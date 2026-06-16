@@ -68,4 +68,5 @@ dependencies, or directory structures unless the task requires them. Verify
 commands or conventions exist before documenting them as active workflow.
 Analyze proposed prompts, system instructions, or context structures to minimize
 input/output token overhead while maximizing information density and model
-adherence.
+adherence. DO NOT DO ANY NETWORKING STUFF. All of the dev server and backend
+server startup will be done by me NOT YOU.

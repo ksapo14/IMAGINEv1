@@ -5,7 +5,7 @@ Minimal prototype for turning teacher speech input into classroom-ready AI text 
 Current flow:
 
 ```text
-typed teacher input -> FastAPI AI pipeline -> Next.js output screen
+typed teacher input or Deepgram microphone transcript -> FastAPI AI pipeline -> Next.js output screen
 ```
 
 The backend generates a short note, selects an existing hosted image, and returns both for immediate display. Gemini text generation is used when `GEMINI_API_KEY` is present; otherwise the backend falls back to a local note so the live demo remains usable.
@@ -38,6 +38,22 @@ Local configuration lives in `.env`, which is ignored by Git. The demo needs the
 
 ```env
 NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8010
+```
+
+Deepgram turn-based speech recognition is optional. Add this server-only value,
+then use the Start mic button in the app:
+
+```env
+DEEPGRAM_API_KEY=your-key-here
+```
+
+The backend validates the key with Deepgram before opening the microphone and
+uses Flux turn detection by default:
+
+```env
+DEEPGRAM_MODEL=flux-general-en
+DEEPGRAM_EOT_THRESHOLD=0.7
+DEEPGRAM_EOT_TIMEOUT_MS=1500
 ```
 
 Gemini text generation is optional. Free-tier text models still count tokens, but supported free-tier input and output token prices are listed as free of charge by Google. Add these server-only values to use Gemini text:

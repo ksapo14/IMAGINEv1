@@ -10,6 +10,29 @@ if (-not (Test-Path $python)) {
 
 Set-Location $root
 
+function Free-Port {
+  param([int]$port, [string]$expectedProcessName)
+  try {
+    $conn = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
+    if ($conn) {
+      $procId = $conn[0].OwningProcess
+      $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
+      if ($proc) {
+        if (-not $expectedProcessName -or $proc.ProcessName -like "*$expectedProcessName*") {
+          Write-Host "Port $port is occupied by '$($proc.ProcessName)' (PID: $procId). Terminating to free the port..." -ForegroundColor Yellow
+          taskkill /PID $procId /T /F | Out-Null
+          Start-Sleep -Milliseconds 500
+        }
+      }
+    }
+  } catch {
+    # Ignore any querying or access errors
+  }
+}
+
+Free-Port -port 8010 -expectedProcessName "python"
+Free-Port -port 3000 -expectedProcessName "node"
+
 # Start the AI backend first so the frontend can submit teacher input immediately.
 $backend = Start-Process `
   -FilePath $python `
