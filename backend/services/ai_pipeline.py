@@ -43,6 +43,8 @@ DEFAULT_GEMINI_FALLBACK_TEXT_MODELS = (
     "gemini-2.5-flash",
 )
 DEFAULT_GEMINI_IMAGE_MODEL = "gemini-2.5-flash-image-preview"
+DEFAULT_GEMINI_IMAGE_API_VERSION = "v1beta"
+GEMINI_IMAGE_MODEL_DISCOVERY_TIMEOUT_SECONDS = 10
 GEMINI_TEACHER_SPEECH_CHAR_LIMIT = 900
 GEMINI_IMAGE_CONTEXT_CHAR_LIMIT = 220
 GEMINI_IMAGE_PROMPT_CHAR_LIMIT = 700
@@ -474,6 +476,11 @@ class GeminiImageProvider:
     def __init__(self) -> None:
         self.api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         self.model_name = os.getenv("GEMINI_IMAGE_MODEL", DEFAULT_GEMINI_IMAGE_MODEL)
+        self.api_version = os.getenv(
+            "GEMINI_IMAGE_API_VERSION",
+            DEFAULT_GEMINI_IMAGE_API_VERSION,
+        )
+        self._discovered_model_name: str | None = None
 
     def generate(self, teacher_speech: str) -> tuple[str, str, str]:
         if not self.api_key:
@@ -493,17 +500,107 @@ class GeminiImageProvider:
                 "responseModalities": ["TEXT", "IMAGE"],
             },
         }
-        request = self._create_gemini_image_request(payload)
-        data = self._request_gemini_image(request)
+        data = self._generate_image_data(payload)
         image_url = self._extract_image_data_url(data)
         image_prompt = f"{GEMINI_IMAGE_PROMPT_PREFIX} {compact_speech[:160]}"
 
         return image_url, image_prompt, "generated-image"
 
-    def _create_gemini_image_request(self, payload: dict) -> urllib.request.Request:
+    def _generate_image_data(self, payload: dict) -> dict:
+        errors: list[str] = []
+
+        for model_name in self._get_image_model_candidates():
+            request = self._create_gemini_image_request(model_name, payload)
+
+            try:
+                data = self._request_gemini_image(request, model_name)
+                self._discovered_model_name = model_name
+                return data
+            except GeminiGenerationError as error:
+                errors.append(str(error))
+                if not error.retryable:
+                    break
+
+        raise RuntimeError("Gemini image generation failed: " + " | ".join(errors))
+
+    def _get_image_model_candidates(self) -> tuple[str, ...]:
+        model_names = [self.model_name]
+
+        if self._discovered_model_name:
+            model_names.append(self._discovered_model_name)
+
+        if self.model_name == DEFAULT_GEMINI_IMAGE_MODEL:
+            model_names.extend(self._discover_image_model_names())
+
+        return tuple(dict.fromkeys(model_names))
+
+    def _discover_image_model_names(self) -> tuple[str, ...]:
+        if not self.api_key:
+            return ()
+
         url = (
-            "https://generativelanguage.googleapis.com/v1/models/"
-            f"{self.model_name}:generateContent"
+            "https://generativelanguage.googleapis.com/"
+            f"{self.api_version}/models"
+        )
+        request = urllib.request.Request(
+            url,
+            headers={"x-goog-api-key": self.api_key},
+            method="GET",
+        )
+
+        try:
+            with urllib.request.urlopen(
+                request,
+                timeout=GEMINI_IMAGE_MODEL_DISCOVERY_TIMEOUT_SECONDS,
+            ) as response:
+                data = json.loads(response.read().decode("utf-8"))
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+            return ()
+
+        candidates: list[tuple[tuple[int, int, int, int], str]] = []
+        for model in data.get("models", []):
+            raw_name = model.get("name", "")
+            model_name = raw_name.removeprefix("models/")
+            if not model_name:
+                continue
+
+            supported_methods = set(model.get("supportedGenerationMethods", []))
+            if "generateContent" not in supported_methods:
+                continue
+
+            searchable_name = " ".join(
+                str(model.get(field, ""))
+                for field in ("name", "displayName", "description")
+            ).lower()
+            if "image" not in searchable_name:
+                continue
+
+            score = (
+                1 if "2.5" in searchable_name else 0,
+                1 if "flash" in searchable_name else 0,
+                1 if "preview" in searchable_name else 0,
+                len(model_name),
+            )
+            candidates.append((score, model_name))
+
+        return tuple(
+            model_name
+            for _score, model_name in sorted(
+                candidates,
+                key=lambda candidate: candidate[0],
+                reverse=True,
+            )
+        )
+
+    def _create_gemini_image_request(
+        self,
+        model_name: str,
+        payload: dict,
+    ) -> urllib.request.Request:
+        url = (
+            "https://generativelanguage.googleapis.com/"
+            f"{self.api_version}/models/"
+            f"{model_name}:generateContent"
         )
         return urllib.request.Request(
             url,
@@ -515,7 +612,11 @@ class GeminiImageProvider:
             method="POST",
         )
 
-    def _request_gemini_image(self, request: urllib.request.Request) -> dict:
+    def _request_gemini_image(
+        self,
+        request: urllib.request.Request,
+        model_name: str,
+    ) -> dict:
         last_error = "unknown error"
 
         for attempt in range(1, GEMINI_IMAGE_MAX_ATTEMPTS + 1):
@@ -530,18 +631,24 @@ class GeminiImageProvider:
                 last_error = f"HTTP {error.code}: {body or error.reason}"
 
                 if error.code not in {429, 500, 502, 503, 504}:
-                    break
+                    raise GeminiGenerationError(
+                        f"Gemini image model {model_name} failed: {last_error}",
+                        retryable=error.code == 404,
+                    ) from error
             except (urllib.error.URLError, TimeoutError) as error:
                 last_error = str(error)
             except json.JSONDecodeError as error:
-                raise RuntimeError("Gemini image generation returned invalid JSON.") from error
+                raise GeminiGenerationError(
+                    f"Gemini image model {model_name} returned invalid JSON.",
+                    retryable=False,
+                ) from error
 
             if attempt < GEMINI_IMAGE_MAX_ATTEMPTS:
                 time.sleep(0.75 * attempt)
 
-        raise RuntimeError(
-            f"Gemini image generation failed after retries on {self.model_name}: "
-            f"{last_error}"
+        raise GeminiGenerationError(
+            f"Gemini image model {model_name} failed after retries: {last_error}",
+            retryable=True,
         )
 
     def _extract_image_data_url(self, data: dict) -> str:

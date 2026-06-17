@@ -65,6 +65,10 @@ GEMINI_API_KEY=your-key-here
 GEMINI_TEXT_MODEL=gemini-2.5-flash-lite
 GEMINI_FALLBACK_TEXT_MODELS=gemini-2.5-flash
 GEMINI_IMAGE_MODEL=gemini-2.5-flash-image-preview
+GEMINI_IMAGE_API_VERSION=v1beta
 ```
+
+If the default image model is not available to your API key, the backend asks
+Gemini for the model list and prefers image-capable `2.5` Flash models.
 
 Do not commit API keys. Only variables prefixed with `NEXT_PUBLIC_` are exposed to the browser by Next.js.

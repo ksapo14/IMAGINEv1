@@ -119,6 +119,23 @@ function getPreferredAudioMimeType() {
   return supportedType ?? "";
 }
 
+function isKeyboardInputTarget(target: EventTarget | null) {
+  if (typeof HTMLElement === "undefined" || !(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  const tagName = target.tagName.toLowerCase();
+  return (
+    target.isContentEditable ||
+    tagName === "input" ||
+    tagName === "select" ||
+    tagName === "textarea" ||
+    tagName === "button" ||
+    tagName === "a" ||
+    target.closest('[role="textbox"]') !== null
+  );
+}
+
 function isClearCommand(speech: string) {
   const normalizedSpeech = speech
     .toLowerCase()
@@ -786,6 +803,27 @@ export default function Home() {
   }, [submitSpeech]);
 
   useEffect(() => {
+    const handleSpacebar = (event: KeyboardEvent) => {
+      if (
+        event.code !== "Space" ||
+        event.repeat ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        isKeyboardInputTarget(event.target)
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      void startDeepgram();
+    };
+
+    window.addEventListener("keydown", handleSpacebar);
+    return () => window.removeEventListener("keydown", handleSpacebar);
+  }, [startDeepgram]);
+
+  useEffect(() => {
     if (!result) {
       return;
     }
@@ -947,20 +985,7 @@ export default function Home() {
         ) : null}
 
         <div className="overflow-hidden rounded bg-white">
-          {isTextOnlyResult ? (
-            <div className="min-h-[420px] bg-white px-5 py-8 md:px-10">
-              <h2 className="mb-4 text-2xl font-semibold text-slate-800">
-                Notes
-              </h2>
-              <ul className="space-y-3 text-lg leading-8 text-slate-800 marker:text-sky-600">
-                {noteBullets.map((bullet, index) => (
-                  <li key={`${bullet}-${index}`} className="ml-6 list-disc pl-2">
-                    {bullet}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : isBeakerResult ? (
+          {isBeakerResult ? (
             <div className="min-h-[420px] bg-white p-2">
               <img
                 src={displayImageUrl}
