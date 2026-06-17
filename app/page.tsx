@@ -9,12 +9,15 @@ type ImagineResponse = {
   text: string;
   imageUrl: string;
   imagePrompt: string;
-  mode: "existing-image" | "local-image";
+  mode: "existing-image" | "local-image" | "text-only";
   textMode: "gemini" | "local" | "local-fallback";
 };
 
+type PromptSource = "typed" | "speech";
+
 type VisualState = {
   result: ImagineResponse | null;
+  inputSource: PromptSource | null;
   neuralInputLayerPinned: boolean;
   beakerStage: number;
 };
@@ -59,22 +62,35 @@ const BEAKER_BLUE_IMAGE_URL = "/beaker_blue.png";
 const BEAKER_BUNSEN_IMAGE_URL = "/beaker_bunsen.png";
 const BEAKER_PATTERN = /\bbeakers?\b/i;
 const BEAKER_200ML_WATER_PATTERN =
-  /(?=.*\bwater\b)(?=.*\b(200\s*ml|200\s*millilit(?:er|re)s?|two hundred\s*(?:ml|millilit(?:er|re)s?))\b)/i;
-const BEAKER_BLUE_WATER_PATTERN = /(?=.*\bblue\b)(?=.*\bwater\b)/i;
-const BEAKER_BUNSEN_PATTERN = /\bbunsen\s*burners?\b/i;
+  /(?:\bbeaker[_\s-]*200\s*ml\b|(?=.*\b(?:beakers?|water)\b)(?=.*\b(?:200\s*ml|200\s*millilit(?:er|re)s?|two hundred\s*(?:ml|millilit(?:er|re)s?))\b))/i;
+const BEAKER_BLUE_WATER_PATTERN =
+  /(?:\bbeaker[_\s-]*blue\b|(?=.*\bblue\b)(?=.*\b(?:beakers?|water)\b))/i;
+const BEAKER_BUNSEN_PATTERN = /\b(?:bunsen(?:\s*burners?)?|beaker[_\s-]*bunsen)\b/i;
 const NEURAL_NETWORK_IMAGE_URL = "/neuralnet.png";
 const NEURAL_NETWORK_IMAGE_PROMPT = "Local neural network layer diagram";
 const NEURAL_INPUT_LAYER_IMAGE_PROMPT =
   "Local neural network input layer focus diagram";
 const NEURAL_INPUT_LAYER_PATTERN = /\binput\s*layers?\b/i;
 const NEURAL_NETWORK_PATTERN =
-  /\b(neural\s*networks?|neural\s*nets?|neurons?|artificial\s*intelligence|\bai\b|machine\s*learning|deep\s*learning|hidden\s*layers?|input\s*layers?|output\s*layers?|weights?|biases?|activation\s*functions?|backpropagation|perceptrons?|transformers?|convolutional|recurrent|\bcnn\b|\brnn\b|\blstm\b|\bmlp\b|model\s*training)\b/i;
+  /\b(neural[_\s-]*(?:networks?|nets?)|neuralnet|neurons?|artificial\s*intelligence|\bai\b|machine\s*learning|deep\s*learning|hidden\s*layers?|input\s*layers?|output\s*layers?|weights?|biases?|activation\s*functions?|backpropagation|perceptrons?|transformers?|convolutional|recurrent|\bcnn\b|\brnn\b|\blstm\b|\bmlp\b|model\s*training)\b/i;
 const DIFFERENT_NEURAL_FOCUS_PATTERN =
   /\b(hidden\s*layers?|output\s*layers?|weights?|biases?|backpropagation|perceptrons?|transformers?|convolutional|recurrent|\bcnn\b|\brnn\b|\blstm\b|\bmlp\b|model\s*training)\b/i;
 const AERODYNAMICS_IMAGE_URL = "/aerodynamics.png";
 const AERODYNAMICS_PATTERN =
   /\b(aerodynamics?|air\s*flow|drag|lift|downforce|streamlines?|wind tunnel|turbulence|laminar|pressure|air resistance|fluid dynamics|spoilers?|wings?|airplanes?|aircraft|cars?|vehicles?|velocity|wake|cfd)\b/i;
 const LOCAL_VISUAL_PROMPT_PREFIX = "Fast local visual selected for:";
+const LOCAL_TOPIC_PATTERN =
+  /\b(photosynthesis|plants?|water|gravity|earth|space|math)\b/i;
+const BOARD_AUTO_CLEAR_MS = 30000;
+
+function getEmptyVisualState(): VisualState {
+  return {
+    result: null,
+    inputSource: null,
+    neuralInputLayerPinned: false,
+    beakerStage: 0
+  };
+}
 
 function getTranscriptionWsUrl() {
   const url = new URL(API_BASE_URL);
@@ -106,7 +122,15 @@ function getPreferredAudioMimeType() {
 }
 
 function isClearCommand(speech: string) {
-  return /^clear[.!?]?$/i.test(speech.trim());
+  const normalizedSpeech = speech
+    .toLowerCase()
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return /^(?:please\s+)?clear(?:\s+(?:please|(?:the\s+)?(?:board|canvas|screen)|everything|all|it))?(?:\s+please)?$/.test(
+    normalizedSpeech
+  );
 }
 
 function getDeepgramFailureMessage(message: DeepgramMessage) {
@@ -130,9 +154,13 @@ async function fetchDeepgramStatus() {
   return (await response.json()) as DeepgramStatusResponse;
 }
 
-function createLocalImageResult(imageUrl: string, imagePrompt: string) {
+function createLocalImageResult(
+  imageUrl: string,
+  imagePrompt: string,
+  text = ""
+) {
   return {
-    text: "",
+    text,
     imageUrl,
     imagePrompt,
     mode: "local-image",
@@ -172,6 +200,38 @@ function getBeakerAlt(stage: number) {
   return "Empty labeled beaker";
 }
 
+function getBeakerSummary(stage: number) {
+  if (stage >= 4) {
+    return (
+      "- The beaker contains blue water and is positioned over a Bunsen burner.\n" +
+      "- The flame adds heat energy from below the container.\n" +
+      "- Heating can help demonstrate temperature change, evaporation, or boiling."
+    );
+  }
+
+  if (stage === 3) {
+    return (
+      "- The water is colored blue so the liquid level is easier to see.\n" +
+      "- The beaker shape helps measure and observe the liquid clearly.\n" +
+      "- Color changes can mark a solution, dye, or demonstration material."
+    );
+  }
+
+  if (stage === 2) {
+    return (
+      "- The beaker is filled to the 200 ml mark.\n" +
+      "- The measurement line shows the liquid volume precisely.\n" +
+      "- Reading the scale at eye level helps avoid measurement error."
+    );
+  }
+
+  return (
+    "- The empty beaker is ready to hold a measured liquid sample.\n" +
+    "- Beaker markings help estimate volume during a lab activity.\n" +
+    "- The wide opening makes it useful for mixing and observation."
+  );
+}
+
 function getRequestedBeakerStage(speech: string) {
   if (BEAKER_BUNSEN_PATTERN.test(speech)) {
     return 4;
@@ -197,15 +257,7 @@ function getNextBeakerStage(currentStage: number, requestedStage: number) {
     return 0;
   }
 
-  if (requestedStage <= currentStage) {
-    return currentStage;
-  }
-
-  if (requestedStage === currentStage + 1) {
-    return requestedStage;
-  }
-
-  return currentStage;
+  return requestedStage;
 }
 
 function isBeakerResponse(result: ImagineResponse) {
@@ -257,6 +309,16 @@ function shouldUseAerodynamicsImage(result: ImagineResponse) {
   return (
     result.imageUrl === AERODYNAMICS_IMAGE_URL ||
     AERODYNAMICS_PATTERN.test(`${result.imagePrompt} ${result.text}`)
+  );
+}
+
+function shouldUseLocalPrompt(speech: string) {
+  return (
+    getRequestedBeakerStage(speech) > 0 ||
+    /cell/i.test(speech) ||
+    NEURAL_NETWORK_PATTERN.test(speech) ||
+    AERODYNAMICS_PATTERN.test(speech) ||
+    LOCAL_TOPIC_PATTERN.test(speech)
   );
 }
 
@@ -313,11 +375,7 @@ function formatNoteBullets(text: string) {
 
 export default function Home() {
   const [teacherInput, setTeacherInput] = useState("");
-  const [visualState, setVisualState] = useState<VisualState>({
-    result: null,
-    neuralInputLayerPinned: false,
-    beakerStage: 0
-  });
+  const [visualState, setVisualState] = useState<VisualState>(getEmptyVisualState);
   const [error, setError] = useState("");
   const [speechNotice, setSpeechNotice] = useState("");
   const [speechStatus, setSpeechStatus] = useState<
@@ -329,7 +387,9 @@ export default function Home() {
   const lastSubmittedSpeech = useRef("");
   const requestInFlight = useRef(false);
   const requestGeneration = useRef(0);
-  const submitSpeechRef = useRef<(speech: string) => Promise<void>>(async () => {});
+  const submitSpeechRef = useRef<
+    (speech: string, source?: PromptSource) => Promise<void>
+  >(async () => {});
   const mediaRecorder = useRef<MediaRecorder | null>(null);
   const microphoneStream = useRef<MediaStream | null>(null);
   const transcriptionSocket = useRef<WebSocket | null>(null);
@@ -512,7 +572,7 @@ export default function Home() {
           setTeacherInput(turnTranscript);
 
           if (data.event === "EndOfTurn") {
-            void submitSpeechRef.current(turnTranscript);
+            void submitSpeechRef.current(turnTranscript, "speech");
             setTeacherInput("");
           }
           return;
@@ -524,7 +584,7 @@ export default function Home() {
           setTeacherInput(transcript);
 
           if (data.speech_final) {
-            void submitSpeechRef.current(transcript);
+            void submitSpeechRef.current(transcript, "speech");
             setTeacherInput("");
           }
         }
@@ -564,7 +624,10 @@ export default function Home() {
     }
   }, [failDeepgram, speechStatus, stopDeepgram]);
 
-  const submitSpeech = useCallback(async (speech: string) => {
+  const submitSpeech = useCallback(async (
+    speech: string,
+    source: PromptSource = "typed"
+  ) => {
     const cleanSpeech = speech.trim();
 
     if (isClearCommand(cleanSpeech)) {
@@ -574,11 +637,7 @@ export default function Home() {
       setError("");
       setIsLoading(false);
       setTeacherInput("");
-      setVisualState({
-        result: null,
-        neuralInputLayerPinned: false,
-        beakerStage: 0
-      });
+      setVisualState(getEmptyVisualState());
       console.log("Board cleared by clear prompt");
       return;
     }
@@ -616,8 +675,10 @@ export default function Home() {
         return {
           result: createLocalImageResult(
             getBeakerImageUrl(nextStage),
-            `${BEAKER_PROMPT_PREFIX} stage ${nextStage}`
+            `${BEAKER_PROMPT_PREFIX} stage ${nextStage}`,
+            getBeakerSummary(nextStage)
           ),
+          inputSource: source,
           neuralInputLayerPinned: false,
           beakerStage: nextStage
         };
@@ -638,12 +699,13 @@ export default function Home() {
     const requestId = ++requestGeneration.current;
 
     try {
-      // Current demo sends typed teacher speech. The same API boundary can
-      // later receive live transcript chunks from speech-to-text.
       const response = await fetch(`${API_BASE_URL}/api/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ teacherSpeech: cleanSpeech })
+        body: JSON.stringify({
+          teacherSpeech: cleanSpeech,
+          textOnly: !shouldUseLocalPrompt(cleanSpeech)
+        })
       });
 
       if (requestId !== requestGeneration.current) {
@@ -671,19 +733,23 @@ export default function Home() {
           cleanSpeech
         );
 
-        if (shouldKeepNeuralInputLayerVisual(currentState, data, cleanSpeech)) {
+        if (
+          source === "speech" &&
+          shouldKeepNeuralInputLayerVisual(currentState, data, cleanSpeech)
+        ) {
           console.log("Keeping neural input layer overlay pinned", {
             ignoredPrompt: data.imagePrompt,
             speech: cleanSpeech
           });
           return {
             result: currentState.result,
+            inputSource: source,
             neuralInputLayerPinned: true,
             beakerStage: 0
           };
         }
 
-        if (shouldKeepBeakerVisual(currentState, data)) {
+        if (source === "speech" && shouldKeepBeakerVisual(currentState, data)) {
           console.log("Keeping beaker sequence visible", {
             stage: currentState.beakerStage,
             ignoredPrompt: data.imagePrompt,
@@ -694,6 +760,7 @@ export default function Home() {
 
         return {
           result: data,
+          inputSource: source,
           neuralInputLayerPinned: nextPinsInputLayer,
           beakerStage: 0
         };
@@ -721,22 +788,53 @@ export default function Home() {
   }, [submitSpeech]);
 
   useEffect(() => {
+    if (!result) {
+      return;
+    }
+
+    const displayedRequestId = requestGeneration.current;
+    const clearTimeoutId = window.setTimeout(() => {
+      if (
+        displayedRequestId !== requestGeneration.current ||
+        requestInFlight.current
+      ) {
+        return;
+      }
+
+      setVisualState(getEmptyVisualState());
+      console.log("Board auto-cleared after display timeout");
+    }, BOARD_AUTO_CLEAR_MS);
+
+    return () => window.clearTimeout(clearTimeoutId);
+  }, [result]);
+
+  useEffect(() => {
     return () => stopDeepgram();
   }, [stopDeepgram]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await submitSpeech(teacherInput);
+    await submitSpeech(teacherInput, "typed");
   }
 
+  const isTextOnlyResult = Boolean(result && result.mode === "text-only");
   const isNeuralNetworkResult =
-    result &&
+    result && !isTextOnlyResult &&
     (isNeuralNetworkResponse(result) || shouldUseNeuralNetworkImage(result));
   const isNeuralInputLayerResult =
-    Boolean(result && visualState.neuralInputLayerPinned);
-  const isBeakerResult = Boolean(result && isBeakerResponse(result));
-  const isClassroomFallback = Boolean(result && isClassroomFallbackResponse(result));
-  const displayImageUrl = isClassroomFallback
+    Boolean(
+      result &&
+        (visualState.neuralInputLayerPinned ||
+          result.imagePrompt === NEURAL_INPUT_LAYER_IMAGE_PROMPT)
+    );
+  const isBeakerResult = Boolean(
+    result && !isTextOnlyResult && isBeakerResponse(result)
+  );
+  const isClassroomFallback = Boolean(
+    result && isClassroomFallbackResponse(result)
+  );
+  const noteBullets = result ? formatNoteBullets(result.text) : [];
+  const displayImageUrl = isTextOnlyResult || isClassroomFallback
     ? ""
     : isNeuralNetworkResult
       ? NEURAL_NETWORK_IMAGE_URL
@@ -781,9 +879,6 @@ export default function Home() {
               Real-time classroom speech to a visual note.
             </p>
           </div>
-          <span className="rounded bg-muted px-2 py-1 text-xs text-muted-foreground">
-            {result ? `visual description: ${result.textMode}` : "waiting"}
-          </span>
         </div>
 
         <form onSubmit={handleSubmit} className="mb-4 grid gap-3 md:grid-cols-[1fr_auto]">
@@ -853,15 +948,21 @@ export default function Home() {
           </p>
         ) : null}
 
-        {deepgramStatus ? (
-          <p className="mb-4 rounded border border-border bg-muted p-3 text-xs text-muted-foreground">
-            Deepgram {deepgramStatus.apiKeyStatus}; {deepgramStatus.model}{" "}
-            {deepgramStatus.mode}
-          </p>
-        ) : null}
-
         <div className="overflow-hidden rounded bg-white">
-          {isBeakerResult ? (
+          {isTextOnlyResult ? (
+            <div className="min-h-[420px] bg-white px-5 py-8 md:px-10">
+              <h2 className="mb-4 text-2xl font-semibold text-slate-800">
+                Notes
+              </h2>
+              <ul className="space-y-3 text-lg leading-8 text-slate-800 marker:text-sky-600">
+                {noteBullets.map((bullet, index) => (
+                  <li key={`${bullet}-${index}`} className="ml-6 list-disc pl-2">
+                    {bullet}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : isBeakerResult ? (
             <div className="min-h-[420px] bg-white p-2">
               <img
                 src={displayImageUrl}
@@ -929,7 +1030,7 @@ export default function Home() {
                   Image details
                 </h2>
                 <ul className="space-y-3 text-lg leading-8 text-slate-800 marker:text-sky-600">
-                  {formatNoteBullets(result.text).map((bullet, index) => (
+                  {noteBullets.map((bullet, index) => (
                     <li key={`${bullet}-${index}`} className="ml-6 list-disc pl-2">
                       {bullet}
                     </li>
@@ -939,13 +1040,13 @@ export default function Home() {
               <div className="order-1 md:order-2">
                 {displayImageUrl ? (
                   <div className="aspect-[4/3] overflow-hidden rounded-sm bg-background shadow-[0_8px_24px_rgba(15,23,42,0.12)]">
-                    {/* Backend selects an existing hosted image and returns its URL. */}
+                    {/* Backend selects a local visual and returns its URL. */}
                     <img
                       src={displayImageUrl}
                       alt={displayImageAlt}
                       className={`h-full w-full ${
-                        displayImageUrl === CELL_IMAGE_URL
-                          || displayImageUrl === AERODYNAMICS_IMAGE_URL
+                        displayImageUrl.startsWith("/") ||
+                          displayImageUrl.startsWith("data:image/svg+xml")
                           ? "object-contain p-3"
                           : "object-cover"
                       }`}
