@@ -41,8 +41,6 @@ AERODYNAMICS_TOPIC_PATTERN = re.compile(
 DEFAULT_GEMINI_TEXT_MODEL = "gemini-2.5-flash-lite"
 DEFAULT_GEMINI_FALLBACK_TEXT_MODELS = (
     "gemini-2.5-flash",
-    "gemini-2.0-flash-lite",
-    "gemini-2.0-flash",
 )
 GEMINI_TEACHER_SPEECH_CHAR_LIMIT = 900
 GEMINI_IMAGE_CONTEXT_CHAR_LIMIT = 220
@@ -523,7 +521,6 @@ class ExistingImageProvider:
         topic_map = {
             "photosynthesis": "plants and sunlight",
             "plant": "plants",
-            "water": "water cycle",
             "gravity": "physics motion",
             "earth": "earth science",
             "space": "space science",

@@ -80,7 +80,7 @@ const AERODYNAMICS_PATTERN =
   /\b(aerodynamics?|air\s*flow|drag|lift|downforce|streamlines?|wind tunnel|turbulence|laminar|pressure|air resistance|fluid dynamics|spoilers?|wings?|airplanes?|aircraft|cars?|vehicles?|velocity|wake|cfd)\b/i;
 const LOCAL_VISUAL_PROMPT_PREFIX = "Fast local visual selected for:";
 const LOCAL_TOPIC_PATTERN =
-  /\b(photosynthesis|plants?|water|gravity|earth|space|math)\b/i;
+  /\b(photosynthesis|plants?|gravity|earth|space|math)\b/i;
 const BOARD_AUTO_CLEAR_MS = 30000;
 
 function getEmptyVisualState(): VisualState {
@@ -268,8 +268,7 @@ function shouldKeepBeakerVisual(currentState: VisualState, nextResult: ImagineRe
   return (
     currentState.beakerStage > 0 &&
     currentState.result !== null &&
-    (isClassroomFallbackResponse(nextResult) ||
-      nextResult.imagePrompt === "Fast local visual selected for: water cycle")
+    isClassroomFallbackResponse(nextResult)
   );
 }
 
