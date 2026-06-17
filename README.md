@@ -8,7 +8,9 @@ Current flow:
 typed teacher input or Deepgram microphone transcript -> FastAPI AI pipeline -> Next.js output screen
 ```
 
-The backend generates a short note, selects an existing hosted image, and returns both for immediate display. Gemini text generation is used when `GEMINI_API_KEY` is present; otherwise the backend falls back to a local note so the live demo remains usable.
+The backend generates a short note, selects matching local images from `public/`,
+or generates a Gemini classroom visual for prompts that do not match a local
+image keyword.
 
 ## Frontend
 
@@ -56,11 +58,13 @@ DEEPGRAM_EOT_THRESHOLD=0.7
 DEEPGRAM_EOT_TIMEOUT_MS=1500
 ```
 
-Gemini text generation is optional. Free-tier text models still count tokens, but supported free-tier input and output token prices are listed as free of charge by Google. Add these server-only values to use Gemini text:
+Gemini text and image generation use the same server-only key:
 
 ```env
 GEMINI_API_KEY=your-key-here
-GEMINI_TEXT_MODEL=gemini-3.1-flash-lite
+GEMINI_TEXT_MODEL=gemini-2.5-flash-lite
+GEMINI_FALLBACK_TEXT_MODELS=gemini-2.5-flash
+GEMINI_IMAGE_MODEL=gemini-2.5-flash-image-preview
 ```
 
 Do not commit API keys. Only variables prefixed with `NEXT_PUBLIC_` are exposed to the browser by Next.js.

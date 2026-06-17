@@ -9,7 +9,7 @@ type ImagineResponse = {
   text: string;
   imageUrl: string;
   imagePrompt: string;
-  mode: "existing-image" | "local-image" | "text-only";
+  mode: "existing-image" | "local-image" | "generated-image" | "text-only";
   textMode: "gemini" | "local" | "local-fallback";
 };
 
@@ -79,8 +79,6 @@ const AERODYNAMICS_IMAGE_URL = "/aerodynamics.png";
 const AERODYNAMICS_PATTERN =
   /\b(aerodynamics?|air\s*flow|drag|lift|downforce|streamlines?|wind tunnel|turbulence|laminar|pressure|air resistance|fluid dynamics|spoilers?|wings?|airplanes?|aircraft|cars?|vehicles?|velocity|wake|cfd)\b/i;
 const LOCAL_VISUAL_PROMPT_PREFIX = "Fast local visual selected for:";
-const LOCAL_TOPIC_PATTERN =
-  /\b(photosynthesis|plants?|gravity|earth|space|math)\b/i;
 const BOARD_AUTO_CLEAR_MS = 30000;
 
 function getEmptyVisualState(): VisualState {
@@ -316,8 +314,7 @@ function shouldUseLocalPrompt(speech: string) {
     getRequestedBeakerStage(speech) > 0 ||
     /cell/i.test(speech) ||
     NEURAL_NETWORK_PATTERN.test(speech) ||
-    AERODYNAMICS_PATTERN.test(speech) ||
-    LOCAL_TOPIC_PATTERN.test(speech)
+    AERODYNAMICS_PATTERN.test(speech)
   );
 }
 
@@ -696,6 +693,7 @@ export default function Home() {
     setIsLoading(true);
     requestInFlight.current = true;
     const requestId = ++requestGeneration.current;
+    const shouldUseLocalVisual = shouldUseLocalPrompt(cleanSpeech);
 
     try {
       const response = await fetch(`${API_BASE_URL}/api/generate`, {
@@ -703,7 +701,8 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           teacherSpeech: cleanSpeech,
-          textOnly: !shouldUseLocalPrompt(cleanSpeech)
+          textOnly: false,
+          generateImage: !shouldUseLocalVisual
         })
       });
 
@@ -1045,7 +1044,7 @@ export default function Home() {
                       alt={displayImageAlt}
                       className={`h-full w-full ${
                         displayImageUrl.startsWith("/") ||
-                          displayImageUrl.startsWith("data:image/svg+xml")
+                          displayImageUrl.startsWith("data:image/")
                           ? "object-contain p-3"
                           : "object-cover"
                       }`}

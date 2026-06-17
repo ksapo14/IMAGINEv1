@@ -35,6 +35,7 @@ DEEPGRAM_FLUX_LISTEN_URL = "wss://api.deepgram.com/v2/listen"
 class GenerateRequest(BaseModel):
     teacherSpeech: str = Field(..., min_length=1, max_length=4000)
     textOnly: bool = False
+    generateImage: bool = False
 
 
 class GenerateResponse(BaseModel):
@@ -162,7 +163,11 @@ async def generate_frame(request: GenerateRequest) -> GenerateResponse:
         raise HTTPException(status_code=400, detail="teacherSpeech is required.")
 
     try:
-        result = await pipeline.generate(clean_input, text_only=request.textOnly)
+        result = await pipeline.generate(
+            clean_input,
+            text_only=request.textOnly,
+            generate_image=request.generateImage,
+        )
     except RuntimeError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
 

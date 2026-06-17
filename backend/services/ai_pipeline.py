@@ -42,13 +42,18 @@ DEFAULT_GEMINI_TEXT_MODEL = "gemini-2.5-flash-lite"
 DEFAULT_GEMINI_FALLBACK_TEXT_MODELS = (
     "gemini-2.5-flash",
 )
+DEFAULT_GEMINI_IMAGE_MODEL = "gemini-2.5-flash-image-preview"
 GEMINI_TEACHER_SPEECH_CHAR_LIMIT = 900
 GEMINI_IMAGE_CONTEXT_CHAR_LIMIT = 220
+GEMINI_IMAGE_PROMPT_CHAR_LIMIT = 700
 GEMINI_MAX_OUTPUT_TOKENS = 220
 GEMINI_REQUEST_TIMEOUT_SECONDS = 20
+GEMINI_IMAGE_REQUEST_TIMEOUT_SECONDS = 60
 GEMINI_MAX_ATTEMPTS = 3
+GEMINI_IMAGE_MAX_ATTEMPTS = 2
 LOCAL_VISUAL_PROMPT_PREFIX = "Fast local visual selected for:"
 TEXT_ONLY_IMAGE_PROMPT_PREFIX = "Text-only classroom note"
+GEMINI_IMAGE_PROMPT_PREFIX = "Gemini generated classroom visual:"
 PUBLIC_DIR = Path(__file__).resolve().parents[2] / "public"
 PUBLIC_IMAGE_EXTENSIONS = {".gif", ".jpeg", ".jpg", ".png", ".svg", ".webp"}
 
@@ -463,16 +468,116 @@ class SmallTextModel:
         )
 
 
+class GeminiImageProvider:
+    """Generates classroom visuals with Gemini 2.5 Flash Image."""
+
+    def __init__(self) -> None:
+        self.api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        self.model_name = os.getenv("GEMINI_IMAGE_MODEL", DEFAULT_GEMINI_IMAGE_MODEL)
+
+    def generate(self, teacher_speech: str) -> tuple[str, str, str]:
+        if not self.api_key:
+            raise RuntimeError("GEMINI_API_KEY is required for Gemini image generation.")
+
+        compact_speech = re.sub(r"\s+", " ", teacher_speech).strip()
+        prompt = (
+            "Create one clear classroom-ready educational visual for this lesson. "
+            "Use a clean diagram or illustration style, strong contrast, and no "
+            "decorative clutter. Include labels only when they help explain the "
+            "concept. Lesson: "
+            f"{compact_speech[:GEMINI_IMAGE_PROMPT_CHAR_LIMIT]}"
+        )
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "responseModalities": ["TEXT", "IMAGE"],
+            },
+        }
+        request = self._create_gemini_image_request(payload)
+        data = self._request_gemini_image(request)
+        image_url = self._extract_image_data_url(data)
+        image_prompt = f"{GEMINI_IMAGE_PROMPT_PREFIX} {compact_speech[:160]}"
+
+        return image_url, image_prompt, "generated-image"
+
+    def _create_gemini_image_request(self, payload: dict) -> urllib.request.Request:
+        url = (
+            "https://generativelanguage.googleapis.com/v1/models/"
+            f"{self.model_name}:generateContent"
+        )
+        return urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "x-goog-api-key": self.api_key or "",
+            },
+            method="POST",
+        )
+
+    def _request_gemini_image(self, request: urllib.request.Request) -> dict:
+        last_error = "unknown error"
+
+        for attempt in range(1, GEMINI_IMAGE_MAX_ATTEMPTS + 1):
+            try:
+                with urllib.request.urlopen(
+                    request,
+                    timeout=GEMINI_IMAGE_REQUEST_TIMEOUT_SECONDS,
+                ) as response:
+                    return json.loads(response.read().decode("utf-8"))
+            except urllib.error.HTTPError as error:
+                body = error.read().decode("utf-8", errors="replace")[:500]
+                last_error = f"HTTP {error.code}: {body or error.reason}"
+
+                if error.code not in {429, 500, 502, 503, 504}:
+                    break
+            except (urllib.error.URLError, TimeoutError) as error:
+                last_error = str(error)
+            except json.JSONDecodeError as error:
+                raise RuntimeError("Gemini image generation returned invalid JSON.") from error
+
+            if attempt < GEMINI_IMAGE_MAX_ATTEMPTS:
+                time.sleep(0.75 * attempt)
+
+        raise RuntimeError(
+            f"Gemini image generation failed after retries on {self.model_name}: "
+            f"{last_error}"
+        )
+
+    def _extract_image_data_url(self, data: dict) -> str:
+        for candidate in data.get("candidates", []):
+            parts = candidate.get("content", {}).get("parts", [])
+            for part in parts:
+                inline_data = part.get("inlineData") or part.get("inline_data")
+                if not inline_data:
+                    continue
+
+                image_data = inline_data.get("data")
+                if not image_data:
+                    continue
+
+                mime_type = (
+                    inline_data.get("mimeType")
+                    or inline_data.get("mime_type")
+                    or "image/png"
+                )
+                return f"data:{mime_type};base64,{image_data}"
+
+        raise RuntimeError("Gemini image generation returned no image.")
+
+
 class ExistingImageProvider:
     """Selects local visuals instead of generating or fetching images."""
 
     def __init__(self) -> None:
         self.public_image_index = LocalPublicImageIndex()
+        self.generated_image_provider = GeminiImageProvider()
 
     def generate(
         self,
         teacher_speech: str,
         text_only: bool = False,
+        generate_image: bool = False,
     ) -> tuple[str, str, str]:
         if NEURAL_INPUT_LAYER_TOPIC_PATTERN.search(teacher_speech):
             return (
@@ -509,6 +614,9 @@ class ExistingImageProvider:
                 f"{TEXT_ONLY_IMAGE_PROMPT_PREFIX}: {compact_speech[:160]}",
                 "text-only",
             )
+
+        if generate_image:
+            return self.generated_image_provider.generate(teacher_speech)
 
         query = self._select_query(teacher_speech)
         image_url = self._local_topic_visual(query)
@@ -558,11 +666,13 @@ class ImaginePipeline:
         self,
         teacher_speech: str,
         text_only: bool = False,
+        generate_image: bool = False,
     ) -> dict[str, str]:
         # One input chunk returns one combined note and visual frame.
         image_url, image_prompt, mode = self.image_provider.generate(
             teacher_speech,
             text_only=text_only,
+            generate_image=generate_image,
         )
         text, text_mode = self.text_model.generate(teacher_speech, image_prompt)
 
