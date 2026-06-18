@@ -1,4 +1,5 @@
-V: Hey everyone. Normally this is where we start a slideshow. We made one, with Forty slides, all color coded and everything, Its beautiful
+V: Hey everyone. Normally this is where we start a slideshow. We made one, with Forty slides, 
+all color coded and everything, Its beautiful
 
 Big Bold Letters appear on the screen saying NOBODY WANTS TO SIT THROUGH 40 SLIDES
 
@@ -17,82 +18,103 @@ V: Hey Imagine, This logo sucks, fix it.
 
 Our normal logo appears on the Screen
 V: Sophomore year, AP Biology. Mr. Ward is describing the electron transport chain. 
-He talks about protons pumping across a membrane, electrons tumbling down a chain of proteins, and energy coming out of it. He explains it, and then looks at us and says, "Close your eyes and picture it." So I do, and I see nothing. Just a blank wall and an overcomplicated frozen image of it on the screen.
+He talks about protons pumping across a membrane, electrons tumbling down a chain of proteins, 
+and energy coming out of it. He explains it, and then looks at us and says, "Close your eyes and
+ picture it." So I do, and I see nothing. Just a blank wall and an overcomplicated frozen image of it on the screen.
 
 
 A blank still image of that electron transport chain appears. 
-J: And that's the problem with explaining things, the ideas that matter most are the ones you can't see. They're invisible, and they're nearly impossible to draw on a board in real time. Teachers burn hours each week building slides, just for them to sit frozen in time in front of students.
-Image of a teacher sitting at a desk annoyed appears
- Visual learning is 43% more persuasive — if only there was a way to seamlessly combine the instruction that the teacher already puts so much effort into with intuitive visuals to fully bring the concept to life.
+J: And that's the problem with explaining things, the ideas that matter most are the ones you can't see. 
+They're invisible, and they're nearly impossible to draw on a board in real time. Teachers burn hours each 
+week building slides, just for them to sit frozen in time in front of students.
+Image of a teacher sitting at a desk annoyed appears, and also an image of a student who is disengaged
+ Visual learning is 43% more persuasive — if only there was a way to seamlessly combine the instruction 
+ that the teacher already puts so much effort into with intuitive visuals to fully bring the concept to life.
 
 
 Then I started to ask myself a different question
 What if the teacher never had to build the slideshow in the first place?
-What if they just talked? Taught the way they always do. And the board kept up with them, drawing every idea the second it left their mouth.
-Still image of electron transport chain
+What if they just talked? Taught the way they always do. And the board kept up with them, drawing every 
+idea the second it left their mouth.
+Still image of electron transport chain reappears
 
 K: Everyone, meet Imagine. 
 CSS Animation of moving electron transport chain shows up. 
 K: It is the thing that has been running this entire presentation. You have been watching it work this whole time.
 Product: IMAGINEv1, a revolutionary live assistant that listens to teachers, automatically draws visuals and places notes in real time
+An animation of a whiteboard drawing things is running, with some text bullet points next too it showing what the speaker is saying below
 Teachers on average spend 5-12 hours on prep per week for slideshows
 Using this product, teachers can save hours of prep, eliminate boring slideshows and create a more immersive visual environment for students
-We make students better, and better students make schools more valuable through higher scores, stronger rankings, and the enrollment and revenue that follows
+We make students better, and better students make schools more valuable through higher scores, stronger rankings, and the enrollment and 
+revenue that follows
 
 
-V: Here is why a school actually pays for this. Teachers get hours back every week. Students stay focused. And students who can see an idea understand it, and they score higher.
+V: Here is why a school actually pays for this. Teachers get hours back every week. Students stay focused. And students who can see an 
+idea understand it, and they score higher.
+
+An animated flow chart appears, showing how student focus leads to better student understanding, which leads to higher scores, which leads 
+to lifted rankings, which leads to enrollment, which leads to revenue.
 
 Schools do better when students do better. Higher scores lift rankings, rankings drive enrollment, enrollment drives revenue.
-(Imagine pops: a flywheel, scores to rankings to enrollment to revenue)
 
  We make students better, and better students make the whole school more valuable.
 
-CSS animation for this part
 
 
-J: Now the model. We charge schools per teacher. A hundred dollars, per teacher, per month. Not ready for a school rollout? Individual teachers can start for thirty-nine
+
+J: Now the model. We charge schools per teacher. A hundred dollars, per teacher, per month. Not ready for a school rollout? 
+Individual teachers can start for thirty-nine
 (Imagine pops: pricing, $100 school / $39 teacher)
 
-And here is the part investors care about. It costs us about seven dollars a month to serve one teacher. We charge a hundred. That is a margin above ninety percent.
-(Imagine pops: the cost-per-user chart sloping down toward $7)
+An image of a school appears, with $100 per teachers using the product/per month underneath it, and next to it an image of a teacher 
+appears with $39 per month underneath it. This can be fluid and animated if you want
 
-CSS animation for this
+And here is the part investors care about. It costs us about seven dollars a month to serve one teacher. We charge a hundred. That is a 
+margin above ninety percent.
 
- And it improves as we grow. More teachers, lower cost each. We start with one group. Tuition paying private schools.
-(Imagine pops: a sleek private school building)
+A graph that shows the cost per user at 7 dollars per month and how the 92 percent profit margin is derived.
+
+ And it improves as we grow. More teachers, lower cost each. We start with one group. Tuition paying schools, who adopt technology easily, 
+ and are prestigious
+
+A collage of names of tuition paying schools falls from the screen. Think duke and durham academy and a bunch more logos just falling 
+from the sky.
 
 The ones that already buy education software and love being first.
 
-J: How big is this? Let me do a quick sanity check.. About half a million teachers at private schools in the US. A hundred dollars a month. Twelve months.
+J: How big is this? .
 
-V: Imagine, you are better with numbers than we are. Total?
+:Imagine, you are better with numbers than we are. Total?
 
-(Imagine pops: the big number, around $2.4 Billion / year)
+Big number pops up with 2.4 BILLION DOLLARS and something funny like DUDE thats a lot of money or whatever
 
-V: 2.4 Billion a year. And that is before a single university, or a single tech forward public district. We take a slice of that and we are very happy.
+ 2.4 Billion a year. And that is before the massive adjacent market we have for this product. Even a small slice of that would make is 
+ very happy.
 
+The best part is, there are plenty of these schools right here in the triangle
 
-K: We do not need the whole thing to win. We start right here, in the Triangle.
-(Imagine pops: a map pin on Durham, NC)
+ a map pin on Durham, NC is displayed
 
-K: Durham Academy is ten minutes from our campus. We land a few schools, run live demos, let teachers feel it, then let them sell it for us to the next school.
+Durham Academy is ten minutes from our campus. We land a few schools, run live demos, let teachers feel it, then let them sell it for 
+us to the next school.
 
-J: And we are not just talking. The proof has been on the screen this whole time. It works. And our first pilots are already taking shape.
-(Imagine pops: a traction graphic / "now piloting")
-
-J: [INSERT REAL TRACTION] One happy teacher becomes the next building, the next district, then universities.
+One happy teacher becomes a happy  next building, the next district, then universities.
 
 
 V: Now let me tell you what I’m really excited about. Once you can animate talking, why would it stop at a classroom?
+
 (Imagine pops: a classroom)
 
 V: A lecture hall.
+
 (Imagine pops: a university lecture hall)
 
 V: A boardroom.
+
 (Imagine pops: a corporate boardroom)
 
 V: A keynote stage.
+
 (Imagine pops: a TED-style stage)
 
 V: Anywhere a person stands up to explain something hard. A world where nobody makes slides ever again.
@@ -101,18 +123,21 @@ V: The real product isn’t education, it’s understanding
 
 
 
-K: Before we finish up we just wanna do some quick intros. We are three students at the North Carolina School of Science and Math who built this because we sat through this exact problem ourselves, sitting in class bored out of our minds every single day. 
+K: Before we finish up we just wanna do some quick intros. We are three students at the North Carolina School of Science and Math 
+who built this because we sat through this exact problem ourselves, sitting in class bored out of our minds every single day. 
 
 V: I am Vivaan, CEO.
+
 (Imagine pops: Vivaan's photo)
 
 V: The one who couldnt picture that diagram back in sophomore year
 
 J: Jackson, CFO.
-(Imagine pops: Jackson's photo)
+
+(Imagine pops: Jackson's photo next to vivaan photo)
 
 K: And Krish, CTO.
-(Imagine pops: Krish's photo)
+(Imagine pops: Krish's photo next too vivaan and jacksons photo)
 
 K: Imagine what we do with a real budget.
 
@@ -120,6 +145,7 @@ K: Imagine what we do with a real budget.
 V: So while we didnt show you a slideshow about our product. We let our product run the whole show. And it did.
 
 J: Imagine, bring it home.
+
 (Imagine pops: logo + tagline lockup)
 
 V: So instead of closing your eyes and imagining it.open your eyes, and imagineer it. Thank you.

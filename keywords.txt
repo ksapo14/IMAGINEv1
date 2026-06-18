@@ -1,0 +1,31 @@
+Keyword -> Action
+
+1. its beautiful -> Show centered bold title: "NOBODY WANTS TO LISTEN TO 40 SLIDES"
+2. imagineer -> Show image: /crappy_imagineer.png
+3. fix it -> Show image: /real_imagineer_logo.png
+4. overcomplicated frozen image -> Show image: /chain_complicated.png
+5. teachers burn hours -> Show stressed teacher and bored student image layout
+6. meet imagine -> Show animated electron transport chain component
+7. running this entire presentation -> Show IMAGINEv1 product intro with live assistant bullets
+8. school actually pays -> Show school value slide: teacher time, student focus, school outcomes
+9. focus -> Show value flow chart and highlight Focus
+10. understanding -> Keep value flow chart and highlight Understanding
+11. scores -> Keep value flow chart and highlight Scores
+12. rankings -> Keep value flow chart and highlight Rankings
+13. enrollment -> Keep value flow chart and highlight Enrollment
+14. revenue -> Keep value flow chart and highlight Revenue
+15. now the model -> Show pricing title with hidden school/teacher reveal slots
+16. school -> Reveal school pricing: $100
+17. individual teachers -> Reveal individual teacher pricing: $39
+18. seven dollars a month -> Show margin chart: $100 price, $7 cost, >90% margin
+19. tuition paying schools -> Show target school logo collage with Providence Day instead of NCSSM
+20. total -> Show market size: "$2.4 BILLION / YEAR"
+21. right here in the triangle -> Show Durham, NC map pin placeholder
+22. classroom -> Show classroom image
+23. lecture hall -> Show university lecture hall image
+24. boardroom -> Show corporate boardroom image
+25. keynote stage -> Show TED/keynote stage image
+26. ceo -> Show Vivaan team photo placeholder
+27. cfo -> Show Vivaan + Jackson team photo placeholders
+28. cto -> Show Vivaan + Jackson + Krish team photo placeholders
+29. imagineer it -> Show final thank-you slide: "Open your eyes, and imagineer it." Also accepts any Imagineer-like fallback such as imagineer, imagineers, imagine here, imagine ear, imagineered, or imagineering.

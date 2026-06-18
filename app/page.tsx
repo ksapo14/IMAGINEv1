@@ -1,9 +1,9 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, Mic, MicOff, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { ElectronTransportChain } from "@/components/electron-transport-chain";
+import { PitchVisual } from "@/components/pitch-visuals";
 import { Textarea } from "@/components/ui/textarea";
 
 type PitchResponse = {
@@ -159,7 +159,8 @@ export default function Home() {
     pitchFrame.slideSubtitle.length === 0 &&
     pitchFrame.bullets.length === 0;
   const isComponentSlide =
-    hasActiveSlide && pitchFrame.componentKey === "electron-transport-chain";
+    hasActiveSlide &&
+    pitchFrame.componentKey.length > 0;
 
   const cleanupDeepgramConnection = useCallback((sendStop: boolean) => {
     const recorder = mediaRecorder.current;
@@ -272,6 +273,9 @@ export default function Home() {
 
       const data = (await response.json()) as PitchResponse;
       setPitchFrame(data);
+      if (source === "typed") {
+        setCaptionInput("");
+      }
     } catch (requestError) {
       if (requestId !== requestGeneration.current) {
         return;
@@ -478,6 +482,15 @@ export default function Home() {
     await submitSpeech(captionInput, "typed");
   }
 
+  function handleCaptionKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) {
+      return;
+    }
+
+    event.preventDefault();
+    void submitSpeech(captionInput, "typed");
+  }
+
   return (
     <main className="min-h-screen overflow-hidden bg-white text-[#111318]">
       <section className="relative flex min-h-screen flex-col bg-white px-3 pb-20 pt-3 sm:px-4 sm:pb-24 sm:pt-4">
@@ -485,12 +498,17 @@ export default function Home() {
           <div className="relative mx-auto flex w-full max-w-[1680px] overflow-hidden bg-white">
 
             {isComponentSlide ? (
-              <div className="flex min-h-[calc(100vh-6.5rem)] w-full items-center justify-center bg-white px-[clamp(1rem,5vw,5rem)] py-[clamp(1rem,4vh,3rem)]">
-                <ElectronTransportChain />
+              <div className="pitch-enter flex min-h-[calc(100vh-6.5rem)] w-full items-center justify-center bg-white px-[clamp(1rem,5vw,5rem)] py-[clamp(1rem,4vh,3rem)]">
+                <PitchVisual
+                  componentKey={pitchFrame.componentKey}
+                  title={pitchFrame.slideTitle}
+                  subtitle={pitchFrame.slideSubtitle}
+                  bullets={pitchFrame.bullets}
+                />
               </div>
             ) : isTitleOnlySlide ? (
               <div className="flex min-h-[calc(100vh-6.5rem)] w-full items-center justify-center bg-white px-[clamp(1.5rem,7vw,8rem)]">
-                <h1 className="max-w-6xl text-center text-[clamp(3rem,8vw,8.5rem)] font-black uppercase leading-[0.94] tracking-normal text-[#111318]">
+                <h1 className="pitch-pop max-w-6xl text-center text-[clamp(3rem,8vw,8.5rem)] font-black uppercase leading-[0.94] tracking-normal text-[#111318]">
                   {pitchFrame.slideTitle}
                 </h1>
               </div>
@@ -499,12 +517,12 @@ export default function Home() {
                 <img
                   src={pitchFrame.imageUrl}
                   alt={pitchFrame.imagePrompt}
-                  className="max-h-[min(74vh,820px)] max-w-[min(86vw,1280px)] object-contain"
+                  className="pitch-pop max-h-[min(74vh,820px)] max-w-[min(86vw,1280px)] object-contain"
                 />
               </div>
             ) : hasActiveSlide ? (
-              <div className="grid min-h-[calc(100vh-6.5rem)] w-full gap-10 bg-white px-[clamp(1.5rem,5vw,5rem)] py-[clamp(1.5rem,6vh,5rem)] lg:grid-cols-[minmax(0,1.05fr)_minmax(280px,0.95fr)] lg:items-center">
-                <div className="max-w-4xl">
+              <div className="pitch-enter grid min-h-[calc(100vh-6.5rem)] w-full gap-10 bg-white px-[clamp(1.5rem,5vw,5rem)] py-[clamp(1.5rem,6vh,5rem)] lg:grid-cols-[minmax(0,1.05fr)_minmax(280px,0.95fr)] lg:items-center">
+                <div className="max-w-4xl pitch-stagger">
                   <p className="mb-5 text-xs font-semibold uppercase tracking-[0.32em] text-[#8f6c36]">
                     IMAGINEv1
                   </p>
@@ -520,7 +538,7 @@ export default function Home() {
 
                 <div className="min-w-0">
                   {pitchFrame.imageUrl ? (
-                    <div className="aspect-[4/3] overflow-hidden bg-white">
+                    <div className="pitch-pop aspect-[4/3] overflow-hidden bg-white">
                       <img
                         src={pitchFrame.imageUrl}
                         alt={pitchFrame.imagePrompt || pitchFrame.slideTitle}
@@ -528,7 +546,7 @@ export default function Home() {
                       />
                     </div>
                   ) : pitchFrame.bullets.length > 0 ? (
-                    <ul className="space-y-5 text-[clamp(1.05rem,1.8vw,1.5rem)] leading-8 text-[#34332f]">
+                    <ul className="pitch-stagger space-y-5 text-[clamp(1.05rem,1.8vw,1.5rem)] leading-8 text-[#34332f]">
                       {pitchFrame.bullets.map((bullet, index) => (
                         <li key={`${bullet}-${index}`} className="border-l-2 border-[#b7873f] pl-5">
                           {bullet}
@@ -588,6 +606,7 @@ export default function Home() {
             aria-label="Caption input"
             value={captionInput}
             onChange={(event) => setCaptionInput(event.target.value)}
+            onKeyDown={handleCaptionKeyDown}
             placeholder="Caption input"
             rows={1}
             className="h-11 flex-1 rounded-full border-[#e5e5e5] bg-white px-4 py-2.5 text-sm leading-5 text-[#171717] placeholder:text-[#7a7a7a] focus:ring-[#151515] sm:h-12 sm:px-5 sm:text-base"
