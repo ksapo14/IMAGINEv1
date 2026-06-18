@@ -1,1 +1,1 @@
-"""Backend service modules for the IMAGINEv1 AI pipeline."""
+"""Backend service modules for the IMAGINEv1 pitch sequence."""

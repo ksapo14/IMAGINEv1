@@ -1,26 +1,28 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { ImageIcon, Loader2, Mic, MicOff, Send } from "lucide-react";
+import { FormEvent, KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
+import { Loader2, Mic, MicOff, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PitchVisual } from "@/components/pitch-visuals";
 import { Textarea } from "@/components/ui/textarea";
 
-type ImagineResponse = {
+type PitchResponse = {
   text: string;
   imageUrl: string;
   imagePrompt: string;
-  mode: "existing-image" | "local-image" | "text-only";
-  textMode: "gemini" | "local" | "local-fallback";
+  mode: "idle" | "slide";
+  textMode: "keyword";
+  status: "unconfigured" | "waiting" | "advanced" | "complete";
+  slideTitle: string;
+  slideSubtitle: string;
+  bullets: string[];
+  sequenceIndex: number;
+  totalSteps: number;
+  matchedKeyword: string;
+  componentKey: string;
 };
 
 type PromptSource = "typed" | "speech";
-
-type VisualState = {
-  result: ImagineResponse | null;
-  inputSource: PromptSource | null;
-  neuralInputLayerPinned: boolean;
-  beakerStage: number;
-};
 
 type DeepgramMessage = {
   type?: string;
@@ -54,41 +56,22 @@ type DeepgramStatusResponse = {
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8010";
-const CELL_IMAGE_URL = "/cell.png";
-const BEAKER_PROMPT_PREFIX = "Local beaker sequence";
-const BEAKER_EMPTY_IMAGE_URL = "/beaker.png";
-const BEAKER_200ML_IMAGE_URL = "/beaker_200ml.png";
-const BEAKER_BLUE_IMAGE_URL = "/beaker_blue.png";
-const BEAKER_BUNSEN_IMAGE_URL = "/beaker_bunsen.png";
-const BEAKER_PATTERN = /\bbeakers?\b/i;
-const BEAKER_200ML_WATER_PATTERN =
-  /(?:\bbeaker[_\s-]*200\s*ml\b|(?=.*\b(?:beakers?|water)\b)(?=.*\b(?:200\s*ml|200\s*millilit(?:er|re)s?|two hundred\s*(?:ml|millilit(?:er|re)s?))\b))/i;
-const BEAKER_BLUE_WATER_PATTERN =
-  /(?:\bbeaker[_\s-]*blue\b|(?=.*\bblue\b)(?=.*\b(?:beakers?|water)\b))/i;
-const BEAKER_BUNSEN_PATTERN = /\b(?:bunsen(?:\s*burners?)?|beaker[_\s-]*bunsen)\b/i;
-const NEURAL_NETWORK_IMAGE_URL = "/neuralnet.png";
-const NEURAL_NETWORK_IMAGE_PROMPT = "Local neural network layer diagram";
-const NEURAL_INPUT_LAYER_IMAGE_PROMPT =
-  "Local neural network input layer focus diagram";
-const NEURAL_INPUT_LAYER_PATTERN = /\binput\s*layers?\b/i;
-const NEURAL_NETWORK_PATTERN =
-  /\b(neural[_\s-]*(?:networks?|nets?)|neuralnet|neurons?|artificial\s*intelligence|\bai\b|machine\s*learning|deep\s*learning|hidden\s*layers?|input\s*layers?|output\s*layers?|weights?|biases?|activation\s*functions?|backpropagation|perceptrons?|transformers?|convolutional|recurrent|\bcnn\b|\brnn\b|\blstm\b|\bmlp\b|model\s*training)\b/i;
-const DIFFERENT_NEURAL_FOCUS_PATTERN =
-  /\b(hidden\s*layers?|output\s*layers?|weights?|biases?|backpropagation|perceptrons?|transformers?|convolutional|recurrent|\bcnn\b|\brnn\b|\blstm\b|\bmlp\b|model\s*training)\b/i;
-const AERODYNAMICS_IMAGE_URL = "/aerodynamics.png";
-const AERODYNAMICS_PATTERN =
-  /\b(aerodynamics?|air\s*flow|drag|lift|downforce|streamlines?|wind tunnel|turbulence|laminar|pressure|air resistance|fluid dynamics|spoilers?|wings?|airplanes?|aircraft|cars?|vehicles?|velocity|wake|cfd)\b/i;
-const LOCAL_VISUAL_PROMPT_PREFIX = "Fast local visual selected for:";
-const LOCAL_TOPIC_PATTERN =
-  /\b(photosynthesis|plants?|gravity|earth|space|math)\b/i;
-const BOARD_AUTO_CLEAR_MS = 30000;
 
-function getEmptyVisualState(): VisualState {
+function getEmptyPitchResponse(): PitchResponse {
   return {
-    result: null,
-    inputSource: null,
-    neuralInputLayerPinned: false,
-    beakerStage: 0
+    text: "",
+    imageUrl: "",
+    imagePrompt: "",
+    mode: "idle",
+    textMode: "keyword",
+    status: "unconfigured",
+    slideTitle: "",
+    slideSubtitle: "",
+    bullets: [],
+    sequenceIndex: 0,
+    totalSteps: 0,
+    matchedKeyword: "",
+    componentKey: ""
   };
 }
 
@@ -113,23 +96,11 @@ function getPreferredAudioMimeType() {
     return "";
   }
 
-  const supportedType = [
-    "audio/webm;codecs=opus",
-    "audio/webm",
-  ].find((mimeType) => MediaRecorder.isTypeSupported(mimeType));
-
-  return supportedType ?? "";
-}
-
-function isClearCommand(speech: string) {
-  const normalizedSpeech = speech
-    .toLowerCase()
-    .replace(/[^\w\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return /^(?:please\s+)?clear(?:\s+(?:please|(?:the\s+)?(?:board|canvas|screen)|everything|all|it))?(?:\s+please)?$/.test(
-    normalizedSpeech
+  return (
+    [
+      "audio/webm;codecs=opus",
+      "audio/webm",
+    ].find((mimeType) => MediaRecorder.isTypeSupported(mimeType)) ?? ""
   );
 }
 
@@ -154,238 +125,18 @@ async function fetchDeepgramStatus() {
   return (await response.json()) as DeepgramStatusResponse;
 }
 
-function createLocalImageResult(
-  imageUrl: string,
-  imagePrompt: string,
-  text = ""
-) {
-  return {
-    text,
-    imageUrl,
-    imagePrompt,
-    mode: "local-image",
-    textMode: "local"
-  } satisfies ImagineResponse;
-}
-
-function getBeakerImageUrl(stage: number) {
-  if (stage >= 4) {
-    return BEAKER_BUNSEN_IMAGE_URL;
-  }
-
-  if (stage === 3) {
-    return BEAKER_BLUE_IMAGE_URL;
-  }
-
-  if (stage === 2) {
-    return BEAKER_200ML_IMAGE_URL;
-  }
-
-  return BEAKER_EMPTY_IMAGE_URL;
-}
-
-function getBeakerAlt(stage: number) {
-  if (stage >= 4) {
-    return "Blue water in a beaker over a Bunsen burner";
-  }
-
-  if (stage === 3) {
-    return "Beaker filled with blue water";
-  }
-
-  if (stage === 2) {
-    return "Beaker filled with 200 ml of water";
-  }
-
-  return "Empty labeled beaker";
-}
-
-function getBeakerSummary(stage: number) {
-  if (stage >= 4) {
-    return (
-      "- The beaker contains blue water and is positioned over a Bunsen burner.\n" +
-      "- The flame adds heat energy from below the container.\n" +
-      "- Heating can help demonstrate temperature change, evaporation, or boiling."
-    );
-  }
-
-  if (stage === 3) {
-    return (
-      "- The water is colored blue so the liquid level is easier to see.\n" +
-      "- The beaker shape helps measure and observe the liquid clearly.\n" +
-      "- Color changes can mark a solution, dye, or demonstration material."
-    );
-  }
-
-  if (stage === 2) {
-    return (
-      "- The beaker is filled to the 200 ml mark.\n" +
-      "- The measurement line shows the liquid volume precisely.\n" +
-      "- Reading the scale at eye level helps avoid measurement error."
-    );
-  }
-
-  return (
-    "- The empty beaker is ready to hold a measured liquid sample.\n" +
-    "- Beaker markings help estimate volume during a lab activity.\n" +
-    "- The wide opening makes it useful for mixing and observation."
-  );
-}
-
-function getRequestedBeakerStage(speech: string) {
-  if (BEAKER_BUNSEN_PATTERN.test(speech)) {
-    return 4;
-  }
-
-  if (BEAKER_BLUE_WATER_PATTERN.test(speech)) {
-    return 3;
-  }
-
-  if (BEAKER_200ML_WATER_PATTERN.test(speech)) {
-    return 2;
-  }
-
-  if (BEAKER_PATTERN.test(speech)) {
-    return 1;
-  }
-
-  return 0;
-}
-
-function getNextBeakerStage(currentStage: number, requestedStage: number) {
-  if (requestedStage === 0) {
-    return 0;
-  }
-
-  return requestedStage;
-}
-
-function isBeakerResponse(result: ImagineResponse) {
-  return result.imagePrompt.startsWith(BEAKER_PROMPT_PREFIX);
-}
-
-function shouldKeepBeakerVisual(currentState: VisualState, nextResult: ImagineResponse) {
-  return (
-    currentState.beakerStage > 0 &&
-    currentState.result !== null &&
-    isClassroomFallbackResponse(nextResult)
-  );
-}
-
-function isNeuralNetworkResponse(result: ImagineResponse) {
-  return (
-    result.imageUrl === NEURAL_NETWORK_IMAGE_URL ||
-    result.imagePrompt === NEURAL_NETWORK_IMAGE_PROMPT ||
-    result.imagePrompt === NEURAL_INPUT_LAYER_IMAGE_PROMPT ||
-    NEURAL_NETWORK_PATTERN.test(`${result.imagePrompt} ${result.text}`)
-  );
-}
-
-function shouldUseNeuralNetworkImage(result: ImagineResponse) {
-  return (
-    result.imageUrl === NEURAL_NETWORK_IMAGE_URL ||
-    NEURAL_NETWORK_PATTERN.test(`${result.imagePrompt} ${result.text}`)
-  );
-}
-
-function shouldFocusNeuralInputLayer(result: ImagineResponse, speech: string) {
-  return (
-    result.imagePrompt === NEURAL_INPUT_LAYER_IMAGE_PROMPT ||
-    NEURAL_INPUT_LAYER_PATTERN.test(
-      `${speech} ${result.imagePrompt}`
-    )
-  );
-}
-
-function shouldUseCellImage(result: ImagineResponse) {
-  return (
-    result.imageUrl === CELL_IMAGE_URL ||
-    /cell/i.test(`${result.imagePrompt} ${result.text}`)
-  );
-}
-
-function shouldUseAerodynamicsImage(result: ImagineResponse) {
-  return (
-    result.imageUrl === AERODYNAMICS_IMAGE_URL ||
-    AERODYNAMICS_PATTERN.test(`${result.imagePrompt} ${result.text}`)
-  );
-}
-
-function shouldUseLocalPrompt(speech: string) {
-  return (
-    getRequestedBeakerStage(speech) > 0 ||
-    /cell/i.test(speech) ||
-    NEURAL_NETWORK_PATTERN.test(speech) ||
-    AERODYNAMICS_PATTERN.test(speech) ||
-    LOCAL_TOPIC_PATTERN.test(speech)
-  );
-}
-
-function isClassroomFallbackResponse(result: ImagineResponse) {
-  return (
-    result.imagePrompt.startsWith(LOCAL_VISUAL_PROMPT_PREFIX) &&
-    result.imagePrompt.includes("classroom learning")
-  );
-}
-
-function shouldKeepNeuralInputLayerVisual(
-  currentState: VisualState,
-  nextResult: ImagineResponse,
-  speech: string
-) {
-  if (!currentState.neuralInputLayerPinned || !currentState.result) {
-    return false;
-  }
-
-  if (shouldFocusNeuralInputLayer(nextResult, speech)) {
-    return false;
-  }
-
-  if (isClassroomFallbackResponse(nextResult)) {
-    return true;
-  }
-
-  return (
-    isNeuralNetworkResponse(nextResult) &&
-    !DIFFERENT_NEURAL_FOCUS_PATTERN.test(speech)
-  );
-}
-
-function formatNoteBullets(text: string) {
-  const lineBullets = text
-    .split(/\r?\n/)
-    .map((line) =>
-      line
-        .replace(/^[-*•\d.)\s]+/, "")
-        .replace(/^(key idea|student note|prompt|caption|description):\s*/i, "")
-        .trim()
-    )
-    .filter(Boolean);
-
-  if (lineBullets.length > 1) {
-    return lineBullets;
-  }
-
-  return text
-    .split(/(?<=[.!?])\s+/)
-    .map((sentence) => sentence.trim())
-    .filter(Boolean);
-}
-
 export default function Home() {
-  const [teacherInput, setTeacherInput] = useState("");
-  const [visualState, setVisualState] = useState<VisualState>(getEmptyVisualState);
+  const [captionInput, setCaptionInput] = useState("");
+  const [pitchFrame, setPitchFrame] = useState<PitchResponse>(getEmptyPitchResponse);
   const [error, setError] = useState("");
   const [speechNotice, setSpeechNotice] = useState("");
   const [speechStatus, setSpeechStatus] = useState<
     "idle" | "connecting" | "listening"
   >("idle");
-  const [deepgramStatus, setDeepgramStatus] =
-    useState<DeepgramStatusResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const lastSubmittedSpeech = useRef("");
-  const requestInFlight = useRef(false);
   const requestGeneration = useRef(0);
+  const requestInFlight = useRef(false);
+  const queuedSpeech = useRef<{ speech: string; source: PromptSource } | null>(null);
   const submitSpeechRef = useRef<
     (speech: string, source?: PromptSource) => Promise<void>
   >(async () => {});
@@ -394,7 +145,22 @@ export default function Home() {
   const transcriptionSocket = useRef<WebSocket | null>(null);
   const speechStopRequested = useRef(false);
   const deepgramConnected = useRef(false);
-  const result = visualState.result;
+  const hasActiveSlide = pitchFrame.mode === "slide";
+  const isTitleOnlySlide =
+    hasActiveSlide &&
+    pitchFrame.slideTitle.length > 0 &&
+    pitchFrame.slideSubtitle.length === 0 &&
+    pitchFrame.bullets.length === 0 &&
+    pitchFrame.imageUrl.length === 0;
+  const isImageOnlySlide =
+    hasActiveSlide &&
+    pitchFrame.imageUrl.length > 0 &&
+    pitchFrame.slideTitle.length === 0 &&
+    pitchFrame.slideSubtitle.length === 0 &&
+    pitchFrame.bullets.length === 0;
+  const isComponentSlide =
+    hasActiveSlide &&
+    pitchFrame.componentKey.length > 0;
 
   const cleanupDeepgramConnection = useCallback((sendStop: boolean) => {
     const recorder = mediaRecorder.current;
@@ -449,6 +215,99 @@ export default function Home() {
     [cleanupDeepgramConnection]
   );
 
+  const resetPitchSequence = useCallback(async () => {
+    requestGeneration.current += 1;
+    requestInFlight.current = false;
+    queuedSpeech.current = null;
+    setError("");
+    setIsLoading(false);
+    setCaptionInput("");
+    setPitchFrame(getEmptyPitchResponse());
+
+    await fetch(`${API_BASE_URL}/api/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ teacherSpeech: "", resetSequence: true })
+    }).catch(() => undefined);
+  }, []);
+
+  const submitSpeech = useCallback(async (
+    speech: string,
+    source: PromptSource = "typed"
+  ) => {
+    const cleanSpeech = speech.trim();
+
+    if (cleanSpeech.length === 0) {
+      return;
+    }
+
+    if (requestInFlight.current) {
+      queuedSpeech.current = { speech: cleanSpeech, source };
+      return;
+    }
+
+    setError("");
+    setIsLoading(source === "typed");
+    requestInFlight.current = true;
+    const requestId = ++requestGeneration.current;
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ teacherSpeech: cleanSpeech })
+      });
+
+      if (requestId !== requestGeneration.current) {
+        return;
+      }
+
+      if (!response.ok) {
+        const problem = (await response.json().catch(() => null)) as {
+          detail?: string;
+        } | null;
+        throw new Error(
+          problem?.detail ?? "The pitch sequence could not process the input."
+        );
+      }
+
+      const data = (await response.json()) as PitchResponse;
+      setPitchFrame(data);
+      if (source === "typed") {
+        setCaptionInput("");
+      }
+    } catch (requestError) {
+      if (requestId !== requestGeneration.current) {
+        return;
+      }
+
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Unexpected request failure."
+      );
+    } finally {
+      if (requestId === requestGeneration.current) {
+        requestInFlight.current = false;
+        setIsLoading(false);
+
+        const queued = queuedSpeech.current;
+        queuedSpeech.current = null;
+        if (queued) {
+          void submitSpeechRef.current(queued.speech, queued.source);
+        }
+      }
+    }
+  }, [resetPitchSequence]);
+
+  useEffect(() => {
+    submitSpeechRef.current = submitSpeech;
+  }, [submitSpeech]);
+
+  useEffect(() => {
+    void resetPitchSequence();
+  }, [resetPitchSequence]);
+
   const startDeepgram = useCallback(async () => {
     if (speechStatus !== "idle") {
       stopDeepgram();
@@ -456,14 +315,13 @@ export default function Home() {
     }
 
     setError("");
-    setSpeechNotice("Checking Deepgram API key...");
+    setSpeechNotice("Checking microphone transcription...");
     setSpeechStatus("connecting");
     speechStopRequested.current = false;
     deepgramConnected.current = false;
 
     try {
       const status = await fetchDeepgramStatus();
-      setDeepgramStatus(status);
 
       if (!status.configured || status.apiKeyStatus === "missing") {
         throw new Error("DEEPGRAM_API_KEY is not configured in .env.");
@@ -477,7 +335,7 @@ export default function Home() {
         throw new Error("Microphone capture is not supported in this browser.");
       }
 
-      setSpeechNotice("Deepgram key verified. Requesting microphone access...");
+      setSpeechNotice("Requesting microphone access...");
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           autoGainControl: true,
@@ -495,7 +353,7 @@ export default function Home() {
           socket.readyState !== WebSocket.CLOSED &&
           !speechStopRequested.current
         ) {
-          failDeepgram("Deepgram did not connect within 6 seconds.");
+          failDeepgram("Transcription did not connect within 6 seconds.");
         }
       }, 6000);
 
@@ -523,13 +381,21 @@ export default function Home() {
         };
         recorder.start(250);
         setSpeechStatus("listening");
-        setSpeechNotice(
-          "Deepgram listening. Pause after a sentence to finish the turn."
-        );
+        setSpeechNotice("");
+      };
+
+      const scanTranscript = (transcript: string) => {
+        const cleanTranscript = transcript.trim();
+        if (!cleanTranscript) {
+          return;
+        }
+
+        setCaptionInput(cleanTranscript);
+        void submitSpeechRef.current(cleanTranscript, "speech");
       };
 
       socket.onopen = () => {
-        setSpeechNotice("Connected to local backend. Waiting for Deepgram...");
+        setSpeechNotice("Connecting transcription...");
       };
 
       socket.onmessage = (event) => {
@@ -547,7 +413,6 @@ export default function Home() {
         }
 
         if (data.type === "Connected") {
-          setSpeechNotice("Deepgram turn detector connected.");
           return;
         }
 
@@ -557,42 +422,27 @@ export default function Home() {
             window.clearTimeout(connectionTimeout);
             startRecorder();
           } else if (data.status === "connecting_to_deepgram") {
-            setSpeechNotice("Connecting to Deepgram...");
+            setSpeechNotice("Connecting transcription...");
           }
           return;
         }
 
         if (data.type === "TurnInfo") {
-          const turnTranscript = data.transcript?.trim() ?? "";
-          if (!turnTranscript) {
-            return;
-          }
-
-          setTeacherInput(turnTranscript);
-
-          if (data.event === "EndOfTurn") {
-            void submitSpeechRef.current(turnTranscript, "speech");
-            setTeacherInput("");
-          }
+          scanTranscript(data.transcript ?? "");
           return;
         }
 
         const transcript =
           data.channel?.alternatives?.[0]?.transcript?.trim() ?? "";
         if (data.type === "Results" && transcript) {
-          setTeacherInput(transcript);
-
-          if (data.speech_final) {
-            void submitSpeechRef.current(transcript, "speech");
-            setTeacherInput("");
-          }
+          scanTranscript(transcript);
         }
       };
 
       socket.onerror = () => {
         if (!speechStopRequested.current) {
           window.clearTimeout(connectionTimeout);
-          failDeepgram("Deepgram websocket connection failed.");
+          failDeepgram("Transcription websocket connection failed.");
         }
       };
 
@@ -605,8 +455,8 @@ export default function Home() {
         if (!speechStopRequested.current) {
           failDeepgram(
             deepgramConnected.current
-              ? "Deepgram websocket closed unexpectedly."
-              : "Deepgram websocket closed before connecting."
+              ? "Transcription websocket closed unexpectedly."
+              : "Transcription websocket closed before connecting."
           );
           return;
         }
@@ -623,452 +473,158 @@ export default function Home() {
     }
   }, [failDeepgram, speechStatus, stopDeepgram]);
 
-  const submitSpeech = useCallback(async (
-    speech: string,
-    source: PromptSource = "typed"
-  ) => {
-    const cleanSpeech = speech.trim();
-
-    if (isClearCommand(cleanSpeech)) {
-      requestGeneration.current += 1;
-      lastSubmittedSpeech.current = cleanSpeech;
-      requestInFlight.current = false;
-      setError("");
-      setIsLoading(false);
-      setTeacherInput("");
-      setVisualState(getEmptyVisualState());
-      console.log("Board cleared by clear prompt");
-      return;
-    }
-
-    const requestedBeakerStage = getRequestedBeakerStage(cleanSpeech);
-
-    if (requestedBeakerStage > 0) {
-      requestGeneration.current += 1;
-      lastSubmittedSpeech.current = cleanSpeech;
-      requestInFlight.current = false;
-      setError("");
-      setIsLoading(false);
-      setTeacherInput("");
-      setVisualState((currentState) => {
-        const nextStage = getNextBeakerStage(
-          currentState.beakerStage,
-          requestedBeakerStage
-        );
-
-        if (nextStage === currentState.beakerStage) {
-          console.log("Beaker sequence unchanged", {
-            currentStage: currentState.beakerStage,
-            requestedStage: requestedBeakerStage,
-            speech: cleanSpeech
-          });
-          return currentState;
-        }
-
-        console.log("Beaker sequence advanced", {
-          from: currentState.beakerStage,
-          to: nextStage,
-          speech: cleanSpeech
-        });
-
-        return {
-          result: createLocalImageResult(
-            getBeakerImageUrl(nextStage),
-            `${BEAKER_PROMPT_PREFIX} stage ${nextStage}`,
-            getBeakerSummary(nextStage)
-          ),
-          inputSource: source,
-          neuralInputLayerPinned: false,
-          beakerStage: nextStage
-        };
-      });
-      return;
-    }
-
-    if (
-      cleanSpeech.length === 0 ||
-      requestInFlight.current
-    ) {
-      return;
-    }
-
-    setError("");
-    setIsLoading(true);
-    requestInFlight.current = true;
-    const requestId = ++requestGeneration.current;
-
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          teacherSpeech: cleanSpeech,
-          textOnly: !shouldUseLocalPrompt(cleanSpeech)
-        })
-      });
-
-      if (requestId !== requestGeneration.current) {
-        return;
-      }
-
-      if (!response.ok) {
-        const problem = (await response.json().catch(() => null)) as {
-          detail?: string;
-        } | null;
-        throw new Error(
-          problem?.detail ?? "The AI backend could not process the input."
-        );
-      }
-
-      const data = (await response.json()) as ImagineResponse;
-      lastSubmittedSpeech.current = cleanSpeech;
-      setVisualState((currentState) => {
-        if (requestId !== requestGeneration.current) {
-          return currentState;
-        }
-
-        const nextPinsInputLayer = shouldFocusNeuralInputLayer(
-          data,
-          cleanSpeech
-        );
-
-        if (
-          source === "speech" &&
-          shouldKeepNeuralInputLayerVisual(currentState, data, cleanSpeech)
-        ) {
-          console.log("Keeping neural input layer overlay pinned", {
-            ignoredPrompt: data.imagePrompt,
-            speech: cleanSpeech
-          });
-          return {
-            result: currentState.result,
-            inputSource: source,
-            neuralInputLayerPinned: true,
-            beakerStage: 0
-          };
-        }
-
-        if (source === "speech" && shouldKeepBeakerVisual(currentState, data)) {
-          console.log("Keeping beaker sequence visible", {
-            stage: currentState.beakerStage,
-            ignoredPrompt: data.imagePrompt,
-            speech: cleanSpeech
-          });
-          return currentState;
-        }
-
-        return {
-          result: data,
-          inputSource: source,
-          neuralInputLayerPinned: nextPinsInputLayer,
-          beakerStage: 0
-        };
-      });
-    } catch (requestError) {
-      if (requestId !== requestGeneration.current) {
-        return;
-      }
-
-      setError(
-        requestError instanceof Error
-          ? requestError.message
-          : "Unexpected request failure."
-      );
-    } finally {
-      if (requestId === requestGeneration.current) {
-        requestInFlight.current = false;
-        setIsLoading(false);
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    submitSpeechRef.current = submitSpeech;
-  }, [submitSpeech]);
-
-  useEffect(() => {
-    if (!result) {
-      return;
-    }
-
-    const displayedRequestId = requestGeneration.current;
-    const clearTimeoutId = window.setTimeout(() => {
-      if (
-        displayedRequestId !== requestGeneration.current ||
-        requestInFlight.current
-      ) {
-        return;
-      }
-
-      setVisualState(getEmptyVisualState());
-      console.log("Board auto-cleared after display timeout");
-    }, BOARD_AUTO_CLEAR_MS);
-
-    return () => window.clearTimeout(clearTimeoutId);
-  }, [result]);
-
   useEffect(() => {
     return () => stopDeepgram();
   }, [stopDeepgram]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await submitSpeech(teacherInput, "typed");
+    await submitSpeech(captionInput, "typed");
   }
 
-  const isTextOnlyResult = Boolean(result && result.mode === "text-only");
-  const isNeuralNetworkResult =
-    result && !isTextOnlyResult &&
-    (isNeuralNetworkResponse(result) || shouldUseNeuralNetworkImage(result));
-  const isNeuralInputLayerResult =
-    Boolean(
-      result &&
-        (visualState.neuralInputLayerPinned ||
-          result.imagePrompt === NEURAL_INPUT_LAYER_IMAGE_PROMPT)
-    );
-  const isBeakerResult = Boolean(
-    result && !isTextOnlyResult && isBeakerResponse(result)
-  );
-  const isClassroomFallback = Boolean(
-    result && isClassroomFallbackResponse(result)
-  );
-  const noteBullets = result ? formatNoteBullets(result.text) : [];
-  const displayImageUrl = isTextOnlyResult || isClassroomFallback
-    ? ""
-    : isNeuralNetworkResult
-      ? NEURAL_NETWORK_IMAGE_URL
-      : isBeakerResult
-        ? getBeakerImageUrl(visualState.beakerStage)
-      : result && shouldUseCellImage(result)
-        ? CELL_IMAGE_URL
-      : result && shouldUseAerodynamicsImage(result)
-        ? AERODYNAMICS_IMAGE_URL
-      : result?.imageUrl;
-  const displayImageAlt = isClassroomFallback
-    ? "Clear canvas"
-    : isNeuralNetworkResult
-      ? isNeuralInputLayerResult
-        ? "Neural network input layer focus diagram"
-        : "Neural network layer diagram"
-      : isBeakerResult
-        ? getBeakerAlt(visualState.beakerStage)
-      : result && shouldUseCellImage(result)
-        ? "Labeled animal cell diagram"
-      : result && shouldUseAerodynamicsImage(result)
-        ? "Aerodynamics airflow visualization around a car"
-      : result?.imagePrompt;
-
-  useEffect(() => {
-    if (isNeuralInputLayerResult) {
-      console.log("Neural input layer overlay visible", {
-        imageUrl: displayImageUrl,
-        imagePrompt: result?.imagePrompt,
-        label: "ReLU function"
-      });
+  function handleCaptionKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) {
+      return;
     }
-  }, [displayImageUrl, isNeuralInputLayerResult, result?.imagePrompt]);
+
+    event.preventDefault();
+    void submitSpeech(captionInput, "typed");
+  }
 
   return (
-    <main className="min-h-screen px-4 py-6 md:px-8">
-      <section className="mx-auto max-w-5xl rounded border border-border bg-white p-4">
-        <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold">IMAGINEv1</h1>
-            <p className="text-sm text-muted-foreground">
-              Real-time classroom speech to a visual note.
-            </p>
+    <main className="min-h-screen overflow-hidden bg-white text-[#111318]">
+      <section className="relative flex min-h-screen flex-col bg-white px-3 pb-20 pt-3 sm:px-4 sm:pb-24 sm:pt-4">
+        <div className="flex min-h-0 flex-1 items-stretch">
+          <div className="relative mx-auto flex w-full max-w-[1680px] overflow-hidden bg-white">
+
+            {isComponentSlide ? (
+              <div className="pitch-enter flex min-h-[calc(100vh-6.5rem)] w-full items-center justify-center bg-white px-[clamp(1rem,5vw,5rem)] py-[clamp(1rem,4vh,3rem)]">
+                <PitchVisual
+                  componentKey={pitchFrame.componentKey}
+                  title={pitchFrame.slideTitle}
+                  subtitle={pitchFrame.slideSubtitle}
+                  bullets={pitchFrame.bullets}
+                />
+              </div>
+            ) : isTitleOnlySlide ? (
+              <div className="flex min-h-[calc(100vh-6.5rem)] w-full items-center justify-center bg-white px-[clamp(1.5rem,7vw,8rem)]">
+                <h1 className="pitch-pop max-w-6xl text-center text-[clamp(3rem,8vw,8.5rem)] font-black uppercase leading-[0.94] tracking-normal text-[#111318]">
+                  {pitchFrame.slideTitle}
+                </h1>
+              </div>
+            ) : isImageOnlySlide ? (
+              <div className="flex min-h-[calc(100vh-6.5rem)] w-full items-center justify-center bg-white px-[clamp(1.5rem,6vw,7rem)] py-[clamp(1.5rem,6vh,5rem)]">
+                <img
+                  src={pitchFrame.imageUrl}
+                  alt={pitchFrame.imagePrompt}
+                  className="pitch-pop max-h-[min(74vh,820px)] max-w-[min(86vw,1280px)] object-contain"
+                />
+              </div>
+            ) : hasActiveSlide ? (
+              <div className="pitch-enter grid min-h-[calc(100vh-6.5rem)] w-full gap-10 bg-white px-[clamp(1.5rem,5vw,5rem)] py-[clamp(1.5rem,6vh,5rem)] lg:grid-cols-[minmax(0,1.05fr)_minmax(280px,0.95fr)] lg:items-center">
+                <div className="max-w-4xl pitch-stagger">
+                  <p className="mb-5 text-xs font-semibold uppercase tracking-[0.32em] text-[#8f6c36]">
+                    IMAGINEv1
+                  </p>
+                  <h1 className="text-balance text-[clamp(2.8rem,7vw,7.5rem)] font-semibold leading-[0.95] tracking-normal text-[#151515]">
+                    {pitchFrame.slideTitle}
+                  </h1>
+                  {pitchFrame.slideSubtitle ? (
+                    <p className="mt-8 max-w-3xl text-[clamp(1.1rem,2vw,1.75rem)] leading-8 text-[#4b4a45]">
+                      {pitchFrame.slideSubtitle}
+                    </p>
+                  ) : null}
+                </div>
+
+                <div className="min-w-0">
+                  {pitchFrame.imageUrl ? (
+                    <div className="pitch-pop aspect-[4/3] overflow-hidden bg-white">
+                      <img
+                        src={pitchFrame.imageUrl}
+                        alt={pitchFrame.imagePrompt || pitchFrame.slideTitle}
+                        className="h-full w-full object-cover"
+                      />
+                    </div>
+                  ) : pitchFrame.bullets.length > 0 ? (
+                    <ul className="pitch-stagger space-y-5 text-[clamp(1.05rem,1.8vw,1.5rem)] leading-8 text-[#34332f]">
+                      {pitchFrame.bullets.map((bullet, index) => (
+                        <li key={`${bullet}-${index}`} className="border-l-2 border-[#b7873f] pl-5">
+                          {bullet}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              </div>
+            ) : (
+              <div className="min-h-[calc(100vh-6.5rem)] w-full bg-white" aria-hidden="true" />
+            )}
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="mb-4 grid gap-3 md:grid-cols-[1fr_auto]">
-          <div>
-            <label
-              htmlFor="teacher-speech"
-              className="mb-2 block text-sm font-medium text-foreground"
-            >
-              Teacher speech input
-            </label>
-            <Textarea
-              id="teacher-speech"
-              value={teacherInput}
-              onChange={(event) => setTeacherInput(event.target.value)}
-              placeholder="Speak with Deepgram or type a short lesson explanation..."
-              required
-              rows={4}
-            />
-          </div>
-          <div className="flex flex-col gap-2 self-end md:w-44">
-            <Button
-              type="submit"
-              disabled={isLoading || teacherInput.trim().length === 0}
-              className="w-full"
-            >
-              {isLoading ? (
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-              ) : (
-                <Send className="h-4 w-4" aria-hidden="true" />
-              )}
-              Generate
-            </Button>
-            <Button
-              type="button"
-              onClick={() => {
-                void startDeepgram();
-              }}
-              className={`w-full ${
-                speechStatus === "idle"
-                  ? ""
-                  : "bg-red-600 text-white hover:opacity-90"
+        {(error || speechNotice) ? (
+          <div className="pointer-events-none fixed inset-x-4 bottom-28 z-20 mx-auto max-w-3xl sm:bottom-32">
+            <p
+              className={`rounded-full border px-4 py-2 text-center text-sm shadow-[0_12px_30px_rgba(30,27,22,0.12)] ${
+                error
+                  ? "border-red-200 bg-red-50 text-red-700"
+                  : "border-[#d9d3c7] bg-[#fbfaf6] text-[#5d5a52]"
               }`}
             >
-              {speechStatus === "connecting" ? (
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-              ) : speechStatus === "listening" ? (
-                <MicOff className="h-4 w-4" aria-hidden="true" />
-              ) : (
-                <Mic className="h-4 w-4" aria-hidden="true" />
-              )}
-              {speechStatus === "idle"
-                ? "Start mic"
-                : "Stop mic"}
-            </Button>
+              {error || speechNotice}
+            </p>
           </div>
+        ) : null}
+
+        <form
+          onSubmit={handleSubmit}
+          className="fixed inset-x-4 bottom-3 z-30 mx-auto flex max-w-3xl items-end gap-2 rounded-full border border-[#e5e5e5] bg-white p-1.5 shadow-[0_12px_34px_rgba(17,19,24,0.12)] sm:bottom-4"
+        >
+          <Button
+            type="button"
+            onClick={() => {
+              void startDeepgram();
+            }}
+            className={`h-11 min-w-28 rounded-full px-4 text-sm font-semibold shadow-[0_8px_18px_rgba(17,19,24,0.16)] sm:h-12 sm:min-w-32 ${
+              speechStatus === "idle"
+                ? "bg-[#151515] text-white"
+                : "bg-[#8f2d2d] text-white"
+            }`}
+            aria-label={speechStatus === "idle" ? "Start microphone" : "Stop microphone"}
+          >
+            {speechStatus === "connecting" ? (
+              <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+            ) : speechStatus === "listening" ? (
+              <MicOff className="h-5 w-5" aria-hidden="true" />
+            ) : (
+              <Mic className="h-5 w-5" aria-hidden="true" />
+            )}
+            {speechStatus === "idle" ? "Speak" : "Stop"}
+          </Button>
+
+          <Textarea
+            aria-label="Caption input"
+            value={captionInput}
+            onChange={(event) => setCaptionInput(event.target.value)}
+            onKeyDown={handleCaptionKeyDown}
+            placeholder="Caption input"
+            rows={1}
+            className="h-11 flex-1 rounded-full border-[#e5e5e5] bg-white px-4 py-2.5 text-sm leading-5 text-[#171717] placeholder:text-[#7a7a7a] focus:ring-[#151515] sm:h-12 sm:px-5 sm:text-base"
+          />
+
+          <Button
+            type="submit"
+            disabled={isLoading || captionInput.trim().length === 0}
+            className="h-11 w-11 shrink-0 rounded-full bg-[#151515] p-0 text-white shadow-[0_8px_18px_rgba(17,19,24,0.16)] sm:h-12 sm:w-12"
+            aria-label="Generate from caption"
+          >
+            {isLoading ? (
+              <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+            ) : (
+              <Send className="h-5 w-5" aria-hidden="true" />
+            )}
+          </Button>
         </form>
-
-        {error ? (
-          <p className="mb-4 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-            {error}
-          </p>
-        ) : null}
-
-        {speechNotice ? (
-          <p className="mb-4 rounded border border-sky-200 bg-sky-50 p-3 text-sm text-sky-800">
-            {speechNotice}
-          </p>
-        ) : null}
-
-        <div className="overflow-hidden rounded bg-white">
-          {isTextOnlyResult ? (
-            <div className="min-h-[420px] bg-white px-5 py-8 md:px-10">
-              <h2 className="mb-4 text-2xl font-semibold text-slate-800">
-                Notes
-              </h2>
-              <ul className="space-y-3 text-lg leading-8 text-slate-800 marker:text-sky-600">
-                {noteBullets.map((bullet, index) => (
-                  <li key={`${bullet}-${index}`} className="ml-6 list-disc pl-2">
-                    {bullet}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : isBeakerResult ? (
-            <div className="min-h-[420px] bg-white p-2">
-              <img
-                src={displayImageUrl}
-                alt={displayImageAlt}
-                className="h-[min(68vh,720px)] min-h-[420px] w-full object-contain"
-              />
-            </div>
-          ) : isNeuralNetworkResult ? (
-            <div className="min-h-[420px] bg-black p-2">
-              <div className="relative mx-auto aspect-[3056/2180] h-[min(68vh,720px)] min-h-[420px] max-w-full">
-                <img
-                  src={displayImageUrl}
-                  alt={displayImageAlt}
-                  className="absolute inset-0 h-full w-full object-contain"
-                />
-                {isNeuralInputLayerResult ? (
-                  <svg
-                    className="pointer-events-none absolute inset-0 h-full w-full"
-                    viewBox="0 0 3056 2180"
-                    aria-hidden="true"
-                  >
-                    <ellipse
-                      cx="126"
-                      cy="1138"
-                      rx="124"
-                      ry="820"
-                      fill="rgba(250, 204, 21, 0.1)"
-                      stroke="#facc15"
-                      strokeWidth="22"
-                    />
-                    <path
-                      d="M270 430 L570 260"
-                      fill="none"
-                      stroke="#facc15"
-                      strokeLinecap="round"
-                      strokeWidth="16"
-                    />
-                    <rect
-                      x="580"
-                      y="180"
-                      width="430"
-                      height="130"
-                      rx="18"
-                      fill="#facc15"
-                    />
-                    <text
-                      x="795"
-                      y="265"
-                      fill="#111827"
-                      fontFamily="Arial, sans-serif"
-                      fontSize="58"
-                      fontWeight="700"
-                      textAnchor="middle"
-                    >
-                      ReLU function
-                    </text>
-                  </svg>
-                ) : null}
-              </div>
-            </div>
-          ) : result ? (
-            <div className="grid min-h-[420px] gap-6 bg-white px-5 py-6 md:grid-cols-[minmax(0,1fr)_minmax(260px,40%)] md:items-center md:px-8">
-              <div className="order-2 md:order-1">
-                <h2 className="mb-4 text-2xl font-semibold text-slate-800">
-                  Image details
-                </h2>
-                <ul className="space-y-3 text-lg leading-8 text-slate-800 marker:text-sky-600">
-                  {noteBullets.map((bullet, index) => (
-                    <li key={`${bullet}-${index}`} className="ml-6 list-disc pl-2">
-                      {bullet}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <div className="order-1 md:order-2">
-                {displayImageUrl ? (
-                  <div className="aspect-[4/3] overflow-hidden rounded-sm bg-background shadow-[0_8px_24px_rgba(15,23,42,0.12)]">
-                    {/* Backend selects a local visual and returns its URL. */}
-                    <img
-                      src={displayImageUrl}
-                      alt={displayImageAlt}
-                      className={`h-full w-full ${
-                        displayImageUrl.startsWith("/") ||
-                          displayImageUrl.startsWith("data:image/svg+xml")
-                          ? "object-contain p-3"
-                          : "object-cover"
-                      }`}
-                    />
-                  </div>
-                ) : (
-                  <div className="aspect-[4/3] overflow-hidden rounded border-2 border-dashed border-slate-200 bg-slate-50 flex flex-col items-center justify-center p-6 text-center text-slate-400">
-                    <ImageIcon className="h-8 w-8 text-slate-300 mb-2 animate-pulse" aria-hidden="true" />
-                    <span className="font-semibold text-slate-500 text-sm mb-1">Canvas Clear</span>
-                    <p className="text-xs max-w-[200px] leading-relaxed">
-                      Say or type keywords like "cell", "neural network", "aerodynamics", or "beaker" to load a visual.
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
-          ) : (
-            <div className="flex min-h-[420px] flex-col items-center justify-center gap-3 px-6 text-center text-sm text-muted-foreground">
-              <ImageIcon className="h-8 w-8" aria-hidden="true" />
-              Submit teacher speech to show one combined visual note.
-            </div>
-          )}
-        </div>
       </section>
     </main>
   );
