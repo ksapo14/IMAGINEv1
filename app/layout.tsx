@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "IMAGINEv1",
-  description: "Real-time classroom AI visual and text prototype"
+  description: "Real-time pitch deck for educator speech to visuals"
 };
 
 export default function RootLayout({

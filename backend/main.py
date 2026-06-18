@@ -12,11 +12,11 @@ from pydantic import BaseModel, Field
 import websockets
 from dotenv import load_dotenv
 
-from .services.ai_pipeline import ImaginePipeline
+from .services.keyword_pipeline import KeywordPipeline
 
 load_dotenv()
 
-app = FastAPI(title="IMAGINEv1 AI Backend")
+app = FastAPI(title="IMAGINEv1 Pitch Backend")
 
 # Frontend and backend run on separate local ports during development.
 app.add_middleware(
@@ -27,14 +27,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-pipeline = ImaginePipeline()
+pipeline = KeywordPipeline()
 DEEPGRAM_AUTH_TOKEN_URL = "https://api.deepgram.com/v1/auth/token"
 DEEPGRAM_FLUX_LISTEN_URL = "wss://api.deepgram.com/v2/listen"
 
 
 class GenerateRequest(BaseModel):
-    teacherSpeech: str = Field(..., min_length=1, max_length=4000)
-    textOnly: bool = False
+    teacherSpeech: str = Field("", max_length=4000)
+    resetSequence: bool = False
 
 
 class GenerateResponse(BaseModel):
@@ -43,6 +43,14 @@ class GenerateResponse(BaseModel):
     imagePrompt: str
     mode: str
     textMode: str
+    status: str
+    slideTitle: str
+    slideSubtitle: str
+    bullets: list[str]
+    sequenceIndex: int
+    totalSteps: int
+    matchedKeyword: str
+    componentKey: str
 
 
 def get_deepgram_api_key() -> str:
@@ -155,14 +163,17 @@ def transcribe_status(checkKey: bool = False) -> dict[str, str | bool]:
 
 @app.post("/api/generate", response_model=GenerateResponse)
 async def generate_frame(request: GenerateRequest) -> GenerateResponse:
-    """Process one teacher input chunk into one classroom output frame."""
+    """Scan one teacher input chunk against the ordered pitch sequence."""
     clean_input = request.teacherSpeech.strip()
 
-    if not clean_input:
+    if not clean_input and not request.resetSequence:
         raise HTTPException(status_code=400, detail="teacherSpeech is required.")
 
     try:
-        result = await pipeline.generate(clean_input, text_only=request.textOnly)
+        result = await pipeline.generate(
+            clean_input,
+            reset_sequence=request.resetSequence,
+        )
     except RuntimeError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
 
