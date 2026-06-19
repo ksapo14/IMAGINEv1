@@ -54,8 +54,21 @@ type DeepgramStatusResponse = {
   apiKeyMessage: string;
 };
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8010";
+function getApiBaseUrl() {
+  const configuredUrl = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
+  if (configuredUrl) {
+    return configuredUrl.replace(/\/$/, "");
+  }
+
+  const apiPort = process.env.NEXT_PUBLIC_API_PORT?.trim() || "8010";
+  if (typeof window !== "undefined") {
+    return `${window.location.protocol}//${window.location.hostname}:${apiPort}`;
+  }
+
+  return `http://127.0.0.1:${apiPort}`;
+}
+
+const API_BASE_URL = getApiBaseUrl();
 
 function getEmptyPitchResponse(): PitchResponse {
   return {

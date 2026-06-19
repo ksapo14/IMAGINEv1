@@ -59,3 +59,53 @@ DEEPGRAM_EOT_TIMEOUT_MS=1500
 ```
 
 Do not commit API keys. Only variables prefixed with `NEXT_PUBLIC_` are exposed to the browser by Next.js.
+
+## Docker
+
+The Docker setup runs the app as two containers:
+
+- `frontend`: Next.js production server on container port `3000`.
+- `backend`: FastAPI server on container port `8010`.
+
+Build and start the stack:
+
+```bash
+docker compose up --build
+```
+
+Open the app from the same device:
+
+```text
+http://localhost:3000
+```
+
+Open it from another device on the same network by replacing the host with the
+computer's LAN IP address:
+
+```text
+http://YOUR_COMPUTER_LAN_IP:3000
+```
+
+The frontend derives the backend URL from the browser hostname by default, so
+`http://YOUR_COMPUTER_LAN_IP:3000` will call
+`http://YOUR_COMPUTER_LAN_IP:8010`.
+
+Stop the containers:
+
+```bash
+docker compose down
+```
+
+Optional configuration can go in `.env`; use `.env.example` as the template.
+For Deepgram microphone transcription, set:
+
+```env
+DEEPGRAM_API_KEY=your-key-here
+```
+
+If you expose the app through a public hostname, set these before building:
+
+```env
+NEXT_PUBLIC_API_BASE_URL=https://api.example.com
+CORS_ALLOW_ORIGIN_REGEX=^https?://(app\.example\.com)(:\d+)?$
+```

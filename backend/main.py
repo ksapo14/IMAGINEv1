@@ -21,7 +21,15 @@ app = FastAPI(title="IMAGINEv1 Pitch Backend")
 # Frontend and backend run on separate local ports during development.
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$",
+    allow_origin_regex=os.getenv("CORS_ALLOW_ORIGIN_REGEX")
+    or (
+        r"^https?://("
+        r"localhost|127\.0\.0\.1|\[::1\]|"
+        r"10\.\d+\.\d+\.\d+|"
+        r"192\.168\.\d+\.\d+|"
+        r"172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+"
+        r")(:\d+)?$"
+    ),
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
