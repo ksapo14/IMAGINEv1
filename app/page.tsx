@@ -504,6 +504,8 @@ export default function Home() {
                   title={pitchFrame.slideTitle}
                   subtitle={pitchFrame.slideSubtitle}
                   bullets={pitchFrame.bullets}
+                  imageUrl={pitchFrame.imageUrl}
+                  imagePrompt={pitchFrame.imagePrompt}
                 />
               </div>
             ) : isTitleOnlySlide ? (

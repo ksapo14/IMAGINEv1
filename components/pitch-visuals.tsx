@@ -1,17 +1,31 @@
 "use client";
 
-import { memo } from "react";
+import { memo, type ReactNode } from "react";
 import {
+  ArrowDown,
+  Check,
   MapPin,
-  Users,
+  Monitor,
+  Smartphone,
+  X,
 } from "lucide-react";
 import { ElectronTransportChain } from "@/components/electron-transport-chain";
+import {
+  ClassroomSpeechBubbles,
+  CompetitorComparisonTable as AnimatedCompetitorComparisonTable,
+  DurhamMapPin,
+  LiveWhiteboardDraw,
+  SplitScreenContrast,
+  TamCounter,
+} from "@/components/imagineer-components";
 
 type PitchVisualProps = {
   componentKey: string;
   title: string;
   subtitle: string;
   bullets: string[];
+  imageUrl?: string;
+  imagePrompt?: string;
 };
 
 const flowSteps = ["Focus", "Understanding", "Scores", "Rankings", "Enrollment", "Revenue"];
@@ -24,6 +38,23 @@ const schoolNames = [
   "Forsyth",
   "Charlotte Country Day",
   "Providence Day",
+];
+const founderProfiles = [
+  {
+    name: "Vivaan",
+    role: "CEO",
+    photo: "/vivaan.png",
+  },
+  {
+    name: "Jackson",
+    role: "CFO",
+    photo: "/jackson.png",
+  },
+  {
+    name: "Krish",
+    role: "CTO",
+    photo: "/krish.jpg",
+  },
 ];
 
 const useCaseDetails = {
@@ -73,6 +104,199 @@ function getPricingStage(componentKey: string) {
 function PlaceholderLabel({ children }: { children: string }) {
   return (
     <div className="pitch-enter inline-flex rounded-full border border-[#dfd8ca] bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] text-[#7d6b4c]">
+      {children}
+    </div>
+  );
+}
+
+function ThemedAnimationStage({
+  children,
+  className = "",
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={`pitch-enter pitch-themed-animation h-[min(82vh,900px)] w-full max-w-[1500px] overflow-hidden border border-[#e4ddd0] bg-white shadow-[0_16px_48px_rgba(20,22,28,0.08)] ${className}`}>
+      <style>{`
+        .pitch-themed-animation,
+        .pitch-themed-animation > div {
+          background: #fff !important;
+          color: #121417 !important;
+          font-family: inherit !important;
+        }
+
+        .pitch-themed-animation > div {
+          padding: clamp(1.25rem, 3.8vw, 3.75rem) !important;
+        }
+
+        .pitch-themed-animation [class~="max-w-md"],
+        .pitch-themed-animation [class~="max-w-lg"],
+        .pitch-themed-animation [class~="max-w-xl"],
+        .pitch-themed-animation [class~="max-w-2xl"],
+        .pitch-themed-animation [class~="max-w-3xl"],
+        .pitch-themed-animation [class~="max-w-4xl"] {
+          max-width: min(94vw, 1180px) !important;
+        }
+
+        .pitch-themed-animation [class~="h-44"] {
+          height: min(44vh, 390px) !important;
+        }
+
+        .pitch-themed-animation [class~="h-64"] {
+          height: min(56vh, 500px) !important;
+        }
+
+        .pitch-themed-animation [class~="gap-2"],
+        .pitch-themed-animation [class~="gap-3"],
+        .pitch-themed-animation [class~="gap-4"] {
+          gap: clamp(1rem, 1.8vw, 2rem) !important;
+        }
+
+        .pitch-themed-animation [class~="p-4"],
+        .pitch-themed-animation [class~="p-5"],
+        .pitch-themed-animation [class~="p-6"] {
+          padding: clamp(1.25rem, 2.3vw, 2.6rem) !important;
+        }
+
+        .pitch-themed-animation [class~="px-3"],
+        .pitch-themed-animation [class~="px-4"],
+        .pitch-themed-animation [class~="px-5"] {
+          padding-left: clamp(1rem, 1.8vw, 2rem) !important;
+          padding-right: clamp(1rem, 1.8vw, 2rem) !important;
+        }
+
+        .pitch-themed-animation [class~="py-1"],
+        .pitch-themed-animation [class~="py-2"],
+        .pitch-themed-animation [class~="py-3"] {
+          padding-top: clamp(0.55rem, 1vw, 1rem) !important;
+          padding-bottom: clamp(0.55rem, 1vw, 1rem) !important;
+        }
+
+        .pitch-themed-animation [class~="text-[10px]"],
+        .pitch-themed-animation [class~="text-[11px]"],
+        .pitch-themed-animation [class~="text-xs"] {
+          font-size: clamp(0.95rem, 1.2vw, 1.18rem) !important;
+          line-height: 1.35 !important;
+        }
+
+        .pitch-themed-animation [class~="text-sm"],
+        .pitch-themed-animation [class~="text-base"] {
+          font-size: clamp(1.08rem, 1.55vw, 1.5rem) !important;
+          line-height: 1.45 !important;
+        }
+
+        .pitch-themed-animation [class~="text-lg"],
+        .pitch-themed-animation [class~="text-xl"] {
+          font-size: clamp(1.35rem, 2vw, 2rem) !important;
+          line-height: 1.25 !important;
+        }
+
+        .pitch-themed-animation [class~="text-2xl"],
+        .pitch-themed-animation [class~="text-3xl"] {
+          font-size: clamp(2rem, 3.2vw, 3.45rem) !important;
+          line-height: 1.08 !important;
+        }
+
+        .pitch-themed-animation [class~="text-4xl"],
+        .pitch-themed-animation [class~="text-5xl"] {
+          font-size: clamp(3.2rem, 6vw, 6.5rem) !important;
+          line-height: 0.98 !important;
+        }
+
+        .pitch-themed-animation [class~="text-6xl"],
+        .pitch-themed-animation [class~="text-7xl"],
+        .pitch-themed-animation [class~="text-8xl"] {
+          font-size: clamp(5rem, 10.5vw, 9.8rem) !important;
+          line-height: 0.9 !important;
+        }
+
+        .pitch-themed-animation svg {
+          max-width: 100% !important;
+        }
+
+        .pitch-themed-animation [class*="bg-[#0A1530]"],
+        .pitch-themed-animation [class*="bg-[#0E1A33]"],
+        .pitch-themed-animation [class*="bg-[#10213F]"],
+        .pitch-themed-animation [class*="bg-[#16294D]"] {
+          background-color: #fff !important;
+        }
+
+        .pitch-themed-animation [class*="bg-[#F7F5EF]"],
+        .pitch-themed-animation [class*="bg-[#F5B546]"] {
+          background-color: #fbfaf7 !important;
+        }
+
+        .pitch-themed-animation [class*="text-[#F7F5EF]"],
+        .pitch-themed-animation [class*="text-[#E6EEF9]"],
+        .pitch-themed-animation [class*="text-[#CFE3F5]"],
+        .pitch-themed-animation [class*="text-[#9FB2D0]"],
+        .pitch-themed-animation [class*="text-[#6F86AD]"] {
+          color: #121417 !important;
+        }
+
+        .pitch-themed-animation [class*="text-[#4CC4F0]"] {
+          color: #1d8067 !important;
+        }
+
+        .pitch-themed-animation [class*="text-[#F5B546]"] {
+          color: #8b5c16 !important;
+        }
+
+        .pitch-themed-animation [class*="border-[#1C2C4D]"],
+        .pitch-themed-animation [class*="border-[#26416E]"] {
+          border-color: #e4ddd0 !important;
+        }
+
+        .pitch-themed-animation [class*="rounded-2xl"],
+        .pitch-themed-animation [class*="rounded-xl"] {
+          border-radius: 0 !important;
+        }
+
+        .pitch-themed-animation [style*="#0A1530"],
+        .pitch-themed-animation [style*="#0E1A33"],
+        .pitch-themed-animation [style*="#10213F"],
+        .pitch-themed-animation [style*="#1C2C4D"] {
+          background-color: #fff !important;
+          border-color: #e4ddd0 !important;
+          color: #121417 !important;
+          box-shadow: 0 12px 34px rgba(20, 22, 28, 0.07) !important;
+        }
+
+        .pitch-themed-animation [style*="#4CC4F0"] {
+          color: #1d8067 !important;
+          border-color: #1d8067 !important;
+        }
+
+        .pitch-themed-animation svg text {
+          fill: #121417 !important;
+          font-family: inherit !important;
+        }
+
+        .pitch-first-kind > div:not(style) > div > div:first-child {
+          background-color: #0e1a33 !important;
+        }
+
+        .pitch-first-kind > div:not(style) > div > div:first-child * {
+          color: #cfe3f5 !important;
+        }
+
+        .pitch-first-kind > div:not(style) > div > div:not(:first-child) {
+          background-color: #fff !important;
+        }
+
+        .pitch-first-kind > div:not(style) > div > div:not(:first-child) * {
+          color: #121417 !important;
+        }
+
+        .pitch-first-kind > div:not(style) > div > div:last-child {
+          background-color: #10213f !important;
+        }
+
+        .pitch-first-kind > div:not(style) > div > div:last-child * {
+          color: #4cc4f0 !important;
+        }
+      `}</style>
       {children}
     </div>
   );
@@ -276,6 +500,30 @@ function MarginChart({ title, subtitle }: PitchVisualProps) {
 function SchoolCollage({ title, subtitle }: PitchVisualProps) {
   return (
     <div className="pitch-enter w-full max-w-7xl">
+      <style>{`
+        @keyframes schoolCardFall {
+          0% {
+            opacity: 0;
+            transform: translateY(-70px) rotate(-2deg);
+          }
+          70% {
+            opacity: 1;
+            transform: translateY(7px) rotate(0.5deg);
+          }
+          100% {
+            opacity: 1;
+            transform: translateY(0) rotate(0deg);
+          }
+        }
+        .school-card-fall {
+          animation: schoolCardFall 700ms cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .school-card-fall {
+            animation: none;
+          }
+        }
+      `}</style>
       <PlaceholderLabel>Target schools</PlaceholderLabel>
       <h1 className="mt-6 max-w-5xl text-[clamp(3rem,7vw,7rem)] font-semibold leading-[0.92] tracking-normal text-[#121417]">
         {title}
@@ -284,8 +532,12 @@ function SchoolCollage({ title, subtitle }: PitchVisualProps) {
         {subtitle}
       </p>
       <div className="pitch-stagger mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {schoolNames.map((name) => (
-          <div key={name} className="grid min-h-24 place-items-center border border-[#e4ddd0] bg-white px-4 text-center text-xl font-semibold text-[#15171a] shadow-[0_12px_30px_rgba(20,22,28,0.06)]">
+        {schoolNames.map((name, index) => (
+          <div
+            key={name}
+            className="school-card-fall grid min-h-24 place-items-center border border-[#e4ddd0] bg-white px-4 text-center text-xl font-semibold text-[#15171a] shadow-[0_12px_30px_rgba(20,22,28,0.06)]"
+            style={{ animationDelay: `${index * 95}ms` }}
+          >
             {name}
           </div>
         ))}
@@ -304,6 +556,254 @@ function MarketTotal({ title, subtitle }: PitchVisualProps) {
       <p className="mt-8 text-[clamp(1.5rem,4vw,4rem)] font-semibold leading-none text-[#8b5c16]">
         {subtitle}
       </p>
+    </div>
+  );
+}
+
+function FutureAnimationPlaceholder({ title, subtitle, bullets }: PitchVisualProps) {
+  return (
+    <div className="pitch-enter grid w-full max-w-7xl gap-8 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
+      <div className="pitch-stagger">
+        <PlaceholderLabel>Animation placeholder</PlaceholderLabel>
+        <h1 className="mt-6 text-[clamp(3rem,7vw,7rem)] font-semibold leading-[0.92] tracking-normal text-[#121417]">
+          {title}
+        </h1>
+        <p className="mt-6 text-[clamp(1.1rem,2vw,1.55rem)] leading-8 text-[#4d4a43]">
+          {subtitle}
+        </p>
+      </div>
+      <div className="pitch-stagger grid gap-4">
+        {bullets.map((bullet, index) => (
+          <div
+            key={bullet}
+            className="flex items-center gap-5 border border-dashed border-[#d7cdbb] bg-white p-5 shadow-[0_12px_30px_rgba(20,22,28,0.06)]"
+          >
+            <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[#f2eadc] text-base font-semibold text-[#8b5c16]">
+              {index + 1}
+            </span>
+            <p className="text-[clamp(1rem,1.7vw,1.4rem)] font-medium leading-7 text-[#181a1d]">
+              {bullet}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function EngagementContrast({ title, subtitle }: PitchVisualProps) {
+  return (
+    <div className="pitch-enter grid w-full max-w-7xl gap-8 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
+      <div className="pitch-stagger">
+        <PlaceholderLabel>Problem</PlaceholderLabel>
+        <h1 className="mt-6 text-[clamp(3.2rem,7vw,7rem)] font-semibold leading-[0.92] tracking-normal text-[#121417]">
+          {title}
+        </h1>
+        <p className="mt-6 text-[clamp(1.1rem,2vw,1.55rem)] leading-8 text-[#4d4a43]">
+          {subtitle}
+        </p>
+      </div>
+      <div className="grid gap-5 sm:grid-cols-2">
+        <div className="pitch-pop border border-[#d9d3c7] bg-white p-6 shadow-[0_14px_42px_rgba(20,22,28,0.08)]">
+          <div className="grid aspect-[9/16] place-items-center border-8 border-[#111318] bg-[#f7fbff]">
+            <div className="grid gap-4 text-center">
+              <Smartphone className="mx-auto h-20 w-20 text-[#3846a7]" strokeWidth={1.4} aria-hidden="true" />
+              <p className="text-3xl font-semibold text-[#121417]">Phones</p>
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#6b7280]">motion / color / feedback</p>
+            </div>
+          </div>
+        </div>
+        <div className="pitch-pop border border-[#e4ddd0] bg-[#fbfaf7] p-6 shadow-[0_14px_42px_rgba(20,22,28,0.06)]" style={{ animationDelay: "140ms" }}>
+          <div className="grid aspect-[9/16] place-items-center border border-[#d6cfc2] bg-white">
+            <div className="grid gap-4 text-center">
+              <Monitor className="mx-auto h-20 w-20 text-[#8b7654]" strokeWidth={1.4} aria-hidden="true" />
+              <p className="text-3xl font-semibold text-[#121417]">Classroom</p>
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#8b7654]">static / slow / passive</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StaticSlides({ title, subtitle, bullets }: PitchVisualProps) {
+  return (
+    <div className="pitch-enter grid w-full max-w-7xl gap-8 lg:grid-cols-[0.85fr_1.15fr] lg:items-center">
+      <div className="pitch-stagger">
+        <PlaceholderLabel>Old classroom</PlaceholderLabel>
+        <h1 className="mt-6 text-[clamp(3rem,7vw,7rem)] font-semibold leading-[0.92] tracking-normal text-[#121417]">
+          {title}
+        </h1>
+        <p className="mt-6 text-[clamp(1.1rem,2vw,1.55rem)] leading-8 text-[#4d4a43]">
+          {subtitle}
+        </p>
+      </div>
+      <div className="pitch-pop border border-[#d9d3c7] bg-white p-7 shadow-[0_16px_48px_rgba(20,22,28,0.08)]">
+        <div className="aspect-[16/9] border border-[#d9d3c7] bg-[#fbfaf7] p-7">
+          <div className="h-8 w-2/3 bg-[#111318]" />
+          <div className="mt-8 grid gap-4">
+            <div className="h-4 w-full bg-[#d7cdbb]" />
+            <div className="h-4 w-11/12 bg-[#d7cdbb]" />
+            <div className="h-4 w-10/12 bg-[#d7cdbb]" />
+            <div className="h-4 w-3/4 bg-[#d7cdbb]" />
+          </div>
+          <div className="mt-8 grid grid-cols-[1fr_0.75fr] gap-6">
+            <div className="grid aspect-[4/3] place-items-center border border-dashed border-[#b9ae9d] text-center text-sm font-semibold uppercase tracking-[0.16em] text-[#8b7654]">
+              frozen diagram
+            </div>
+            <div className="grid content-start gap-3">
+              {bullets.map((bullet) => (
+                <div key={bullet} className="border-l-2 border-[#bd3d2f] bg-white px-4 py-3 text-lg font-semibold text-[#181a1d]">
+                  {bullet}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SalesFlow({ title, subtitle, stage }: PitchVisualProps & { stage: 1 | 2 | 3 }) {
+  const steps = ["Teacher", "Department Chair", "Principal"];
+
+  return (
+    <div className="pitch-enter grid w-full max-w-7xl gap-10 lg:grid-cols-[0.85fr_1.15fr] lg:items-center">
+      <div className="pitch-stagger">
+        <PlaceholderLabel>Distribution</PlaceholderLabel>
+        <h1 className="mt-6 text-[clamp(3.2rem,7vw,7rem)] font-semibold leading-[0.92] tracking-normal text-[#121417]">
+          {title}
+        </h1>
+        <p className="mt-6 text-[clamp(1.1rem,2vw,1.55rem)] leading-8 text-[#4d4a43]">
+          {subtitle}
+        </p>
+      </div>
+      <div className="pitch-stagger mx-auto grid w-full max-w-xl gap-3">
+        {steps.map((step, index) => {
+          const visible = index < stage;
+          return (
+            <div key={step} className="grid gap-3">
+              <div className={`grid min-h-28 place-items-center border px-6 text-center text-[clamp(1.6rem,3vw,3rem)] font-semibold shadow-[0_12px_34px_rgba(20,22,28,0.07)] ${
+                visible ? "border-[#101214] bg-white text-[#121417]" : "border-dashed border-[#e1d9ca] bg-[#fbfaf7] text-[#b8ad9f]"
+              }`}>
+                {visible ? step : "Next buyer"}
+              </div>
+              {index < steps.length - 1 ? (
+                <ArrowDown className={`mx-auto h-10 w-10 ${visible ? "text-[#1d8067]" : "text-[#d5ccbd]"}`} strokeWidth={1.8} aria-hidden="true" />
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function PilotExpansion({ title, subtitle, stage }: PitchVisualProps & { stage: 1 | 2 | 3 | 4 }) {
+  const steps = ["Pilots", "Results", "Case Studies"];
+
+  return (
+    <div className="pitch-enter w-full max-w-7xl">
+      <PlaceholderLabel>Go to market</PlaceholderLabel>
+      <h1 className="mt-6 max-w-5xl text-[clamp(3rem,7vw,7rem)] font-semibold leading-[0.92] tracking-normal text-[#121417]">
+        {title}
+      </h1>
+      <p className="mt-5 max-w-3xl text-[clamp(1.1rem,2vw,1.55rem)] leading-8 text-[#4d4a43]">
+        {subtitle}
+      </p>
+      <div className="pitch-stagger mt-12 grid gap-4 md:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr] md:items-center">
+        {steps.map((step, index) => (
+          <div key={step} className="contents">
+            <div className={`grid min-h-36 place-items-center border p-5 text-center text-2xl font-semibold shadow-[0_12px_34px_rgba(20,22,28,0.07)] ${
+              index < stage ? "border-[#101214] bg-white text-[#121417]" : "border-dashed border-[#e1d9ca] bg-[#fbfaf7] text-[#b8ad9f]"
+            }`}>
+              {index < stage ? step : "Pending"}
+            </div>
+            <p className="hidden text-4xl font-semibold text-[#8b7654] md:block">{index === steps.length - 1 ? "=" : "+"}</p>
+          </div>
+        ))}
+        <div className={`grid min-h-36 place-items-center border p-5 text-center text-2xl font-semibold shadow-[0_12px_34px_rgba(20,22,28,0.07)] ${
+          stage >= 4 ? "border-[#101214] bg-[#101214] text-white" : "border-dashed border-[#e1d9ca] bg-[#fbfaf7] text-[#b8ad9f]"
+        }`}>
+          Expansion
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TamCalculation({ title, subtitle }: PitchVisualProps) {
+  const rows = [
+    ["Reachable teacher seats", "2.15M"],
+    ["Annual price", "$1,200"],
+    ["Total addressable market", "$2.4B"],
+  ];
+
+  return (
+    <div className="pitch-enter grid w-full max-w-7xl gap-8 lg:grid-cols-[0.85fr_1.15fr] lg:items-center">
+      <div className="pitch-stagger">
+        <PlaceholderLabel>TAM calculation</PlaceholderLabel>
+        <h1 className="mt-6 text-[clamp(3.2rem,7vw,7rem)] font-semibold leading-[0.92] tracking-normal text-[#121417]">
+          {title}
+        </h1>
+        {subtitle ? (
+          <p className="mt-6 text-[clamp(1.1rem,2vw,1.55rem)] leading-8 text-[#4d4a43]">
+            {subtitle}
+          </p>
+        ) : null}
+      </div>
+      <div className="pitch-stagger border border-[#d9d3c7] bg-white p-6 shadow-[0_16px_48px_rgba(20,22,28,0.08)]">
+        {rows.map(([label, value], index) => (
+          <div key={label} className={`grid grid-cols-[1fr_auto] gap-5 border-b border-[#e4ddd0] px-2 py-5 ${index === rows.length - 1 ? "border-b-0 bg-[#101214] px-5 text-white" : ""}`}>
+            <p className="text-[clamp(1.1rem,2vw,1.6rem)] font-medium">{label}</p>
+            <p className="text-[clamp(1.5rem,3vw,3rem)] font-semibold leading-none">{value}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CompetitiveTable({ title, subtitle }: PitchVisualProps) {
+  const rows = [
+    ["Canva", true, false, false, false],
+    ["Google Slides", true, false, false, false],
+    ["ChatGPT", true, false, false, false],
+    ["Imagine", true, true, true, true],
+  ] as const;
+
+  return (
+    <div className="pitch-enter w-full max-w-7xl">
+      <PlaceholderLabel>Category</PlaceholderLabel>
+      <h1 className="mt-6 max-w-5xl text-[clamp(3rem,7vw,7rem)] font-semibold leading-[0.92] tracking-normal text-[#121417]">
+        {title}
+      </h1>
+      <p className="mt-5 max-w-4xl text-[clamp(1.1rem,2vw,1.55rem)] leading-8 text-[#4d4a43]">
+        {subtitle}
+      </p>
+      <div className="pitch-stagger mt-10 overflow-hidden border border-[#d9d3c7] bg-white shadow-[0_16px_48px_rgba(20,22,28,0.08)]">
+        <div className="grid grid-cols-[1.2fr_repeat(4,1fr)] bg-[#101214] text-sm font-semibold uppercase tracking-[0.12em] text-white">
+          {["Tool", "Visuals", "Live", "Room", "Zero prep"].map((header) => (
+            <div key={header} className="px-4 py-4 text-center">{header}</div>
+          ))}
+        </div>
+        {rows.map((row) => (
+          <div key={row[0]} className={`grid grid-cols-[1.2fr_repeat(4,1fr)] border-t border-[#e4ddd0] ${row[0] === "Imagine" ? "bg-[#f4fbf8]" : "bg-white"}`}>
+            <div className="px-4 py-5 text-xl font-semibold text-[#121417]">{row[0]}</div>
+            {row.slice(1).map((enabled, index) => (
+              <div key={`${row[0]}-${index}`} className="grid place-items-center px-4 py-5">
+                {enabled ? (
+                  <Check className="h-8 w-8 text-[#1d8067]" strokeWidth={2.4} aria-label="Yes" />
+                ) : (
+                  <X className="h-8 w-8 text-[#bd3d2f]" strokeWidth={2.4} aria-label="No" />
+                )}
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -364,17 +864,11 @@ function UseCaseStage({ title, subtitle, kind }: PitchVisualProps & { kind: stri
 }
 
 function TeamStage({ active }: { active: 1 | 2 | 3 }) {
-  const people = [
-    { name: "Vivaan", role: "CEO" },
-    { name: "Jackson", role: "CFO" },
-    { name: "Krish", role: "CTO" },
-  ];
-
   return (
     <div className="pitch-enter w-full max-w-7xl">
       <PlaceholderLabel>Founding team</PlaceholderLabel>
       <div className="pitch-stagger mt-10 grid gap-5 md:grid-cols-3">
-        {people.map((person, index) => {
+        {founderProfiles.map((person, index) => {
           const visible = index < active;
           return (
             <div
@@ -388,7 +882,17 @@ function TeamStage({ active }: { active: 1 | 2 | 3 }) {
               <div className={`grid aspect-square place-items-center border border-dashed border-[#d7cdbb] bg-white transition-opacity duration-500 ${
                 visible ? "opacity-100" : "opacity-35"
               }`}>
-                <Users className={visible ? "pitch-float h-24 w-24" : "h-24 w-24"} strokeWidth={1.2} aria-hidden="true" />
+                {visible ? (
+                  <img
+                    src={person.photo}
+                    alt={`${person.name} headshot`}
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <span className="text-sm font-semibold uppercase tracking-[0.18em] text-[#b6ad9f]">
+                    Photo pending
+                  </span>
+                )}
               </div>
               <p className="mt-6 text-4xl font-semibold">{visible ? person.name : "Photo placeholder"}</p>
               <p className="mt-2 text-xl font-medium uppercase tracking-[0.18em] text-[#8b7654]">
@@ -465,16 +969,78 @@ function TeachersBurnHours() {
   );
 }
 
+function BeakerImage({ imageUrl, imagePrompt }: PitchVisualProps) {
+  return (
+    <div className="pitch-enter grid w-full place-items-center bg-white px-[clamp(1rem,4vw,4rem)] py-[clamp(1rem,4vh,3rem)]">
+      <img
+        src={imageUrl}
+        alt={imagePrompt || "Beaker demo"}
+        className="pitch-pop h-auto max-h-[min(78vh,820px)] w-auto max-w-[min(92vw,1280px)] object-contain"
+      />
+    </div>
+  );
+}
+
 export const PitchVisual = memo(function PitchVisual(props: PitchVisualProps) {
   switch (props.componentKey) {
     case "teachers-burn-hours":
       return <TeachersBurnHours />;
+    case "phones-vs-classroom":
+      return <EngagementContrast {...props} />;
+    case "static-slides":
+      return <StaticSlides {...props} />;
+    case "beaker-image":
+      return <BeakerImage {...props} />;
     case "electron-transport-chain":
       return <ElectronTransportChain />;
     case "product-intro":
       return <ProductIntro {...props} />;
     case "live-whiteboard":
-      return <LiveWhiteboard {...props} />;
+      return (
+        <ThemedAnimationStage>
+          <LiveWhiteboardDraw title={props.title || "IMAGINEv1"} bullets={props.bullets} />
+        </ThemedAnimationStage>
+      );
+    case "split-screen":
+      return (
+        <ThemedAnimationStage>
+          <SplitScreenContrast />
+        </ThemedAnimationStage>
+      );
+    case "discussion":
+      return (
+        <ThemedAnimationStage>
+          <ClassroomSpeechBubbles
+            remarks={[
+              "So it is like a battery?",
+              "Wait, draw the protons",
+              "Now I get it",
+            ]}
+          />
+        </ThemedAnimationStage>
+      );
+    case "sales-flow-teacher":
+      return <SalesFlow {...props} stage={1} />;
+    case "sales-flow-department-chair":
+      return <SalesFlow {...props} stage={2} />;
+    case "sales-flow-principal":
+      return <SalesFlow {...props} stage={3} />;
+    case "pilot-expansion-pilots":
+      return <PilotExpansion {...props} stage={1} />;
+    case "pilot-expansion-results":
+      return <PilotExpansion {...props} stage={2} />;
+    case "pilot-expansion-case-studies":
+      return <PilotExpansion {...props} stage={3} />;
+    case "pilot-expansion-expansion":
+      return <PilotExpansion {...props} stage={4} />;
+    case "tam-calc":
+      return <TamCalculation {...props} />;
+    case "competitive-table":
+      return (
+        <ThemedAnimationStage className="pitch-first-kind">
+          <AnimatedCompetitorComparisonTable />
+        </ThemedAnimationStage>
+      );
     case "school-value":
       return <SchoolValue {...props} />;
     case "value-flow-focus":
@@ -493,9 +1059,24 @@ export const PitchVisual = memo(function PitchVisual(props: PitchVisualProps) {
     case "school-collage":
       return <SchoolCollage {...props} />;
     case "market-total":
-      return <MarketTotal {...props} />;
+      return (
+        <ThemedAnimationStage>
+          <TamCounter
+            target={2.4}
+            prefix="$"
+            suffix="B"
+            label="Total addressable market / year"
+            aside="Dude. That is a lot of money."
+            decimals={1}
+          />
+        </ThemedAnimationStage>
+      );
     case "durham-map":
-      return <DurhamMap {...props} />;
+      return (
+        <ThemedAnimationStage>
+          <DurhamMapPin />
+        </ThemedAnimationStage>
+      );
     case "use-case-classroom":
       return <UseCaseStage {...props} kind="classroom" />;
     case "use-case-lecture-hall":
