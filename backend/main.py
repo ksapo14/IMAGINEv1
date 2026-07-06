@@ -2,13 +2,13 @@ import asyncio
 import json
 import os
 import time
-import urllib.error
-import urllib.request
 from collections import defaultdict, deque
 from collections.abc import Callable
 from threading import Lock
 from typing import Literal
 from urllib.parse import urlencode
+import urllib.error
+import urllib.request
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -85,18 +85,12 @@ class GenerateRequest(BaseModel):
     userInput: str = Field(..., min_length=1, max_length=4000)
 
 
-class VisualSource(BaseModel):
-    label: str
-    url: str
-    license: str
-
-
 class GeneratedVisual(BaseModel):
-    kind: Literal["searched", "generated"]
-    dataUrl: str
-    mimeType: str
+    kind: Literal["diagram", "generated"]
     alt: str
-    source: VisualSource | None
+    html: str | None = None
+    dataUrl: str | None = None
+    mimeType: str | None = None
 
 
 class GenerateResponse(BaseModel):

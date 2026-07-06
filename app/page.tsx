@@ -36,17 +36,18 @@ type DeepgramStatusResponse = {
   apiKeyMessage: string;
 };
 
-type GeneratedVisual = {
-  kind: "searched" | "generated";
-  dataUrl: string;
-  mimeType: string;
-  alt: string;
-  source: {
-    label: string;
-    url: string;
-    license: string;
-  } | null;
-};
+type GeneratedVisual =
+  | {
+      kind: "diagram";
+      html: string;
+      alt: string;
+    }
+  | {
+      kind: "generated";
+      dataUrl: string;
+      mimeType: string;
+      alt: string;
+    };
 
 type GenerateResponse = {
   title: string;
@@ -118,6 +119,100 @@ async function fetchDeepgramStatus() {
   }
 
   return (await response.json()) as DeepgramStatusResponse;
+}
+
+function getDiagramDocument(html: string) {
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    background: #f4f5f6;
+    color: #202124;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  .diagram {
+    width: min(100%, 760px);
+    min-height: 360px;
+    padding: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+  }
+  .flow, .row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  .stack {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 14px;
+    width: 100%;
+  }
+  .node, .lane {
+    border: 1px solid #cfd5dc;
+    background: #ffffff;
+    border-radius: 14px;
+    padding: 14px 16px;
+    min-width: 120px;
+    max-width: 220px;
+    text-align: center;
+    font-size: 15px;
+    line-height: 1.35;
+    font-weight: 600;
+  }
+  .node-primary { border-color: #2563eb; background: #eff6ff; }
+  .node-secondary { border-color: #0f766e; background: #f0fdfa; }
+  .node-accent { border-color: #c2410c; background: #fff7ed; }
+  .node-muted { color: #5f6368; background: #f8fafc; }
+  .arrow, .connector {
+    color: #64748b;
+    font-weight: 700;
+    font-size: 22px;
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 28px;
+    border-radius: 999px;
+    padding: 4px 10px;
+    background: #e2e8f0;
+    color: #334155;
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .caption {
+    color: #5f6368;
+    font-size: 13px;
+    line-height: 1.4;
+  }
+  .compact { padding: 8px 10px; min-width: 80px; }
+  svg { max-width: 100%; height: auto; }
+  @media (max-width: 520px) {
+    .diagram { min-height: 300px; padding: 18px; }
+    .node, .lane { max-width: 100%; }
+  }
+</style>
+</head>
+<body>${html}</body>
+</html>`;
 }
 
 export default function Home() {
@@ -475,28 +570,26 @@ export default function Home() {
 
           {result.visual ? (
             <div className="overflow-hidden rounded-[1.75rem] bg-[#f4f5f6]">
-              <img
-                src={result.visual.dataUrl}
-                alt={result.visual.alt}
-                className="max-h-[65dvh] w-full object-contain"
-              />
+              {result.visual.kind === "diagram" ? (
+                <iframe
+                  title={result.visual.alt}
+                  sandbox=""
+                  srcDoc={getDiagramDocument(result.visual.html)}
+                  className="h-[min(65dvh,520px)] w-full border-0"
+                />
+              ) : (
+                <img
+                  src={result.visual.dataUrl}
+                  alt={result.visual.alt}
+                  className="max-h-[65dvh] w-full object-contain"
+                />
+              )}
               <div className="px-5 py-3 text-xs leading-5 text-[#6f7378]">
-                {result.visual.kind === "searched" && result.visual.source ? (
-                  <p>
-                    Web image:{" "}
-                    <a
-                      href={result.visual.source.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="font-medium text-[#3c4043] underline decoration-[#aeb4b9] underline-offset-2 hover:decoration-[#3c4043]"
-                    >
-                      {result.visual.source.label}
-                    </a>
-                    <span> · {result.visual.source.license}</span>
-                  </p>
-                ) : (
-                  <p>AI-generated visual</p>
-                )}
+                <p>
+                  {result.visual.kind === "diagram"
+                    ? "HTML diagram"
+                    : "AI-generated visual"}
+                </p>
               </div>
             </div>
           ) : null}

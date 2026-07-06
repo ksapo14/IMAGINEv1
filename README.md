@@ -1,13 +1,14 @@
 # IMAGINEv1
 
 Real-time speech workspace that turns typed or transcribed input into concise
-notes and, when useful, one searched or generated visual.
+notes and, when useful, one generated diagram or visual.
 
 ```text
 typed input or Deepgram transcript
   -> Gemini 2.5 Flash Lite notes and visual strategy
-  -> grounded Gemini 2.5 Flash search for reusable real-world images
-  -> Gemini 2.5 Flash Image fallback or direct diagram generation
+  -> sanitized HTML diagram for flowcharts and live diagrams
+  -> Gemini 2.5 Flash Image only when a raster visual is better
+  -> persistent local visual cache for similar repeat prompts
   -> latest result
 ```
 
@@ -33,9 +34,8 @@ DEEPGRAM_API_KEY=your-deepgram-key
 GEMINI_API_KEY=your-gemini-key
 
 GEMINI_TEXT_MODEL=gemini-2.5-flash-lite
-GEMINI_SEARCH_MODEL=gemini-2.5-flash
 GEMINI_IMAGE_MODEL=gemini-2.5-flash-image
-IMAGE_SEARCH_ALLOWED_HOSTS=commons.wikimedia.org,upload.wikimedia.org
+VISUAL_CACHE_DIR=.cache/visuals
 ```
 
 Run the stack with `npm run dev`. The frontend uses port `3000` and the
@@ -45,16 +45,17 @@ FastAPI backend uses port `8010`.
 
 - Every manual submission makes one Flash Lite request.
 - Flash Lite returns no more than three bullets and chooses no visual,
-  reusable-image search, or generated imagery.
-- Grounded search runs only for real people, places, organisms, events,
-  artworks, and existing objects. Search output is capped at 160 tokens.
-- Repeated search queries reuse validated metadata for 30 minutes.
-- Diagram, process, and abstract-concept requests go directly to the image
-  model. Search failures fall back to that model once.
+  a sanitized HTML diagram, or generated imagery.
+- Flowcharts, processes, comparisons, systems, and abstract concepts render as
+  HTML diagrams, avoiding image-model cost.
+- Similar repeated visual prompts can reuse `.cache/visuals` with no Gemini
+  request.
+- Raster image prompts are prefixed with a no-text rule so diagrams do not
+  contain incorrect generated labels.
 - The image model runs at most once per submission. If it fails, completed
   notes remain visible without another retry.
 - Requests contain no conversation history and are limited to 4,000 input
-  characters and 256 text output tokens.
+  characters and 768 text output tokens.
 - The local backend permits 10 generation requests per client IP per minute.
 
 ## Secret handling
@@ -63,12 +64,9 @@ FastAPI backend uses port `8010`.
 never use a `NEXT_PUBLIC_` prefix. The Gemini key is sent from the backend in
 the `x-goog-api-key` header; it is not placed in URLs or API responses.
 
-Grounded-search URLs are treated as untrusted. By default, only Wikimedia
-Commons source pages and uploads are accepted. The backend rejects non-HTTPS,
-private-network, redirected, oversized, and unsupported image responses,
-then proxies valid bytes to the browser with linked source/license credit.
-Only add a host to `IMAGE_SEARCH_ALLOWED_HOSTS` when the host publishes
-reusable or public-domain media.
+Generated diagram HTML is sanitized on the backend and rendered by the
+frontend in a sandboxed frame. Scripts, links, event handlers, styles, and
+unknown classes are removed before the browser sees the diagram.
 
 `.env` and `.env.*` are excluded from Git and Docker build contexts, while
 `.env.example` contains names and non-secret defaults only. The Docker setup
