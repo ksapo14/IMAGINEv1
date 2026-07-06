@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import time
+import uuid
 from collections import defaultdict, deque
 from collections.abc import Callable
 from threading import Lock
@@ -79,6 +80,8 @@ class SlidingWindowRateLimiter:
 
 
 generation_rate_limiter = SlidingWindowRateLimiter()
+visual_jobs: dict[str, dict[str, object]] = {}
+visual_jobs_lock = Lock()
 
 
 class GenerateRequest(BaseModel):
@@ -98,6 +101,52 @@ class GenerateResponse(BaseModel):
     bullets: list[str]
     visual: GeneratedVisual | None
     warning: str | None
+    visualJobId: str | None = None
+
+
+class VisualJobResponse(BaseModel):
+    status: Literal["pending", "complete", "failed"]
+    visual: GeneratedVisual | None = None
+    warning: str | None = None
+
+
+async def run_visual_job(
+    job_id: str,
+    user_input: str,
+    title: str,
+    bullets: list[str],
+    visual_strategy: str,
+    visual_prompt: str,
+    visual_alt: str,
+) -> None:
+    visual = await gemini_pipeline.generate_visual(
+        visual_strategy,
+        visual_prompt,
+        visual_alt,
+    )
+    if visual is None:
+        with visual_jobs_lock:
+            visual_jobs[job_id] = {
+                "status": "failed",
+                "visual": None,
+                "warning": "The notes are ready, but the visual could not be generated.",
+            }
+        return
+
+    result = {
+        "title": title,
+        "bullets": bullets,
+        "visual": visual,
+        "warning": None,
+    }
+    gemini_pipeline.cache_result(user_input, result)
+
+    with visual_jobs_lock:
+        visual_jobs[job_id] = {
+            "status": "complete",
+            "visual": visual,
+            "warning": None,
+        }
 
 
 def get_deepgram_api_key() -> str:
@@ -207,7 +256,45 @@ async def generate_content(
     except GeminiProviderError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
 
+    visual_strategy = result.pop("_visualStrategy", "none")
+    visual_prompt = result.pop("_visualPrompt", "")
+    visual_alt = result.pop("_visualAlt", "")
+    if (
+        result.get("visual") is None
+        and visual_strategy in {"diagram", "image"}
+        and isinstance(visual_prompt, str)
+        and isinstance(visual_alt, str)
+    ):
+        job_id = uuid.uuid4().hex
+        result["visualJobId"] = job_id
+        with visual_jobs_lock:
+            visual_jobs[job_id] = {
+                "status": "pending",
+                "visual": None,
+                "warning": None,
+            }
+        asyncio.create_task(
+            run_visual_job(
+                job_id,
+                user_input,
+                str(result["title"]),
+                list(result["bullets"]),
+                str(visual_strategy),
+                visual_prompt,
+                visual_alt,
+            )
+        )
+
     return GenerateResponse(**result)
+
+
+@app.get("/api/visual/{job_id}", response_model=VisualJobResponse)
+def visual_job_status(job_id: str) -> VisualJobResponse:
+    with visual_jobs_lock:
+        job = visual_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Visual job was not found.")
+    return VisualJobResponse(**job)
 
 
 @app.get("/api/transcribe/status")

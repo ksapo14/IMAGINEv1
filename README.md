@@ -6,8 +6,8 @@ notes and, when useful, one generated diagram or visual.
 ```text
 typed input or Deepgram transcript
   -> Gemini 2.5 Flash Lite notes and visual strategy
-  -> sanitized HTML diagram for flowcharts and live diagrams
-  -> Gemini 2.5 Flash Image only when a raster visual is better
+  -> immediate notes response
+  -> async sanitized HTML diagram or raster visual job
   -> persistent local visual cache for similar repeat prompts
   -> latest result
 ```
@@ -43,19 +43,20 @@ FastAPI backend uses port `8010`.
 
 ## Cost controls
 
-- Every manual submission makes one Flash Lite request.
-- Flash Lite returns no more than three bullets and chooses no visual,
-  a sanitized HTML diagram, or generated imagery.
+- Every uncached manual submission first makes one small Flash Lite request for
+  notes and a visual brief.
+- Flash Lite returns no more than three bullets and chooses no visual, an HTML
+  diagram job, or generated imagery.
 - Flowcharts, processes, comparisons, systems, and abstract concepts render as
-  HTML diagrams, avoiding image-model cost.
-- Similar repeated visual prompts can reuse `.cache/visuals` with no Gemini
-  request.
+  richer async HTML diagrams, avoiding image-model cost.
+- Similar repeated prompts can reuse `.cache/visuals` with no Gemini request.
 - Raster image prompts are prefixed with a no-text rule so diagrams do not
   contain incorrect generated labels.
 - The image model runs at most once per submission. If it fails, completed
   notes remain visible without another retry.
 - Requests contain no conversation history and are limited to 4,000 input
-  characters and 768 text output tokens.
+  characters. The notes request is capped at 256 output tokens; async diagram
+  jobs are capped separately for more detail.
 - The local backend permits 10 generation requests per client IP per minute.
 
 ## Secret handling

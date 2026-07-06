@@ -15,8 +15,7 @@ from backend.services.gemini_pipeline import (
 def text_response(
     *,
     strategy: str = "none",
-    diagram_html: str = "",
-    image_prompt: str = "",
+    visual_prompt: str = "",
     visual_alt: str = "",
 ) -> dict[str, Any]:
     structured = {
@@ -26,8 +25,7 @@ def text_response(
             "ATP supplies usable energy for cellular work.",
         ],
         "visualStrategy": strategy,
-        "diagramHtml": diagram_html,
-        "imagePrompt": image_prompt,
+        "visualPrompt": visual_prompt,
         "visualAlt": visual_alt,
     }
     return {
@@ -35,6 +33,18 @@ def text_response(
             {
                 "content": {
                     "parts": [{"text": json.dumps(structured)}],
+                }
+            }
+        ]
+    }
+
+
+def diagram_response(html: str) -> dict[str, Any]:
+    return {
+        "candidates": [
+            {
+                "content": {
+                    "parts": [{"text": json.dumps({"html": html})}],
                 }
             }
         ]
@@ -99,25 +109,18 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
         request_body = json.loads(request.data.decode("utf-8"))
         self.assertEqual(
             request_body["generationConfig"]["maxOutputTokens"],
-            768,
+            256,
         )
         self.assertIsNone(result["visual"])
 
-    async def test_diagram_strategy_returns_sanitized_html_without_image_request(
+    async def test_diagram_strategy_returns_visual_job_spec_without_image_request(
         self,
     ) -> None:
         transport = StubTransport(
             [
                 text_response(
                     strategy="diagram",
-                    diagram_html=(
-                        '<div class="diagram fake" onclick="bad()">'
-                        '<div class="node node-primary">Glucose</div>'
-                        '<script>alert(1)</script>'
-                        '<span class="arrow">-></span>'
-                        '<div class="node node-secondary">ATP</div>'
-                        "</div>"
-                    ),
+                    visual_prompt="Show glucose becoming ATP through cellular respiration.",
                     visual_alt="Flowchart showing glucose becoming ATP.",
                 )
             ]
@@ -131,18 +134,54 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
         result = await pipeline.generate("Make a flowchart of ATP production.")
 
         self.assertEqual(len(transport.requests), 1)
-        self.assertEqual(result["visual"]["kind"], "diagram")
-        self.assertIn('class="diagram"', result["visual"]["html"])
-        self.assertIn('class="node node-primary"', result["visual"]["html"])
-        self.assertNotIn("onclick", result["visual"]["html"])
-        self.assertNotIn("script", result["visual"]["html"])
+        self.assertIsNone(result["visual"])
+        self.assertEqual(result["_visualStrategy"], "diagram")
+        self.assertIn("glucose", result["_visualPrompt"].lower())
+
+    async def test_generate_visual_returns_sanitized_rich_diagram(self) -> None:
+        transport = StubTransport(
+            [
+                diagram_response(
+                    '<section class="diagram fake" onclick="bad()">'
+                    '<div class="step input"><span class="step-number">1</span>'
+                    '<h3 class="title">Glucose enters</h3>'
+                    '<p class="detail">Chemical energy is available.</p></div>'
+                    '<script>alert(1)</script>'
+                    '<span class="arrow">-></span>'
+                    '<div class="step output"><strong>ATP</strong>'
+                    '<p class="note">Usable cell energy.</p></div>'
+                    "</section>"
+                )
+            ]
+        )
+        pipeline = GeminiPipeline(
+            api_key="server-secret",
+            transport=transport,
+            cache_enabled=False,
+        )
+
+        visual = await pipeline.generate_visual(
+            "diagram",
+            "Show glucose becoming ATP through cellular respiration.",
+            "Flowchart showing glucose becoming ATP.",
+        )
+
+        self.assertEqual(len(transport.requests), 1)
+        request_body = json.loads(transport.requests[0][0].data.decode("utf-8"))
+        self.assertEqual(request_body["generationConfig"]["maxOutputTokens"], 1800)
+        self.assertEqual(visual["kind"], "diagram")
+        self.assertIn('class="diagram"', visual["html"])
+        self.assertIn('class="step input"', visual["html"])
+        self.assertIn("<h3", visual["html"])
+        self.assertNotIn("onclick", visual["html"])
+        self.assertNotIn("script", visual["html"])
 
     async def test_image_strategy_uses_no_text_prompt_prefix(self) -> None:
         transport = StubTransport(
             [
                 text_response(
                     strategy="image",
-                    image_prompt="A clean illustration of ATP production.",
+                    visual_prompt="A clean illustration of ATP production.",
                     visual_alt="Illustration showing ATP production.",
                 ),
                 image_response(),
@@ -155,6 +194,11 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
         )
 
         result = await pipeline.generate("Draw how a cell makes ATP.")
+        visual = await pipeline.generate_visual(
+            result["_visualStrategy"],
+            result["_visualPrompt"],
+            result["_visualAlt"],
+        )
 
         self.assertEqual(len(transport.requests), 2)
         image_request, _ = transport.requests[1]
@@ -162,8 +206,8 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
         image_body = json.loads(image_request.data.decode("utf-8"))
         prompt = image_body["contents"][0]["parts"][0]["text"]
         self.assertIn("absolutely no text", prompt)
-        self.assertEqual(result["visual"]["kind"], "generated")
-        self.assertNotIn("source", result["visual"])
+        self.assertEqual(visual["kind"], "generated")
+        self.assertNotIn("source", visual)
 
     async def test_repeated_similar_input_uses_persistent_cache(self) -> None:
         cache_dir = Path.cwd() / ".cache" / f"test-visual-cache-{uuid.uuid4().hex}"
@@ -171,15 +215,16 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
             [
                 text_response(
                     strategy="diagram",
-                    diagram_html=(
-                        '<div class="diagram">'
-                        '<div class="node node-primary">Evaporation</div>'
-                        '<span class="arrow">-></span>'
-                        '<div class="node node-secondary">Condensation</div>'
-                        "</div>"
-                    ),
+                    visual_prompt="Show evaporation, condensation, and precipitation in the water cycle.",
                     visual_alt="Water cycle flowchart.",
-                )
+                ),
+                diagram_response(
+                    '<section class="diagram">'
+                    '<div class="step input">Evaporation</div>'
+                    '<span class="arrow">-></span>'
+                    '<div class="step output">Condensation</div>'
+                    "</section>"
+                ),
             ]
         )
         pipeline = GeminiPipeline(
@@ -190,6 +235,21 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
 
         first = await pipeline.generate(
             "Create a flowchart diagram of water cycle evaporation condensation precipitation."
+        )
+        visual = await pipeline.generate_visual(
+            first["_visualStrategy"],
+            first["_visualPrompt"],
+            first["_visualAlt"],
+        )
+        first_result = {
+            "title": first["title"],
+            "bullets": first["bullets"],
+            "visual": visual,
+            "warning": None,
+        }
+        pipeline.cache_result(
+            "Create a flowchart diagram of water cycle evaporation condensation precipitation.",
+            first_result,
         )
 
         cached_transport = StubTransport([])
@@ -202,7 +262,7 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
             "Make a flowchart diagram of water cycle evaporation condensation precipitation."
         )
 
-        self.assertEqual(first, second)
+        self.assertEqual(first_result, second)
         self.assertEqual(cached_transport.requests, [])
 
     async def test_image_failure_returns_notes_without_retry(self) -> None:
@@ -210,7 +270,7 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
             [
                 text_response(
                     strategy="image",
-                    image_prompt="A diagram of ATP production.",
+                    visual_prompt="A diagram of ATP production.",
                     visual_alt="ATP production diagram.",
                 ),
                 {
@@ -227,10 +287,14 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
         )
 
         result = await pipeline.generate("Draw ATP production.")
+        visual = await pipeline.generate_visual(
+            result["_visualStrategy"],
+            result["_visualPrompt"],
+            result["_visualAlt"],
+        )
 
         self.assertEqual(len(transport.requests), 2)
-        self.assertIsNone(result["visual"])
-        self.assertIsNotNone(result["warning"])
+        self.assertIsNone(visual)
 
     async def test_missing_key_fails_before_any_request(self) -> None:
         transport = StubTransport([])

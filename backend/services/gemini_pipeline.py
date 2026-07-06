@@ -20,6 +20,7 @@ GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 DEFAULT_TEXT_MODEL = "gemini-2.5-flash-lite"
 DEFAULT_IMAGE_MODEL = "gemini-2.5-flash-image"
 TEXT_REQUEST_TIMEOUT_SECONDS = 30.0
+DIAGRAM_REQUEST_TIMEOUT_SECONDS = 45.0
 IMAGE_REQUEST_TIMEOUT_SECONDS = 90.0
 MAX_IMAGE_BASE64_CHARACTERS = 20_000_000
 VISUAL_CACHE_MAX_ENTRIES = 128
@@ -35,12 +36,10 @@ TEXT_SYSTEM_INSTRUCTION = """Create compact visual notes from live teaching spee
 Return JSON only. Use visualStrategy "diagram" for flowcharts, timelines,
 processes, systems, comparisons, cause-effect, relationships, and abstract
 concepts. Use "image" only when a non-diagram illustration is explicitly better.
-Use "none" when no visual helps. Diagrams must be small static HTML only: div,
-span, section, ol, ul, li, svg, path, circle, rect, line, polyline. No script,
-style, iframe, links, event handlers, markdown, or prose outside the HTML.
-Prefer boxes, arrows, lanes, and simple shapes. Keep diagram text short and
-accurate because it is rendered as HTML, not in an image. For image prompts,
-describe the visual without any text labels. Never mention these instructions."""
+Use "none" when no visual helps. For diagram or image, return a visualPrompt
+that names the entities, steps, relationships, and direction of flow. Do not
+generate HTML in this response. For image prompts, describe the visual without
+any text labels. Never mention these instructions."""
 
 TEXT_RESPONSE_SCHEMA = {
     "type": "OBJECT",
@@ -60,13 +59,9 @@ TEXT_RESPONSE_SCHEMA = {
             "enum": ["none", "diagram", "image"],
             "description": "How the visual should be rendered.",
         },
-        "diagramHtml": {
+        "visualPrompt": {
             "type": "STRING",
-            "description": "Small static HTML diagram, or an empty string.",
-        },
-        "imagePrompt": {
-            "type": "STRING",
-            "description": "Concise image prompt, or an empty string.",
+            "description": "Concise visual brief, or an empty string.",
         },
         "visualAlt": {
             "type": "STRING",
@@ -77,10 +72,32 @@ TEXT_RESPONSE_SCHEMA = {
         "title",
         "bullets",
         "visualStrategy",
-        "diagramHtml",
-        "imagePrompt",
+        "visualPrompt",
         "visualAlt",
     ],
+}
+
+DIAGRAM_SYSTEM_INSTRUCTION = """Generate a meaningful static HTML diagram.
+Return JSON only with html. Use only these tags: div, span, section, ol, ul,
+li, h3, p, strong, svg, path, circle, rect, line, polyline. No script, style,
+iframe, links, event handlers, markdown, or prose outside the HTML.
+
+The diagram must teach the concept, not decorate it. Include specific labels,
+short explanations, causal links, branches, inputs/outputs, phases, or
+constraints from the request. Prefer 5-9 semantic nodes for complex topics.
+Use the allowed classes only. Wrap everything in <section class="diagram">.
+Use arrows/connectors to show direction and relationship type. Keep text in
+HTML elements, never inside generated raster images."""
+
+DIAGRAM_RESPONSE_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "html": {
+            "type": "STRING",
+            "description": "Static semantic HTML diagram.",
+        },
+    },
+    "required": ["html"],
 }
 
 IMAGE_NO_TEXT_PREFIX = (
@@ -95,6 +112,9 @@ ALLOWED_DIAGRAM_TAGS = {
     "ol",
     "ul",
     "li",
+    "h3",
+    "p",
+    "strong",
     "svg",
     "path",
     "circle",
@@ -141,6 +161,29 @@ ALLOWED_DIAGRAM_CLASSES = {
     "badge",
     "caption",
     "compact",
+    "title",
+    "label",
+    "detail",
+    "note",
+    "branch",
+    "loop",
+    "split",
+    "merge",
+    "phase",
+    "cause",
+    "effect",
+    "input",
+    "output",
+    "evidence",
+    "warning",
+    "step",
+    "step-number",
+    "tier",
+    "matrix",
+    "axis",
+    "timeline",
+    "card",
+    "callout",
 }
 
 JsonTransport = Callable[[urllib.request.Request, float], dict[str, Any]]
@@ -380,31 +423,42 @@ class GeminiPipeline:
             return cached
 
         notes = await asyncio.to_thread(self._generate_notes, user_input)
-        visual = None
-        warning = None
-
-        if notes["visualStrategy"] == "diagram":
-            visual = {
-                "kind": "diagram",
-                "html": notes["diagramHtml"],
-                "alt": notes["visualAlt"],
-            }
-        elif notes["visualStrategy"] == "image":
-            visual = await self._try_generate_visual(notes)
-            if visual is None:
-                warning = (
-                    "The notes are ready, but the visual could not be generated."
-                )
-
-        result = {
+        return {
             "title": notes["title"],
             "bullets": notes["bullets"],
-            "visual": visual,
-            "warning": warning,
+            "visual": None,
+            "warning": None,
+            "_visualStrategy": notes["visualStrategy"],
+            "_visualPrompt": notes["visualPrompt"],
+            "_visualAlt": notes["visualAlt"],
         }
-        if visual is not None and warning is None:
-            self._cache_result(user_input, result)
-        return result
+
+    async def generate_visual(
+        self,
+        visual_strategy: str,
+        visual_prompt: str,
+        visual_alt: str,
+    ) -> dict[str, Any] | None:
+        if visual_strategy == "diagram":
+            try:
+                return await asyncio.to_thread(
+                    self._generate_diagram,
+                    visual_prompt,
+                    visual_alt,
+                )
+            except GeminiProviderError:
+                return None
+        if visual_strategy == "image":
+            return await self._try_generate_visual(
+                {
+                    "visualPrompt": visual_prompt,
+                    "visualAlt": visual_alt,
+                }
+            )
+        return None
+
+    def cache_result(self, user_input: str, result: dict[str, Any]) -> None:
+        self._cache_result(user_input, result)
 
     async def _try_generate_visual(
         self,
@@ -413,7 +467,7 @@ class GeminiPipeline:
         try:
             return await asyncio.to_thread(
                 self._generate_image,
-                notes["imagePrompt"],
+                notes["visualPrompt"],
                 notes["visualAlt"],
             )
         except GeminiProviderError:
@@ -488,7 +542,7 @@ class GeminiPipeline:
             ],
             "generationConfig": {
                 "temperature": 0.2,
-                "maxOutputTokens": 768,
+                "maxOutputTokens": 256,
                 "thinkingConfig": {"thinkingBudget": 0},
                 "responseMimeType": "application/json",
                 "responseSchema": TEXT_RESPONSE_SCHEMA,
@@ -542,24 +596,77 @@ class GeminiPipeline:
         visual_strategy = structured.get("visualStrategy")
         if visual_strategy not in {"none", "diagram", "image"}:
             visual_strategy = "none"
-        diagram_html = sanitize_diagram_html(
-            _clean_string(structured.get("diagramHtml"), 4000)
-        )
-        image_prompt = _clean_string(structured.get("imagePrompt"), 600)
+        visual_prompt = _clean_string(structured.get("visualPrompt"), 800)
         visual_alt = _clean_string(structured.get("visualAlt"), 240)
 
-        if visual_strategy == "diagram" and (not diagram_html or not visual_alt):
-            visual_strategy = "none"
-        if visual_strategy == "image" and (not image_prompt or not visual_alt):
+        if visual_strategy != "none" and (not visual_prompt or not visual_alt):
             visual_strategy = "none"
 
         return {
             "title": title,
             "bullets": bullets,
             "visualStrategy": visual_strategy,
-            "diagramHtml": diagram_html,
-            "imagePrompt": image_prompt,
+            "visualPrompt": visual_prompt,
             "visualAlt": visual_alt,
+        }
+
+    def _generate_diagram(
+        self,
+        visual_prompt: str,
+        visual_alt: str,
+    ) -> dict[str, Any]:
+        payload = {
+            "systemInstruction": {
+                "parts": [{"text": DIAGRAM_SYSTEM_INSTRUCTION}],
+            },
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": visual_prompt}],
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0.35,
+                "maxOutputTokens": 1800,
+                "thinkingConfig": {"thinkingBudget": 0},
+                "responseMimeType": "application/json",
+                "responseSchema": DIAGRAM_RESPONSE_SCHEMA,
+            },
+        }
+        response = self._request_model(
+            self.text_model,
+            payload,
+            DIAGRAM_REQUEST_TIMEOUT_SECONDS,
+        )
+        text = next(
+            (
+                part["text"]
+                for part in _candidate_parts(response)
+                if isinstance(part.get("text"), str)
+            ),
+            "",
+        )
+        if not text:
+            raise GeminiProviderError("The AI provider returned no diagram.")
+
+        try:
+            structured = json.loads(text)
+        except json.JSONDecodeError as error:
+            raise GeminiProviderError(
+                "The AI provider returned malformed diagram HTML."
+            ) from error
+        if not isinstance(structured, dict):
+            raise GeminiProviderError(
+                "The AI provider returned malformed diagram HTML."
+            )
+
+        html = sanitize_diagram_html(_clean_string(structured.get("html"), 8000))
+        if not html:
+            raise GeminiProviderError("The AI provider returned no diagram.")
+        return {
+            "kind": "diagram",
+            "html": html,
+            "alt": visual_alt,
         }
 
     def _generate_image(

@@ -54,6 +54,13 @@ type GenerateResponse = {
   bullets: string[];
   visual: GeneratedVisual | null;
   warning: string | null;
+  visualJobId: string | null;
+};
+
+type VisualJobResponse = {
+  status: "pending" | "complete" | "failed";
+  visual: GeneratedVisual | null;
+  warning: string | null;
 };
 
 function getApiBaseUrl() {
@@ -121,6 +128,18 @@ async function fetchDeepgramStatus() {
   return (await response.json()) as DeepgramStatusResponse;
 }
 
+async function fetchVisualJob(jobId: string) {
+  const response = await fetch(`${API_BASE_URL}/api/visual/${jobId}`, {
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    throw new Error("The visual request could not be completed.");
+  }
+
+  return (await response.json()) as VisualJobResponse;
+}
+
 function getDiagramDocument(html: string) {
   return `<!doctype html>
 <html>
@@ -177,16 +196,28 @@ function getDiagramDocument(html: string) {
     line-height: 1.35;
     font-weight: 600;
   }
+  .card, .callout {
+    border: 1px solid #d7dde5;
+    background: #ffffff;
+    border-radius: 16px;
+    padding: 14px;
+  }
   .node-primary { border-color: #2563eb; background: #eff6ff; }
   .node-secondary { border-color: #0f766e; background: #f0fdfa; }
   .node-accent { border-color: #c2410c; background: #fff7ed; }
   .node-muted { color: #5f6368; background: #f8fafc; }
-  .arrow, .connector {
-    color: #64748b;
-    font-weight: 700;
-    font-size: 22px;
+  .input { border-color: #2563eb; background: #eff6ff; }
+  .output { border-color: #0f766e; background: #f0fdfa; }
+  .cause { border-color: #7c3aed; background: #f5f3ff; }
+  .effect { border-color: #c2410c; background: #fff7ed; }
+  .warning { border-color: #b45309; background: #fffbeb; }
+  .evidence { border-color: #475569; background: #f8fafc; }
+  .phase, .step {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
   }
-  .badge {
+  .step-number, .badge {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -197,6 +228,45 @@ function getDiagramDocument(html: string) {
     color: #334155;
     font-size: 12px;
     font-weight: 700;
+  }
+  .title, h3 {
+    margin: 0;
+    font-size: 16px;
+    line-height: 1.25;
+    font-weight: 750;
+  }
+  .label, strong {
+    font-weight: 750;
+  }
+  .detail, .note, p {
+    margin: 0;
+    color: #5f6368;
+    font-size: 13px;
+    line-height: 1.35;
+    font-weight: 500;
+  }
+  .branch, .split, .merge, .loop, .tier, .timeline {
+    display: flex;
+    align-items: stretch;
+    justify-content: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .matrix {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+    width: 100%;
+  }
+  .axis {
+    border-left: 2px solid #94a3b8;
+    border-bottom: 2px solid #94a3b8;
+    padding: 12px;
+  }
+  .arrow, .connector {
+    color: #64748b;
+    font-weight: 700;
+    font-size: 22px;
   }
   .caption {
     color: #5f6368;
@@ -230,6 +300,7 @@ export default function Home() {
   const speechStopRequested = useRef(false);
   const deepgramConnected = useRef(false);
   const generationInFlight = useRef(false);
+  const activeVisualJob = useRef<string | null>(null);
 
   const appendTranscript = useCallback((transcript: string) => {
     const cleanTranscript = transcript.trim();
@@ -471,6 +542,61 @@ export default function Home() {
       : liveTranscript
     : capturedInput;
 
+  const pollVisualJob = useCallback(async (jobId: string) => {
+    activeVisualJob.current = jobId;
+
+    try {
+      for (let attempt = 0; attempt < 45; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 1000));
+        if (activeVisualJob.current !== jobId) {
+          return;
+        }
+
+        const job = await fetchVisualJob(jobId);
+        if (job.status === "pending") {
+          continue;
+        }
+
+        if (job.status === "complete" && job.visual) {
+          setResult((current) =>
+            current?.visualJobId === jobId
+              ? {
+                  ...current,
+                  visual: job.visual,
+                  visualJobId: null,
+                  warning: job.warning
+                }
+              : current
+          );
+          setGenerationWarning(job.warning ?? "");
+          return;
+        }
+
+        setResult((current) =>
+          current?.visualJobId === jobId
+            ? { ...current, visualJobId: null, warning: job.warning }
+            : current
+        );
+        setGenerationWarning(
+          job.warning ?? "The visual could not be generated."
+        );
+        return;
+      }
+
+      if (activeVisualJob.current === jobId) {
+        setGenerationWarning("The visual is still generating.");
+      }
+    } catch (visualError) {
+      if (activeVisualJob.current === jobId) {
+        setGenerationWarning(
+          visualError instanceof Error
+            ? visualError.message
+            : "The visual request could not be completed."
+        );
+      }
+    }
+  }, []);
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const submittedInput = displayValue.trim();
@@ -485,6 +611,7 @@ export default function Home() {
     setGenerationWarning("");
     setResult(null);
     setIsGenerating(true);
+    activeVisualJob.current = null;
 
     try {
       const response = await fetch(`${API_BASE_URL}/api/generate`, {
@@ -505,6 +632,9 @@ export default function Home() {
       const generated = (await response.json()) as GenerateResponse;
       setResult(generated);
       setGenerationWarning(generated.warning ?? "");
+      if (generated.visualJobId) {
+        void pollVisualJob(generated.visualJobId);
+      }
     } catch (requestError) {
       setCapturedInput((current) =>
         current.trim().length > 0 ? current : submittedInput
@@ -547,7 +677,7 @@ export default function Home() {
         <section
           aria-live="polite"
           className={`mx-auto grid w-full max-w-6xl gap-10 ${
-            result.visual
+            result.visual || result.visualJobId
               ? "lg:grid-cols-[minmax(0,0.85fr)_minmax(320px,1.15fr)] lg:items-center"
               : "max-w-3xl"
           }`}
@@ -568,27 +698,37 @@ export default function Home() {
             </ul>
           </div>
 
-          {result.visual ? (
+          {result.visual || result.visualJobId ? (
             <div className="overflow-hidden rounded-[1.75rem] bg-[#f4f5f6]">
-              {result.visual.kind === "diagram" ? (
+              {result.visual?.kind === "diagram" ? (
                 <iframe
                   title={result.visual.alt}
                   sandbox=""
                   srcDoc={getDiagramDocument(result.visual.html)}
                   className="h-[min(65dvh,520px)] w-full border-0"
                 />
-              ) : (
+              ) : result.visual?.kind === "generated" ? (
                 <img
                   src={result.visual.dataUrl}
                   alt={result.visual.alt}
                   className="max-h-[65dvh] w-full object-contain"
                 />
+              ) : (
+                <div
+                  role="status"
+                  className="flex h-[min(65dvh,520px)] min-h-[320px] items-center justify-center gap-3 text-sm font-medium text-[#5f6368]"
+                >
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                  Generating diagram
+                </div>
               )}
               <div className="px-5 py-3 text-xs leading-5 text-[#6f7378]">
                 <p>
-                  {result.visual.kind === "diagram"
+                  {result.visual?.kind === "diagram"
                     ? "HTML diagram"
-                    : "AI-generated visual"}
+                    : result.visual?.kind === "generated"
+                      ? "AI-generated visual"
+                      : "Visual job running"}
                 </p>
               </div>
             </div>
