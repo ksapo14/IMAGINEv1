@@ -1,15 +1,27 @@
 import asyncio
 import json
 import os
+import time
 import urllib.error
 import urllib.request
+from collections import defaultdict, deque
+from collections.abc import Callable
+from threading import Lock
+from typing import Literal
 from urllib.parse import urlencode
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.websockets import WebSocket, WebSocketDisconnect
+from pydantic import BaseModel, Field
 import websockets
 from dotenv import load_dotenv
+
+from .services.gemini_pipeline import (
+    GeminiConfigurationError,
+    GeminiPipeline,
+    GeminiProviderError,
+)
 
 load_dotenv()
 
@@ -34,6 +46,64 @@ app.add_middleware(
 
 DEEPGRAM_AUTH_TOKEN_URL = "https://api.deepgram.com/v1/auth/token"
 DEEPGRAM_FLUX_LISTEN_URL = "wss://api.deepgram.com/v2/listen"
+gemini_pipeline = GeminiPipeline()
+
+
+class SlidingWindowRateLimiter:
+    def __init__(
+        self,
+        limit: int = 10,
+        window_seconds: float = 60.0,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self.limit = limit
+        self.window_seconds = window_seconds
+        self.clock = clock
+        self.requests: defaultdict[str, deque[float]] = defaultdict(deque)
+        self.lock = Lock()
+
+    def allow(self, client_key: str) -> bool:
+        now = self.clock()
+        cutoff = now - self.window_seconds
+
+        with self.lock:
+            recent = self.requests[client_key]
+            while recent and recent[0] <= cutoff:
+                recent.popleft()
+
+            if len(recent) >= self.limit:
+                return False
+
+            recent.append(now)
+            return True
+
+
+generation_rate_limiter = SlidingWindowRateLimiter()
+
+
+class GenerateRequest(BaseModel):
+    userInput: str = Field(..., min_length=1, max_length=4000)
+
+
+class VisualSource(BaseModel):
+    label: str
+    url: str
+    license: str
+
+
+class GeneratedVisual(BaseModel):
+    kind: Literal["searched", "generated"]
+    dataUrl: str
+    mimeType: str
+    alt: str
+    source: VisualSource | None
+
+
+class GenerateResponse(BaseModel):
+    title: str
+    bullets: list[str]
+    visual: GeneratedVisual | None
+    warning: str | None
 
 
 def get_deepgram_api_key() -> str:
@@ -117,6 +187,33 @@ def check_deepgram_api_key(timeout_seconds: float = 8.0) -> dict[str, str | bool
 @app.get("/health")
 def health_check() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.post("/api/generate", response_model=GenerateResponse)
+async def generate_content(
+    payload: GenerateRequest,
+    request: Request,
+) -> GenerateResponse:
+    """Generate concise notes and, only when useful, one visual."""
+    user_input = payload.userInput.strip()
+    if not user_input:
+        raise HTTPException(status_code=422, detail="Input cannot be empty.")
+
+    client_key = request.client.host if request.client else "unknown"
+    if not generation_rate_limiter.allow(client_key):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many generation requests. Please wait and try again.",
+        )
+
+    try:
+        result = await gemini_pipeline.generate(user_input)
+    except GeminiConfigurationError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except GeminiProviderError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+    return GenerateResponse(**result)
 
 
 @app.get("/api/transcribe/status")

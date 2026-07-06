@@ -1,7 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, Mic, MicOff } from "lucide-react";
+import {
+  FormEvent,
+  KeyboardEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState
+} from "react";
+import { ArrowUp, Loader2, Mic, MicOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -27,6 +34,25 @@ type DeepgramStatusResponse = {
   configured: boolean;
   apiKeyStatus: "not_checked" | "missing" | "valid" | "invalid" | "unreachable" | "error";
   apiKeyMessage: string;
+};
+
+type GeneratedVisual = {
+  kind: "searched" | "generated";
+  dataUrl: string;
+  mimeType: string;
+  alt: string;
+  source: {
+    label: string;
+    url: string;
+    license: string;
+  } | null;
+};
+
+type GenerateResponse = {
+  title: string;
+  bullets: string[];
+  visual: GeneratedVisual | null;
+  warning: string | null;
 };
 
 function getApiBaseUrl() {
@@ -99,12 +125,16 @@ export default function Home() {
   const [liveTranscript, setLiveTranscript] = useState("");
   const [error, setError] = useState("");
   const [speechNotice, setSpeechNotice] = useState("");
+  const [generationWarning, setGenerationWarning] = useState("");
   const [speechStatus, setSpeechStatus] = useState<SpeechStatus>("idle");
+  const [result, setResult] = useState<GenerateResponse | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
   const mediaRecorder = useRef<MediaRecorder | null>(null);
   const microphoneStream = useRef<MediaStream | null>(null);
   const transcriptionSocket = useRef<WebSocket | null>(null);
   const speechStopRequested = useRef(false);
   const deepgramConnected = useRef(false);
+  const generationInFlight = useRef(false);
 
   const appendTranscript = useCallback((transcript: string) => {
     const cleanTranscript = transcript.trim();
@@ -346,97 +376,212 @@ export default function Home() {
       : liveTranscript
     : capturedInput;
 
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const submittedInput = displayValue.trim();
+    if (!submittedInput || generationInFlight.current) {
+      return;
+    }
+
+    generationInFlight.current = true;
+    setCapturedInput("");
+    setLiveTranscript("");
+    setError("");
+    setGenerationWarning("");
+    setResult(null);
+    setIsGenerating(true);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userInput: submittedInput })
+      });
+
+      if (!response.ok) {
+        const problem = (await response.json().catch(() => null)) as {
+          detail?: string;
+        } | null;
+        throw new Error(
+          problem?.detail ?? "The generation request could not be completed."
+        );
+      }
+
+      const generated = (await response.json()) as GenerateResponse;
+      setResult(generated);
+      setGenerationWarning(generated.warning ?? "");
+    } catch (requestError) {
+      setCapturedInput((current) =>
+        current.trim().length > 0 ? current : submittedInput
+      );
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "The generation request could not be completed."
+      );
+    } finally {
+      generationInFlight.current = false;
+      setIsGenerating(false);
+    }
+  }
+
+  function handleInputKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (
+      event.key !== "Enter" ||
+      event.shiftKey ||
+      event.nativeEvent.isComposing
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    event.currentTarget.form?.requestSubmit();
+  }
+
   return (
-    <main className="min-h-screen bg-white px-4 py-6 text-foreground md:px-8">
-      <section className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-5xl flex-col">
-        <header className="flex items-center justify-between border-b border-border pb-4">
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight">IMAGINEv1</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Speech input scaffold
-            </p>
-          </div>
-          <span className="rounded-full bg-muted px-3 py-1 text-xs font-medium text-muted-foreground">
-            Generation not configured
-          </span>
-        </header>
-
-        <div className="flex flex-1 items-center justify-center px-6 text-center">
-          <div className="max-w-md">
-            <p className="text-lg font-medium">Blank workspace</p>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              Keyword triggers and presentation slides have been removed.
-              Captured input is ready for the future real-time generation
-              pipeline.
-            </p>
-          </div>
+    <main className="relative flex min-h-[100dvh] items-center justify-center bg-white px-6 pb-32 pt-12 text-foreground">
+      {isGenerating ? (
+        <div
+          role="status"
+          className="flex items-center gap-3 text-lg font-medium text-[#5f6368]"
+        >
+          <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+          Generating notes
         </div>
-
-        {(error || speechNotice) ? (
-          <p
-            className={`mb-3 rounded border px-4 py-3 text-sm ${
-              error
-                ? "border-red-200 bg-red-50 text-red-700"
-                : "border-border bg-muted text-muted-foreground"
-            }`}
-          >
-            {error || speechNotice}
-          </p>
-        ) : null}
-
-        <div className="grid gap-3 border-t border-border pt-4 md:grid-cols-[1fr_auto] md:items-end">
+      ) : result ? (
+        <section
+          aria-live="polite"
+          className={`mx-auto grid w-full max-w-6xl gap-10 ${
+            result.visual
+              ? "lg:grid-cols-[minmax(0,0.85fr)_minmax(320px,1.15fr)] lg:items-center"
+              : "max-w-3xl"
+          }`}
+        >
           <div>
-            <label
-              htmlFor="speech-input"
-              className="mb-2 block text-sm font-medium"
-            >
-              Captured speech
-            </label>
-            <Textarea
-              id="speech-input"
-              value={displayValue}
-              onChange={(event) => {
-                setCapturedInput(event.target.value);
-                setLiveTranscript("");
-              }}
-              placeholder="Type here or start the microphone..."
-              rows={3}
-            />
+            <h1 className="text-balance text-3xl font-semibold leading-tight tracking-[-0.035em] text-[#202124] sm:text-5xl">
+              {result.title}
+            </h1>
+            <ul className="mt-8 space-y-4 text-lg leading-8 text-[#4f5358]">
+              {result.bullets.map((bullet, index) => (
+                <li
+                  key={`${bullet}-${index}`}
+                  className="border-l-2 border-[#c7cbcf] pl-5"
+                >
+                  {bullet}
+                </li>
+              ))}
+            </ul>
           </div>
-          <div className="flex gap-2 md:flex-col">
-            <Button
-              type="button"
-              onClick={() => void startTranscription()}
-              className={`flex-1 md:w-40 ${
-                speechStatus === "idle"
-                  ? ""
-                  : "bg-red-600 text-white hover:opacity-90"
-              }`}
-            >
-              {speechStatus === "connecting" ? (
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-              ) : speechStatus === "listening" ? (
-                <MicOff className="h-4 w-4" aria-hidden="true" />
-              ) : (
-                <Mic className="h-4 w-4" aria-hidden="true" />
-              )}
-              {speechStatus === "idle" ? "Start mic" : "Stop mic"}
-            </Button>
-            <Button
-              type="button"
-              disabled={!capturedInput && !liveTranscript}
-              onClick={() => {
-                setCapturedInput("");
-                setLiveTranscript("");
-                setError("");
-              }}
-              className="flex-1 bg-muted text-foreground shadow-none md:w-40"
-            >
-              Clear input
-            </Button>
-          </div>
+
+          {result.visual ? (
+            <div className="overflow-hidden rounded-[1.75rem] bg-[#f4f5f6]">
+              <img
+                src={result.visual.dataUrl}
+                alt={result.visual.alt}
+                className="max-h-[65dvh] w-full object-contain"
+              />
+              <div className="px-5 py-3 text-xs leading-5 text-[#6f7378]">
+                {result.visual.kind === "searched" && result.visual.source ? (
+                  <p>
+                    Web image:{" "}
+                    <a
+                      href={result.visual.source.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-medium text-[#3c4043] underline decoration-[#aeb4b9] underline-offset-2 hover:decoration-[#3c4043]"
+                    >
+                      {result.visual.source.label}
+                    </a>
+                    <span> · {result.visual.source.license}</span>
+                  </p>
+                ) : (
+                  <p>AI-generated visual</p>
+                )}
+              </div>
+            </div>
+          ) : null}
+        </section>
+      ) : (
+        <h1 className="text-balance text-center text-2xl font-medium tracking-[-0.025em] text-[#202124] sm:text-3xl">
+          Start speaking to generate
+        </h1>
+      )}
+
+      {error ? (
+        <div
+          role="alert"
+          className="fixed left-1/2 top-5 z-50 w-[min(calc(100%-2rem),28rem)] -translate-x-1/2 rounded-2xl border border-red-200 bg-red-50 px-5 py-3 text-center text-sm text-red-700 shadow-[0_14px_40px_rgba(127,29,29,0.12)]"
+        >
+          {error}
         </div>
-      </section>
+      ) : generationWarning ? (
+        <div
+          role="status"
+          className="fixed left-1/2 top-5 z-50 w-[min(calc(100%-2rem),28rem)] -translate-x-1/2 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-3 text-center text-sm text-amber-800 shadow-[0_14px_40px_rgba(120,80,20,0.10)]"
+        >
+          {generationWarning}
+        </div>
+      ) : speechNotice ? (
+        <div
+          role="status"
+          className="fixed left-1/2 top-5 z-50 w-[min(calc(100%-2rem),28rem)] -translate-x-1/2 rounded-2xl border border-border bg-white px-5 py-3 text-center text-sm text-muted-foreground shadow-[0_14px_40px_rgba(30,41,59,0.10)]"
+        >
+          {speechNotice}
+        </div>
+      ) : null}
+
+      <form
+        onSubmit={handleSubmit}
+        className="fixed inset-x-4 bottom-4 z-40 mx-auto flex max-w-3xl items-end gap-2 rounded-[2rem] border border-border bg-white p-1.5 shadow-[0_16px_48px_rgba(30,41,59,0.12)] sm:bottom-6"
+      >
+        <label htmlFor="speech-input" className="sr-only">
+          Speech input
+        </label>
+        <Textarea
+          id="speech-input"
+          value={displayValue}
+          onChange={(event) => {
+            setCapturedInput(event.target.value);
+            setLiveTranscript("");
+          }}
+          onKeyDown={handleInputKeyDown}
+          placeholder="Type here or start speaking..."
+          rows={1}
+          className="min-h-14 flex-1 resize-none rounded-[1.65rem] border-0 px-5 py-[1.05rem] text-base leading-6 shadow-none focus:ring-0"
+        />
+        <Button
+          type="submit"
+          disabled={!displayValue.trim() || isGenerating}
+          className="h-14 w-14 shrink-0 rounded-full bg-[#eceff1] px-0 text-[#202124] transition duration-200 hover:bg-[#e2e6e9] active:scale-[0.97]"
+          aria-label="Submit input"
+        >
+          {isGenerating ? (
+            <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+          ) : (
+            <ArrowUp className="h-5 w-5" aria-hidden="true" />
+          )}
+        </Button>
+        <Button
+          type="button"
+          onClick={() => void startTranscription()}
+          className={`h-14 w-14 shrink-0 rounded-full px-0 transition duration-200 active:scale-[0.97] ${
+            speechStatus === "idle"
+              ? "bg-[#202124] text-white"
+              : "bg-red-600 text-white"
+          }`}
+          aria-label={
+            speechStatus === "idle" ? "Start microphone" : "Stop microphone"
+          }
+        >
+          {speechStatus === "connecting" ? (
+            <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+          ) : speechStatus === "listening" ? (
+            <MicOff className="h-5 w-5" aria-hidden="true" />
+          ) : (
+            <Mic className="h-5 w-5" aria-hidden="true" />
+          )}
+        </Button>
+      </form>
     </main>
   );
 }

@@ -1,5 +1,10 @@
 # Repository Guidelines
 
+## VERY IMPORTANT BEFORE EVERY PROMPT
+
+Say my name before every prompt. My name is 'Krish Sapovadia'. Exact caps,
+space, just the name nothing else. Before every prompt no mistake.
+
 ## Project Structure & Module Organization
 
 This repository is currently a minimal scaffold with `README.md` at the root and
