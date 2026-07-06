@@ -1,1 +1,1 @@
-"""Backend service modules for the IMAGINEv1 pitch sequence."""
+"""Backend service modules for IMAGINEv1."""

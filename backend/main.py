@@ -5,18 +5,15 @@ import urllib.error
 import urllib.request
 from urllib.parse import urlencode
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.websockets import WebSocket, WebSocketDisconnect
-from pydantic import BaseModel, Field
 import websockets
 from dotenv import load_dotenv
 
-from .services.keyword_pipeline import KeywordPipeline
-
 load_dotenv()
 
-app = FastAPI(title="IMAGINEv1 Pitch Backend")
+app = FastAPI(title="IMAGINEv1 Backend")
 
 # Frontend and backend run on separate local ports during development.
 app.add_middleware(
@@ -35,30 +32,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-pipeline = KeywordPipeline()
 DEEPGRAM_AUTH_TOKEN_URL = "https://api.deepgram.com/v1/auth/token"
 DEEPGRAM_FLUX_LISTEN_URL = "wss://api.deepgram.com/v2/listen"
-
-
-class GenerateRequest(BaseModel):
-    teacherSpeech: str = Field("", max_length=4000)
-    resetSequence: bool = False
-
-
-class GenerateResponse(BaseModel):
-    text: str
-    imageUrl: str
-    imagePrompt: str
-    mode: str
-    textMode: str
-    status: str
-    slideTitle: str
-    slideSubtitle: str
-    bullets: list[str]
-    sequenceIndex: int
-    totalSteps: int
-    matchedKeyword: str
-    componentKey: str
 
 
 def get_deepgram_api_key() -> str:
@@ -167,25 +142,6 @@ def transcribe_status(checkKey: bool = False) -> dict[str, str | bool]:
         status.update(check_deepgram_api_key())
 
     return status
-
-
-@app.post("/api/generate", response_model=GenerateResponse)
-async def generate_frame(request: GenerateRequest) -> GenerateResponse:
-    """Scan one teacher input chunk against the ordered pitch sequence."""
-    clean_input = request.teacherSpeech.strip()
-
-    if not clean_input and not request.resetSequence:
-        raise HTTPException(status_code=400, detail="teacherSpeech is required.")
-
-    try:
-        result = await pipeline.generate(
-            clean_input,
-            reset_sequence=request.resetSequence,
-        )
-    except RuntimeError as error:
-        raise HTTPException(status_code=503, detail=str(error)) from error
-
-    return GenerateResponse(**result)
 
 
 @app.websocket("/api/transcribe")
