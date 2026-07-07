@@ -1,13 +1,14 @@
 # IMAGINEv1
 
-Real-time speech workspace that turns typed or transcribed input into concise
-notes and, when useful, one generated diagram or visual.
+Real-time speech workspace that turns typed or transcribed input into a planned
+visual note canvas with concise text, diagrams, generated images, or callouts.
 
 ```text
 typed input or Deepgram transcript
-  -> Gemini 2.5 Flash Lite notes and visual strategy
-  -> immediate notes response
-  -> async sanitized HTML diagram or raster visual job
+  -> Gemini 2.5 Flash Lite notes
+  -> Gemini 2.5 Flash Lite composition planner
+  -> immediate multi-block canvas response
+  -> async sanitized HTML diagram or raster visual jobs
   -> persistent local visual cache for similar repeat prompts
   -> latest result
 ```
@@ -34,6 +35,7 @@ DEEPGRAM_API_KEY=your-deepgram-key
 GEMINI_API_KEY=your-gemini-key
 
 GEMINI_TEXT_MODEL=gemini-2.5-flash-lite
+GEMINI_DIAGRAM_MODEL=gemini-2.5-flash
 GEMINI_IMAGE_MODEL=gemini-2.5-flash-image
 VISUAL_CACHE_DIR=.cache/visuals
 ```
@@ -44,19 +46,22 @@ FastAPI backend uses port `8010`.
 ## Cost controls
 
 - Every uncached manual submission first makes one small Flash Lite request for
-  notes and a visual brief.
-- Flash Lite returns no more than three bullets and chooses no visual, an HTML
-  diagram job, or generated imagery.
-- Flowcharts, processes, comparisons, systems, and abstract concepts render as
-  richer async HTML diagrams, avoiding image-model cost.
+  notes, then one planner request that decides layout, visual balance, theme,
+  and which blocks need visuals.
+- The planner can return a text-led, visual-led, sequence, comparison, or
+  balanced canvas with multiple blocks.
+- Flowcharts, processes, comparisons, systems, timelines, and abstract concepts
+  render as richer async HTML diagrams with a separate diagram model, avoiding
+  image-model cost.
 - Similar repeated prompts can reuse `.cache/visuals` with no Gemini request.
 - Raster image prompts are prefixed with a no-text rule so diagrams do not
   contain incorrect generated labels.
-- The image model runs at most once per submission. If it fails, completed
-  notes remain visible without another retry.
+- The image model runs only for blocks where an unlabeled raster illustration is
+  more useful than a diagram. If a visual job fails, completed text blocks
+  remain visible without another retry.
 - Requests contain no conversation history and are limited to 4,000 input
   characters. The notes request is capped at 256 output tokens; async diagram
-  jobs are capped separately for more detail.
+  jobs use a larger output cap for detailed workflows.
 - The local backend permits 10 generation requests per client IP per minute.
 
 ## Secret handling

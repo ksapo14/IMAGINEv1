@@ -81,6 +81,7 @@ class SlidingWindowRateLimiter:
 
 generation_rate_limiter = SlidingWindowRateLimiter()
 visual_jobs: dict[str, dict[str, object]] = {}
+visual_batches: dict[str, dict[str, object]] = {}
 visual_jobs_lock = Lock()
 
 
@@ -96,25 +97,57 @@ class GeneratedVisual(BaseModel):
     mimeType: str | None = None
 
 
+class CompositionTheme(BaseModel):
+    palette: Literal["slate", "sage", "ember", "indigo", "mono"]
+    density: Literal["compact", "comfortable", "spacious"]
+    motion: Literal["subtle", "none"]
+
+
+class CompositionBlock(BaseModel):
+    blockId: str
+    kind: Literal[
+        "heading",
+        "notes",
+        "callout",
+        "diagram",
+        "image",
+        "comparison",
+        "timeline",
+    ]
+    title: str
+    body: str
+    items: list[str]
+    size: Literal["compact", "medium", "large", "wide"]
+    visual: GeneratedVisual | None = None
+    visualJobId: str | None = None
+
+
 class GenerateResponse(BaseModel):
     title: str
-    bullets: list[str]
-    visual: GeneratedVisual | None
+    layoutMode: Literal[
+        "textDominant",
+        "visualDominant",
+        "balanced",
+        "sequence",
+        "comparison",
+    ]
+    theme: CompositionTheme
+    blocks: list[CompositionBlock]
     warning: str | None
-    visualJobId: str | None = None
 
 
 class VisualJobResponse(BaseModel):
     status: Literal["pending", "complete", "failed"]
+    blockId: str
     visual: GeneratedVisual | None = None
     warning: str | None = None
 
 
 async def run_visual_job(
     job_id: str,
+    batch_id: str,
+    block_id: str,
     user_input: str,
-    title: str,
-    bullets: list[str],
     visual_strategy: str,
     visual_prompt: str,
     visual_alt: str,
@@ -128,25 +161,46 @@ async def run_visual_job(
         with visual_jobs_lock:
             visual_jobs[job_id] = {
                 "status": "failed",
+                "blockId": block_id,
                 "visual": None,
                 "warning": "The notes are ready, but the visual could not be generated.",
             }
+            batch = visual_batches.get(batch_id)
+            if batch:
+                pending_job_ids = batch.get("pendingJobIds")
+                if isinstance(pending_job_ids, set):
+                    pending_job_ids.discard(job_id)
+                    if not pending_job_ids:
+                        visual_batches.pop(batch_id, None)
         return
-
-    result = {
-        "title": title,
-        "bullets": bullets,
-        "visual": visual,
-        "warning": None,
-    }
-    gemini_pipeline.cache_result(user_input, result)
 
     with visual_jobs_lock:
         visual_jobs[job_id] = {
             "status": "complete",
+            "blockId": block_id,
             "visual": visual,
             "warning": None,
         }
+        batch = visual_batches.get(batch_id)
+        if batch:
+            result = batch.get("result")
+            pending_job_ids = batch.get("pendingJobIds")
+            if isinstance(result, dict):
+                blocks = result.get("blocks")
+                if isinstance(blocks, list):
+                    for block in blocks:
+                        if (
+                            isinstance(block, dict)
+                            and block.get("blockId") == block_id
+                        ):
+                            block["visual"] = visual
+                            block["visualJobId"] = None
+                            break
+            if isinstance(pending_job_ids, set):
+                pending_job_ids.discard(job_id)
+                if not pending_job_ids and isinstance(result, dict):
+                    gemini_pipeline.cache_result(user_input, result)
+                    visual_batches.pop(batch_id, None)
 
 
 def get_deepgram_api_key() -> str:
@@ -237,7 +291,7 @@ async def generate_content(
     payload: GenerateRequest,
     request: Request,
 ) -> GenerateResponse:
-    """Generate concise notes and, only when useful, one visual."""
+    """Generate a composed note canvas and schedule useful visuals."""
     user_input = payload.userInput.strip()
     if not user_input:
         raise HTTPException(status_code=422, detail="Input cannot be empty.")
@@ -256,34 +310,66 @@ async def generate_content(
     except GeminiProviderError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
 
-    visual_strategy = result.pop("_visualStrategy", "none")
-    visual_prompt = result.pop("_visualPrompt", "")
-    visual_alt = result.pop("_visualAlt", "")
-    if (
-        result.get("visual") is None
-        and visual_strategy in {"diagram", "image"}
-        and isinstance(visual_prompt, str)
-        and isinstance(visual_alt, str)
-    ):
-        job_id = uuid.uuid4().hex
-        result["visualJobId"] = job_id
-        with visual_jobs_lock:
-            visual_jobs[job_id] = {
-                "status": "pending",
-                "visual": None,
-                "warning": None,
-            }
-        asyncio.create_task(
-            run_visual_job(
-                job_id,
-                user_input,
-                str(result["title"]),
-                list(result["bullets"]),
-                str(visual_strategy),
-                visual_prompt,
-                visual_alt,
+    visual_requests = result.pop("_visualRequests", [])
+    pending_job_ids: set[str] = set()
+    batch_id = uuid.uuid4().hex
+
+    if isinstance(visual_requests, list):
+        for visual_request in visual_requests:
+            if not isinstance(visual_request, dict):
+                continue
+            block_id = visual_request.get("blockId")
+            visual_strategy = visual_request.get("visualStrategy")
+            visual_prompt = visual_request.get("visualPrompt")
+            visual_alt = visual_request.get("visualAlt")
+            if (
+                not isinstance(block_id, str)
+                or visual_strategy not in {"diagram", "image"}
+                or not isinstance(visual_prompt, str)
+                or not isinstance(visual_alt, str)
+            ):
+                continue
+
+            job_id = uuid.uuid4().hex
+            pending_job_ids.add(job_id)
+            blocks = result.get("blocks")
+            if isinstance(blocks, list):
+                for block in blocks:
+                    if (
+                        isinstance(block, dict)
+                        and block.get("blockId") == block_id
+                    ):
+                        block["visualJobId"] = job_id
+                        break
+
+            with visual_jobs_lock:
+                visual_jobs[job_id] = {
+                    "status": "pending",
+                    "blockId": block_id,
+                    "visual": None,
+                    "warning": None,
+                }
+            asyncio.create_task(
+                run_visual_job(
+                    job_id,
+                    batch_id,
+                    block_id,
+                    user_input,
+                    str(visual_strategy),
+                    visual_prompt,
+                    visual_alt,
+                )
             )
-        )
+
+    if pending_job_ids:
+        with visual_jobs_lock:
+            visual_batches[batch_id] = {
+                "userInput": user_input,
+                "result": result,
+                "pendingJobIds": pending_job_ids,
+            }
+    else:
+        gemini_pipeline.cache_result(user_input, result)
 
     return GenerateResponse(**result)
 

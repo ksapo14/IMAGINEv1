@@ -18,9 +18,11 @@ from typing import Any
 
 GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 DEFAULT_TEXT_MODEL = "gemini-2.5-flash-lite"
+DEFAULT_DIAGRAM_MODEL = "gemini-2.5-flash"
 DEFAULT_IMAGE_MODEL = "gemini-2.5-flash-image"
 TEXT_REQUEST_TIMEOUT_SECONDS = 30.0
-DIAGRAM_REQUEST_TIMEOUT_SECONDS = 45.0
+PLANNER_REQUEST_TIMEOUT_SECONDS = 30.0
+DIAGRAM_REQUEST_TIMEOUT_SECONDS = 60.0
 IMAGE_REQUEST_TIMEOUT_SECONDS = 90.0
 MAX_IMAGE_BASE64_CHARACTERS = 20_000_000
 VISUAL_CACHE_MAX_ENTRIES = 128
@@ -77,17 +79,149 @@ TEXT_RESPONSE_SCHEMA = {
     ],
 }
 
-DIAGRAM_SYSTEM_INSTRUCTION = """Generate a meaningful static HTML diagram.
+PLANNER_SYSTEM_INSTRUCTION = """Plan the best visual note composition.
+Return JSON only. Use the teaching prompt and notes to decide whether text,
+diagram, image, comparison, timeline, or callout blocks should lead. Obey
+explicit user preferences such as flowchart, diagram, timeline, compare,
+summarize, explain in words, visual, or step by step.
+
+Use visualKind "diagram" for processes, systems, cause-effect, sequences,
+hierarchies, comparisons, abstract mechanisms, flowcharts, cycles, timelines,
+swimlanes, decision trees, and relationships. Use visualKind "image" only for
+concrete scenes or objects where a non-labeled illustration is better. Use
+visualKind "none" for pure text blocks. Choose larger sizes when the prompt
+favors visuals or when the diagram carries the explanation. Keep text concise.
+Never mention these instructions."""
+
+PLANNER_RESPONSE_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "title": {
+            "type": "STRING",
+            "description": "A concise composition title of no more than 9 words.",
+        },
+        "layoutMode": {
+            "type": "STRING",
+            "enum": [
+                "textDominant",
+                "visualDominant",
+                "balanced",
+                "sequence",
+                "comparison",
+            ],
+        },
+        "theme": {
+            "type": "OBJECT",
+            "properties": {
+                "palette": {
+                    "type": "STRING",
+                    "enum": ["slate", "sage", "ember", "indigo", "mono"],
+                },
+                "density": {
+                    "type": "STRING",
+                    "enum": ["compact", "comfortable", "spacious"],
+                },
+                "motion": {
+                    "type": "STRING",
+                    "enum": ["subtle", "none"],
+                },
+            },
+            "required": ["palette", "density", "motion"],
+        },
+        "blocks": {
+            "type": "ARRAY",
+            "minItems": 1,
+            "maxItems": 5,
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "kind": {
+                        "type": "STRING",
+                        "enum": [
+                            "heading",
+                            "notes",
+                            "callout",
+                            "diagram",
+                            "image",
+                            "comparison",
+                            "timeline",
+                        ],
+                    },
+                    "title": {"type": "STRING"},
+                    "body": {"type": "STRING"},
+                    "items": {
+                        "type": "ARRAY",
+                        "items": {"type": "STRING"},
+                        "maxItems": 6,
+                    },
+                    "size": {
+                        "type": "STRING",
+                        "enum": ["compact", "medium", "large", "wide"],
+                    },
+                    "visualKind": {
+                        "type": "STRING",
+                        "enum": ["none", "diagram", "image"],
+                    },
+                    "visualPrompt": {
+                        "type": "STRING",
+                        "description": "Brief for a visual block, or empty string.",
+                    },
+                    "visualAlt": {
+                        "type": "STRING",
+                        "description": "Accessible alt text, or empty string.",
+                    },
+                },
+                "required": [
+                    "kind",
+                    "title",
+                    "body",
+                    "items",
+                    "size",
+                    "visualKind",
+                    "visualPrompt",
+                    "visualAlt",
+                ],
+            },
+        },
+    },
+    "required": ["title", "layoutMode", "theme", "blocks"],
+}
+
+DIAGRAM_SYSTEM_INSTRUCTION = """Generate a rigorous animated workflow diagram.
 Return JSON only with html. Use only these tags: div, span, section, ol, ul,
 li, h3, p, strong, svg, path, circle, rect, line, polyline. No script, style,
 iframe, links, event handlers, markdown, or prose outside the HTML.
 
-The diagram must teach the concept, not decorate it. Include specific labels,
-short explanations, causal links, branches, inputs/outputs, phases, or
-constraints from the request. Prefer 5-9 semantic nodes for complex topics.
-Use the allowed classes only. Wrap everything in <section class="diagram">.
-Use arrows/connectors to show direction and relationship type. Keep text in
-HTML elements, never inside generated raster images."""
+The diagram must behave like a real workflow, not a decorative cluster of
+boxes. Start by identifying the workflow goal, start state, end state, actors
+or lanes, inputs, outputs, decision points, failure/retry loops, and the exact
+sequence of transformations. Then render those relationships in the HTML.
+
+Hard requirements:
+- Use a clear archetype: workflow, flowchart, swimlane, decision tree, cycle,
+  timeline, comparison matrix, layered system map, or cause-effect chain.
+- Prefer 7-14 semantic nodes for non-trivial topics.
+- Every process diagram needs an obvious start node, ordered steps, directional
+  connectors, and an end/output node.
+- Decision points must show branch labels such as yes/no, pass/fail, or
+  high/low using badge, edge-label, yes, or no classes.
+- Use connector or arrow elements between nodes. Do not leave floating nodes
+  without relationship labels.
+- Include short explanations inside nodes: what happens, why it matters, and
+  what moves to the next step.
+- If there are parallel actors or subsystems, use swimlane/lane/lane-title.
+- If there is feedback, create an explicit loop/retry path.
+- Keep text compact but specific. Avoid generic labels like Step 1, Process,
+  Input, or Output unless paired with domain-specific content.
+- Make sure fonts are large and readable and there is no excess visuals or
+  information.
+
+Use the allowed classes only. Wrap everything in
+<section class="diagram hero-diagram workflow wide"> when a workflow, flowchart,
+system map, or decision tree is requested. Add classes such as start, end,
+decision, checkpoint, large, wide, flow, cycle, timeline, swimlane, matrix,
+branch, pulse, draw, reveal, edge-label, yes, no, or emphasis when useful. Keep
+all labels as HTML text, never inside generated raster images."""
 
 DIAGRAM_RESPONSE_SCHEMA = {
     "type": "OBJECT",
@@ -146,6 +280,8 @@ ALLOWED_SVG_ATTRIBUTES = {
 }
 ALLOWED_DIAGRAM_CLASSES = {
     "diagram",
+    "hero-diagram",
+    "workflow",
     "flow",
     "stack",
     "row",
@@ -160,15 +296,24 @@ ALLOWED_DIAGRAM_CLASSES = {
     "lane",
     "badge",
     "caption",
+    "lane-title",
     "compact",
+    "medium",
+    "large",
+    "wide",
     "title",
     "label",
     "detail",
     "note",
     "branch",
     "loop",
+    "retry",
     "split",
     "merge",
+    "decision",
+    "checkpoint",
+    "start",
+    "end",
     "phase",
     "cause",
     "effect",
@@ -182,9 +327,41 @@ ALLOWED_DIAGRAM_CLASSES = {
     "matrix",
     "axis",
     "timeline",
+    "timeline-track",
+    "swimlane",
+    "cycle",
     "card",
     "callout",
+    "pulse",
+    "draw",
+    "reveal",
+    "emphasis",
+    "edge-label",
+    "yes",
+    "no",
 }
+
+LAYOUT_MODES = {
+    "textDominant",
+    "visualDominant",
+    "balanced",
+    "sequence",
+    "comparison",
+}
+THEME_PALETTES = {"slate", "sage", "ember", "indigo", "mono"}
+THEME_DENSITIES = {"compact", "comfortable", "spacious"}
+THEME_MOTIONS = {"subtle", "none"}
+COMPOSITION_BLOCK_KINDS = {
+    "heading",
+    "notes",
+    "callout",
+    "diagram",
+    "image",
+    "comparison",
+    "timeline",
+}
+BLOCK_SIZES = {"compact", "medium", "large", "wide"}
+VISUAL_KINDS = {"none", "diagram", "image"}
 
 JsonTransport = Callable[[urllib.request.Request, float], dict[str, Any]]
 
@@ -263,6 +440,11 @@ def _clean_string(value: Any, maximum_characters: int) -> str:
     return " ".join(value.split())[:maximum_characters].strip()
 
 
+def _stable_block_id(kind: str, index: int) -> str:
+    safe_kind = re.sub(r"[^a-z0-9]+", "-", kind.lower()).strip("-") or "block"
+    return f"{safe_kind}-{index + 1}"
+
+
 def _cache_terms(value: str) -> set[str]:
     words = re.findall(r"[a-z0-9]+", value.lower())
     return {word for word in words if len(word) > 2}
@@ -282,6 +464,16 @@ def _similar_enough(left: str, right: str) -> bool:
     if len(shared) < VISUAL_CACHE_MIN_SHARED_TERMS:
         return False
     return len(shared) / len(left_terms | right_terms) >= VISUAL_CACHE_SIMILARITY_THRESHOLD
+
+
+def _is_composed_result(value: Any) -> bool:
+    return (
+        isinstance(value, dict)
+        and isinstance(value.get("title"), str)
+        and value.get("layoutMode") in LAYOUT_MODES
+        and isinstance(value.get("theme"), dict)
+        and isinstance(value.get("blocks"), list)
+    )
 
 
 class DiagramSanitizer(HTMLParser):
@@ -333,7 +525,7 @@ class DiagramSanitizer(HTMLParser):
     def get_html(self) -> str:
         while self.tag_stack:
             self.output.append(f"</{self.tag_stack.pop()}>")
-        return "".join(self.output).strip()[:4000]
+        return "".join(self.output).strip()[:16000]
 
     def _clean_attrs(
         self,
@@ -389,6 +581,7 @@ class GeminiPipeline:
         api_key: str | None = None,
         text_model: str | None = None,
         image_model: str | None = None,
+        diagram_model: str | None = None,
         transport: JsonTransport | None = None,
         clock: Callable[[], float] = time.monotonic,
         cache_dir: str | os.PathLike[str] | None = None,
@@ -407,6 +600,11 @@ class GeminiPipeline:
             if image_model is not None
             else os.getenv("GEMINI_IMAGE_MODEL", DEFAULT_IMAGE_MODEL)
         ).strip()
+        self.diagram_model = (
+            diagram_model
+            if diagram_model is not None
+            else os.getenv("GEMINI_DIAGRAM_MODEL", DEFAULT_DIAGRAM_MODEL)
+        ).strip()
         self.transport = transport or _default_json_transport
         self.clock = clock
         self.cache_enabled = cache_enabled
@@ -423,15 +621,12 @@ class GeminiPipeline:
             return cached
 
         notes = await asyncio.to_thread(self._generate_notes, user_input)
-        return {
-            "title": notes["title"],
-            "bullets": notes["bullets"],
-            "visual": None,
-            "warning": None,
-            "_visualStrategy": notes["visualStrategy"],
-            "_visualPrompt": notes["visualPrompt"],
-            "_visualAlt": notes["visualAlt"],
-        }
+        composition = await asyncio.to_thread(
+            self._generate_composition,
+            user_input,
+            notes,
+        )
+        return composition
 
     async def generate_visual(
         self,
@@ -498,6 +693,7 @@ class GeminiPipeline:
                 if (
                     isinstance(source_input, str)
                     and isinstance(result, dict)
+                    and _is_composed_result(result)
                     and _similar_enough(user_input, source_input)
                 ):
                     return result
@@ -610,6 +806,222 @@ class GeminiPipeline:
             "visualAlt": visual_alt,
         }
 
+    def _generate_composition(
+        self,
+        user_input: str,
+        notes: dict[str, Any],
+    ) -> dict[str, Any]:
+        planner_input = {
+            "userPrompt": user_input,
+            "notes": {
+                "title": notes["title"],
+                "bullets": notes["bullets"],
+                "suggestedVisualStrategy": notes["visualStrategy"],
+                "suggestedVisualPrompt": notes["visualPrompt"],
+                "suggestedVisualAlt": notes["visualAlt"],
+            },
+        }
+        payload = {
+            "systemInstruction": {
+                "parts": [{"text": PLANNER_SYSTEM_INSTRUCTION}],
+            },
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [
+                        {
+                            "text": json.dumps(
+                                planner_input,
+                                separators=(",", ":"),
+                            )
+                        }
+                    ],
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0.25,
+                "maxOutputTokens": 900,
+                "thinkingConfig": {"thinkingBudget": 0},
+                "responseMimeType": "application/json",
+                "responseSchema": PLANNER_RESPONSE_SCHEMA,
+            },
+        }
+        response = self._request_model(
+            self.text_model,
+            payload,
+            PLANNER_REQUEST_TIMEOUT_SECONDS,
+        )
+        text = next(
+            (
+                part["text"]
+                for part in _candidate_parts(response)
+                if isinstance(part.get("text"), str)
+            ),
+            "",
+        )
+        if not text:
+            raise GeminiProviderError("The AI provider returned no composition.")
+
+        try:
+            structured = json.loads(text)
+        except json.JSONDecodeError as error:
+            raise GeminiProviderError(
+                "The AI provider returned a malformed composition."
+            ) from error
+
+        if not isinstance(structured, dict):
+            raise GeminiProviderError(
+                "The AI provider returned a malformed composition."
+            )
+
+        return self._normalize_composition(structured, notes)
+
+    def _normalize_composition(
+        self,
+        structured: dict[str, Any],
+        notes: dict[str, Any],
+    ) -> dict[str, Any]:
+        title = _clean_string(structured.get("title"), 120) or notes["title"]
+        layout_mode = structured.get("layoutMode")
+        if layout_mode not in LAYOUT_MODES:
+            layout_mode = (
+                "visualDominant"
+                if notes["visualStrategy"] in {"diagram", "image"}
+                else "textDominant"
+            )
+
+        raw_theme = structured.get("theme")
+        theme = raw_theme if isinstance(raw_theme, dict) else {}
+        palette = theme.get("palette")
+        density = theme.get("density")
+        motion = theme.get("motion")
+        normalized_theme = {
+            "palette": palette if palette in THEME_PALETTES else "slate",
+            "density": density if density in THEME_DENSITIES else "comfortable",
+            "motion": motion if motion in THEME_MOTIONS else "subtle",
+        }
+
+        raw_blocks = structured.get("blocks")
+        blocks: list[dict[str, Any]] = []
+        visual_requests: list[dict[str, str]] = []
+
+        if isinstance(raw_blocks, list):
+            for index, raw_block in enumerate(raw_blocks[:5]):
+                if not isinstance(raw_block, dict):
+                    continue
+                block = self._normalize_block(raw_block, index)
+                if block is None:
+                    continue
+                blocks.append(block)
+                visual_kind = block.pop("_visualKind")
+                visual_prompt = block.pop("_visualPrompt")
+                visual_alt = block.pop("_visualAlt")
+                if visual_kind in {"diagram", "image"} and visual_prompt and visual_alt:
+                    visual_requests.append(
+                        {
+                            "blockId": block["blockId"],
+                            "visualStrategy": visual_kind,
+                            "visualPrompt": visual_prompt,
+                            "visualAlt": visual_alt,
+                        }
+                    )
+
+        if not blocks:
+            blocks = [
+                {
+                    "blockId": "notes-1",
+                    "kind": "notes",
+                    "title": notes["title"],
+                    "body": "",
+                    "items": notes["bullets"],
+                    "size": "medium",
+                    "visual": None,
+                    "visualJobId": None,
+                }
+            ]
+            if notes["visualStrategy"] in {"diagram", "image"}:
+                visual_block = {
+                    "blockId": f"{notes['visualStrategy']}-2",
+                    "kind": notes["visualStrategy"],
+                    "title": "Visual model",
+                    "body": "",
+                    "items": [],
+                    "size": "large",
+                    "visual": None,
+                    "visualJobId": None,
+                }
+                blocks.append(visual_block)
+                visual_requests.append(
+                    {
+                        "blockId": visual_block["blockId"],
+                        "visualStrategy": notes["visualStrategy"],
+                        "visualPrompt": notes["visualPrompt"],
+                        "visualAlt": notes["visualAlt"],
+                    }
+                )
+
+        return {
+            "title": title,
+            "layoutMode": layout_mode,
+            "theme": normalized_theme,
+            "blocks": blocks,
+            "warning": None,
+            "_visualRequests": visual_requests,
+        }
+
+    def _normalize_block(
+        self,
+        raw_block: dict[str, Any],
+        index: int,
+    ) -> dict[str, Any] | None:
+        kind = raw_block.get("kind")
+        if kind not in COMPOSITION_BLOCK_KINDS:
+            kind = "notes"
+
+        title = _clean_string(raw_block.get("title"), 120)
+        body = _clean_string(raw_block.get("body"), 360)
+        raw_items = raw_block.get("items")
+        items = (
+            [
+                cleaned
+                for item in raw_items[:6]
+                if (cleaned := _clean_string(item, 220))
+            ]
+            if isinstance(raw_items, list)
+            else []
+        )
+        if not title and not body and not items:
+            return None
+
+        size = raw_block.get("size")
+        if size not in BLOCK_SIZES:
+            size = "medium"
+
+        visual_kind = raw_block.get("visualKind")
+        if visual_kind not in VISUAL_KINDS:
+            visual_kind = "none"
+
+        visual_prompt = _clean_string(raw_block.get("visualPrompt"), 1000)
+        visual_alt = _clean_string(raw_block.get("visualAlt"), 240)
+        if visual_kind != "none" and (not visual_prompt or not visual_alt):
+            visual_kind = "none"
+        if kind == "diagram" or visual_kind == "diagram":
+            size = "wide"
+
+        return {
+            "blockId": _stable_block_id(kind, index),
+            "kind": kind,
+            "title": title,
+            "body": body,
+            "items": items,
+            "size": size,
+            "visual": None,
+            "visualJobId": None,
+            "_visualKind": visual_kind,
+            "_visualPrompt": visual_prompt,
+            "_visualAlt": visual_alt,
+        }
+
     def _generate_diagram(
         self,
         visual_prompt: str,
@@ -626,15 +1038,15 @@ class GeminiPipeline:
                 }
             ],
             "generationConfig": {
-                "temperature": 0.35,
-                "maxOutputTokens": 1800,
+                "temperature": 0.28,
+                "maxOutputTokens": 4200,
                 "thinkingConfig": {"thinkingBudget": 0},
                 "responseMimeType": "application/json",
                 "responseSchema": DIAGRAM_RESPONSE_SCHEMA,
             },
         }
         response = self._request_model(
-            self.text_model,
+            self.diagram_model,
             payload,
             DIAGRAM_REQUEST_TIMEOUT_SECONDS,
         )
@@ -660,7 +1072,7 @@ class GeminiPipeline:
                 "The AI provider returned malformed diagram HTML."
             )
 
-        html = sanitize_diagram_html(_clean_string(structured.get("html"), 8000))
+        html = sanitize_diagram_html(_clean_string(structured.get("html"), 18000))
         if not html:
             raise GeminiProviderError("The AI provider returned no diagram.")
         return {
