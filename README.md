@@ -53,6 +53,9 @@ FastAPI backend uses port `8010`.
 - Flowcharts, processes, comparisons, systems, timelines, and abstract concepts
   render as richer async HTML diagrams with a separate diagram model, avoiding
   image-model cost.
+- Diagram jobs return their own canvas width and height, so horizontal or
+  vertical workflows can scroll inside the visual panel instead of being
+  squeezed into the viewport.
 - Similar repeated prompts can reuse `.cache/visuals` with no Gemini request.
 - Raster image prompts are prefixed with a no-text rule so diagrams do not
   contain incorrect generated labels.

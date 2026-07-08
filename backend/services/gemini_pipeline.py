@@ -188,9 +188,10 @@ PLANNER_RESPONSE_SCHEMA = {
 }
 
 DIAGRAM_SYSTEM_INSTRUCTION = """Generate a rigorous animated workflow diagram.
-Return JSON only with html. Use only these tags: div, span, section, ol, ul,
-li, h3, p, strong, svg, path, circle, rect, line, polyline. No script, style,
-iframe, links, event handlers, markdown, or prose outside the HTML.
+Return JSON only with html, canvasWidth, and canvasHeight. Use only these tags:
+div, span, section, ol, ul, li, h3, p, strong, svg, path, circle, rect, line,
+polyline. No script, style, iframe, links, event handlers, markdown, or prose
+outside the HTML.
 
 The diagram must behave like a real workflow, not a decorative cluster of
 boxes. Start by identifying the workflow goal, start state, end state, actors
@@ -221,7 +222,15 @@ Use the allowed classes only. Wrap everything in
 system map, or decision tree is requested. Add classes such as start, end,
 decision, checkpoint, large, wide, flow, cycle, timeline, swimlane, matrix,
 branch, pulse, draw, reveal, edge-label, yes, no, or emphasis when useful. Keep
-all labels as HTML text, never inside generated raster images."""
+all labels as HTML text, never inside generated raster images.
+
+Choose canvasWidth and canvasHeight for the actual diagram shape:
+- Horizontal workflows with many sequential steps: 1800-3200 wide, 800-1300 high.
+- Vertical workflows, timelines, or stacked explanations: 1000-1600 wide,
+  1400-2600 high.
+- Matrix or swimlane layouts: 1500-2600 wide, 1000-1800 high.
+- Small diagrams still need enough room: at least 1100 wide and 750 high.
+The HTML should be designed for that canvas, not squeezed into the viewport."""
 
 DIAGRAM_RESPONSE_SCHEMA = {
     "type": "OBJECT",
@@ -230,8 +239,16 @@ DIAGRAM_RESPONSE_SCHEMA = {
             "type": "STRING",
             "description": "Static semantic HTML diagram.",
         },
+        "canvasWidth": {
+            "type": "INTEGER",
+            "description": "Diagram canvas width in CSS pixels.",
+        },
+        "canvasHeight": {
+            "type": "INTEGER",
+            "description": "Diagram canvas height in CSS pixels.",
+        },
     },
-    "required": ["html"],
+    "required": ["html", "canvasWidth", "canvasHeight"],
 }
 
 IMAGE_NO_TEXT_PREFIX = (
@@ -438,6 +455,22 @@ def _clean_string(value: Any, maximum_characters: int) -> str:
     if not isinstance(value, str):
         return ""
     return " ".join(value.split())[:maximum_characters].strip()
+
+
+def _clean_int(value: Any, minimum: int, maximum: int, default: int) -> int:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int):
+        return min(max(value, minimum), maximum)
+    if isinstance(value, float):
+        return min(max(int(value), minimum), maximum)
+    if isinstance(value, str):
+        try:
+            parsed = int(float(value.strip()))
+        except ValueError:
+            return default
+        return min(max(parsed, minimum), maximum)
+    return default
 
 
 def _stable_block_id(kind: str, index: int) -> str:
@@ -1075,10 +1108,24 @@ class GeminiPipeline:
         html = sanitize_diagram_html(_clean_string(structured.get("html"), 18000))
         if not html:
             raise GeminiProviderError("The AI provider returned no diagram.")
+        canvas_width = _clean_int(
+            structured.get("canvasWidth"),
+            900,
+            3600,
+            1600,
+        )
+        canvas_height = _clean_int(
+            structured.get("canvasHeight"),
+            600,
+            2800,
+            1000,
+        )
         return {
             "kind": "diagram",
             "html": html,
             "alt": visual_alt,
+            "canvasWidth": canvas_width,
+            "canvasHeight": canvas_height,
         }
 
     def _generate_image(

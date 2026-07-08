@@ -65,6 +65,8 @@ type GeneratedVisual =
       kind: "diagram";
       html: string;
       alt: string;
+      canvasWidth?: number;
+      canvasHeight?: number;
     }
   | {
       kind: "generated";
@@ -127,6 +129,19 @@ const blockSizeClasses: Record<BlockSize, string> = {
   large: "lg:col-span-8",
   wide: "lg:col-span-12"
 };
+
+function clampCanvasDimension(
+  value: number | undefined,
+  minimum: number,
+  maximum: number,
+  fallback: number
+) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return fallback;
+  }
+
+  return Math.min(Math.max(Math.round(value), minimum), maximum);
+}
 
 function getBlockSpanClass(block: CompositionBlock) {
   if (block.kind === "diagram" || block.visual?.kind === "diagram") {
@@ -213,7 +228,12 @@ async function fetchVisualJob(jobId: string) {
   return (await response.json()) as VisualJobResponse;
 }
 
-function getDiagramDocument(html: string, motion: ThemeMotion) {
+function getDiagramDocument(
+  html: string,
+  motion: ThemeMotion,
+  canvasWidth: number,
+  canvasHeight: number
+) {
   const motionCss =
     motion === "subtle"
       ? `
@@ -260,7 +280,9 @@ function getDiagramDocument(html: string, motion: ThemeMotion) {
   * { box-sizing: border-box; }
   body {
     margin: 0;
-    min-height: 100vh;
+    width: ${canvasWidth}px;
+    min-width: ${canvasWidth}px;
+    min-height: ${canvasHeight}px;
     display: grid;
     place-items: stretch;
     overflow: auto;
@@ -273,7 +295,7 @@ function getDiagramDocument(html: string, motion: ThemeMotion) {
   }
   .diagram {
     width: 100%;
-    min-height: 100vh;
+    min-height: ${canvasHeight}px;
     padding: 42px;
     display: flex;
     align-items: center;
@@ -282,7 +304,7 @@ function getDiagramDocument(html: string, motion: ThemeMotion) {
   }
   .hero-diagram, .workflow, .wide, .large {
     width: 100%;
-    min-height: 100vh;
+    min-height: ${canvasHeight}px;
   }
   .flow, .row {
     display: flex;
@@ -467,8 +489,8 @@ function getDiagramDocument(html: string, motion: ThemeMotion) {
   ${motionCss}
   @media (max-width: 640px) {
     body { overflow: auto; }
-    .diagram { min-height: 100vh; padding: 20px; }
-    .hero-diagram, .workflow, .wide, .large { min-height: 100vh; }
+    .diagram { min-height: ${canvasHeight}px; padding: 20px; }
+    .hero-diagram, .workflow, .wide, .large { min-height: ${canvasHeight}px; }
     .node, .lane { max-width: 100%; }
   }
 </style>
@@ -512,13 +534,35 @@ function VisualPanel({
         : "h-[min(58dvh,520px)] min-h-[320px]";
 
   if (block.visual?.kind === "diagram") {
+    const canvasWidth = clampCanvasDimension(
+      block.visual.canvasWidth,
+      900,
+      3600,
+      1600
+    );
+    const canvasHeight = clampCanvasDimension(
+      block.visual.canvasHeight,
+      600,
+      2800,
+      1000
+    );
+
     return (
       <div className={`${heightClass} overflow-auto bg-[#f4f2ec]`}>
         <iframe
           title={block.visual.alt}
           sandbox=""
-          srcDoc={getDiagramDocument(block.visual.html, motion)}
-          className="h-full min-h-[900px] w-full min-w-[1280px] border-0"
+          srcDoc={getDiagramDocument(
+            block.visual.html,
+            motion,
+            canvasWidth,
+            canvasHeight
+          )}
+          className="border-0"
+          style={{
+            width: `${canvasWidth}px`,
+            height: `${canvasHeight}px`
+          }}
         />
       </div>
     );

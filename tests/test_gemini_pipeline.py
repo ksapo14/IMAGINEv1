@@ -108,12 +108,27 @@ def image_block() -> dict[str, Any]:
     }
 
 
-def diagram_response(html: str) -> dict[str, Any]:
+def diagram_response(
+    html: str,
+    *,
+    canvas_width: int = 2200,
+    canvas_height: int = 1100,
+) -> dict[str, Any]:
     return {
         "candidates": [
             {
                 "content": {
-                    "parts": [{"text": json.dumps({"html": html})}],
+                    "parts": [
+                        {
+                            "text": json.dumps(
+                                {
+                                    "html": html,
+                                    "canvasWidth": canvas_width,
+                                    "canvasHeight": canvas_height,
+                                }
+                            )
+                        }
+                    ],
                 }
             }
         ]
@@ -264,6 +279,8 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('class="edge-label yes"', visual["html"])
         self.assertIn('class="arrow draw"', visual["html"])
         self.assertIn('class="step end output pulse"', visual["html"])
+        self.assertEqual(visual["canvasWidth"], 2200)
+        self.assertEqual(visual["canvasHeight"], 1100)
         self.assertNotIn("onclick", visual["html"])
         self.assertNotIn("script", visual["html"])
 

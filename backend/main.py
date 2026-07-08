@@ -93,6 +93,8 @@ class GeneratedVisual(BaseModel):
     kind: Literal["diagram", "generated"]
     alt: str
     html: str | None = None
+    canvasWidth: int | None = None
+    canvasHeight: int | None = None
     dataUrl: str | None = None
     mimeType: str | None = None
 
