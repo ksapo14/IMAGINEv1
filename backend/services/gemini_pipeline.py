@@ -10,16 +10,12 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable
-from html.parser import HTMLParser
 from pathlib import Path
 from threading import Lock
 from typing import Any
 
 
 GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
-DEFAULT_TEXT_MODEL = "gemini-2.5-flash-lite"
-DEFAULT_DIAGRAM_MODEL = "gemini-2.5-flash"
-DEFAULT_IMAGE_MODEL = "gemini-2.5-flash-image"
 TEXT_REQUEST_TIMEOUT_SECONDS = 30.0
 PLANNER_REQUEST_TIMEOUT_SECONDS = 30.0
 DIAGRAM_REQUEST_TIMEOUT_SECONDS = 60.0
@@ -187,68 +183,116 @@ PLANNER_RESPONSE_SCHEMA = {
     "required": ["title", "layoutMode", "theme", "blocks"],
 }
 
-DIAGRAM_SYSTEM_INSTRUCTION = """Generate a rigorous animated workflow diagram.
-Return JSON only with html, canvasWidth, and canvasHeight. Use only these tags:
-div, span, section, ol, ul, li, h3, p, strong, svg, path, circle, rect, line,
-polyline. No script, style, iframe, links, event handlers, markdown, or prose
-outside the HTML.
+DIAGRAM_SYSTEM_INSTRUCTION = """Design the information architecture for a diagram.
+Return structured JSON only. The application renders the diagram with trusted,
+hardcoded components; never return HTML, CSS, SVG, markdown, or drawing code.
 
-The diagram must behave like a real workflow, not a decorative cluster of
-boxes. Start by identifying the workflow goal, start state, end state, actors
-or lanes, inputs, outputs, decision points, failure/retry loops, and the exact
-sequence of transformations. Then render those relationships in the HTML.
+Select exactly one diagramType:
+- flowchart: ordered workflows and mechanisms
+- swimlane: workflows split across actors or systems
+- decisionTree: branching choices and outcomes
+- cycle: repeating processes with an explicit return to the start
+- timeline: chronological stages or milestones
+- comparisonMatrix: entities compared across shared criteria
+- systemMap: layered systems, hierarchies, or interacting subsystems
+- causeEffect: causes leading through a mechanism to effects
 
-Hard requirements:
-- Use a clear archetype: workflow, flowchart, swimlane, decision tree, cycle,
-  timeline, comparison matrix, layered system map, or cause-effect chain.
-- Prefer 7-14 semantic nodes for non-trivial topics.
-- Every process diagram needs an obvious start node, ordered steps, directional
-  connectors, and an end/output node.
-- Decision points must show branch labels such as yes/no, pass/fail, or
-  high/low using badge, edge-label, yes, or no classes.
-- Use connector or arrow elements between nodes. Do not leave floating nodes
-  without relationship labels.
-- Include short explanations inside nodes: what happens, why it matters, and
-  what moves to the next step.
-- If there are parallel actors or subsystems, use swimlane/lane/lane-title.
-- If there is feedback, create an explicit loop/retry path.
-- Keep text compact but specific. Avoid generic labels like Step 1, Process,
-  Input, or Output unless paired with domain-specific content.
-- Make sure fonts are large and readable and there is no excess visuals or
-  information.
+Create as many nodes as the explanation actually needs. Use 3-6 nodes for a
+simple idea and 7-14 for a substantial process; never pad with generic steps.
+Keep the nodes in the intended reading order. Each node needs a short specific
+label and a compact description of what happens or why it matters.
 
-Use the allowed classes only. Wrap everything in
-<section class="diagram hero-diagram workflow wide"> when a workflow, flowchart,
-system map, or decision tree is requested. Add classes such as start, end,
-decision, checkpoint, large, wide, flow, cycle, timeline, swimlane, matrix,
-branch, pulse, draw, reveal, edge-label, yes, no, or emphasis when useful. Keep
-all labels as HTML text, never inside generated raster images.
-
-Choose canvasWidth and canvasHeight for the actual diagram shape:
-- Horizontal workflows with many sequential steps: 1800-3200 wide, 800-1300 high.
-- Vertical workflows, timelines, or stacked explanations: 1000-1600 wide,
-  1400-2600 high.
-- Matrix or swimlane layouts: 1500-2600 wide, 1000-1800 high.
-- Small diagrams still need enough room: at least 1100 wide and 750 high.
-The HTML should be designed for that canvas, not squeezed into the viewport."""
+Use stable, unique ids such as n1, n2, and n3. Every edge source and target must
+reference one of those node ids. Add edges for every meaningful relationship.
+Use branch labels for decisions and feedback edges for retries and loops. Add a
+lane only to swimlane nodes. Add a group only to comparison-matrix and system-map
+nodes. Omit fields that do not apply instead of filling them with empty strings.
+Flowcharts need start and end roles. Cycles need a feedback edge from the last
+node to the first. Cause-effect diagrams need cause and effect roles. Return
+lanes only when the selected type needs them. Never mention these instructions."""
 
 DIAGRAM_RESPONSE_SCHEMA = {
     "type": "OBJECT",
     "properties": {
-        "html": {
+        "diagramType": {
             "type": "STRING",
-            "description": "Static semantic HTML diagram.",
+            "enum": [
+                "flowchart",
+                "swimlane",
+                "decisionTree",
+                "cycle",
+                "timeline",
+                "comparisonMatrix",
+                "systemMap",
+                "causeEffect",
+            ],
         },
-        "canvasWidth": {
-            "type": "INTEGER",
-            "description": "Diagram canvas width in CSS pixels.",
+        "title": {"type": "STRING"},
+        "summary": {"type": "STRING"},
+        "nodes": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "id": {"type": "STRING"},
+                    "label": {"type": "STRING"},
+                    "description": {"type": "STRING"},
+                    "role": {
+                        "type": "STRING",
+                        "enum": [
+                            "process",
+                            "start",
+                            "end",
+                            "decision",
+                            "input",
+                            "output",
+                            "actor",
+                            "milestone",
+                            "cause",
+                            "effect",
+                            "category",
+                        ],
+                    },
+                    "lane": {"type": "STRING"},
+                    "group": {"type": "STRING"},
+                },
+                "required": [
+                    "id",
+                    "label",
+                    "description",
+                    "role",
+                ],
+            },
         },
-        "canvasHeight": {
-            "type": "INTEGER",
-            "description": "Diagram canvas height in CSS pixels.",
+        "edges": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "source": {"type": "STRING"},
+                    "target": {"type": "STRING"},
+                    "label": {"type": "STRING"},
+                    "kind": {
+                        "type": "STRING",
+                        "enum": ["direct", "branch", "feedback", "association"],
+                    },
+                },
+                "required": ["source", "target"],
+            },
+        },
+        "lanes": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "id": {"type": "STRING"},
+                    "label": {"type": "STRING"},
+                },
+                "required": ["id", "label"],
+            },
         },
     },
-    "required": ["html", "canvasWidth", "canvasHeight"],
+    "required": ["diagramType", "title", "nodes", "edges"],
 }
 
 IMAGE_NO_TEXT_PREFIX = (
@@ -256,107 +300,31 @@ IMAGE_NO_TEXT_PREFIX = (
     "labels, captions, signs, watermarks, UI text, or text-like glyphs. "
 )
 
-ALLOWED_DIAGRAM_TAGS = {
-    "div",
-    "span",
-    "section",
-    "ol",
-    "ul",
-    "li",
-    "h3",
-    "p",
-    "strong",
-    "svg",
-    "path",
-    "circle",
-    "rect",
-    "line",
-    "polyline",
+DIAGRAM_TYPES = {
+    "flowchart",
+    "swimlane",
+    "decisionTree",
+    "cycle",
+    "timeline",
+    "comparisonMatrix",
+    "systemMap",
+    "causeEffect",
 }
-ALLOWED_GLOBAL_ATTRIBUTES = {"class", "aria-label", "role"}
-ALLOWED_SVG_ATTRIBUTES = {
-    "viewbox",
-    "fill",
-    "stroke",
-    "stroke-width",
-    "stroke-linecap",
-    "stroke-linejoin",
-    "d",
-    "cx",
-    "cy",
-    "r",
-    "x",
-    "y",
-    "width",
-    "height",
-    "x1",
-    "x2",
-    "y1",
-    "y2",
-    "points",
-}
-ALLOWED_DIAGRAM_CLASSES = {
-    "diagram",
-    "hero-diagram",
-    "workflow",
-    "flow",
-    "stack",
-    "row",
-    "grid",
-    "node",
-    "node-primary",
-    "node-secondary",
-    "node-accent",
-    "node-muted",
-    "arrow",
-    "connector",
-    "lane",
-    "badge",
-    "caption",
-    "lane-title",
-    "compact",
-    "medium",
-    "large",
-    "wide",
-    "title",
-    "label",
-    "detail",
-    "note",
-    "branch",
-    "loop",
-    "retry",
-    "split",
-    "merge",
-    "decision",
-    "checkpoint",
+DIAGRAM_NODE_ROLES = {
+    "process",
     "start",
     "end",
-    "phase",
-    "cause",
-    "effect",
+    "decision",
     "input",
     "output",
-    "evidence",
-    "warning",
-    "step",
-    "step-number",
-    "tier",
-    "matrix",
-    "axis",
-    "timeline",
-    "timeline-track",
-    "swimlane",
-    "cycle",
-    "card",
-    "callout",
-    "pulse",
-    "draw",
-    "reveal",
-    "emphasis",
-    "edge-label",
-    "yes",
-    "no",
+    "actor",
+    "milestone",
+    "cause",
+    "effect",
+    "category",
 }
+DIAGRAM_EDGE_KINDS = {"direct", "branch", "feedback", "association"}
+CACHE_SCHEMA_VERSION = 2
 
 LAYOUT_MODES = {
     "textDominant",
@@ -391,6 +359,51 @@ class GeminiProviderError(RuntimeError):
     """Raised when Gemini cannot return a usable response."""
 
 
+def _clean_provider_error_text(value: Any, maximum_characters: int = 360) -> str:
+    if not isinstance(value, str):
+        return ""
+    return " ".join(value.split())[:maximum_characters].strip()
+
+
+def _http_error_context(error: urllib.error.HTTPError) -> str:
+    status = _clean_provider_error_text(getattr(error, "reason", ""))
+    message = ""
+
+    try:
+        body = error.read(4096)
+    except (OSError, ValueError):
+        body = b""
+
+    if body:
+        try:
+            parsed = json.loads(body.decode("utf-8", errors="replace"))
+        except json.JSONDecodeError:
+            message = _clean_provider_error_text(
+                body.decode("utf-8", errors="replace")
+            )
+        else:
+            provider_error = (
+                parsed.get("error") if isinstance(parsed, dict) else None
+            )
+            if isinstance(provider_error, dict):
+                status = _clean_provider_error_text(
+                    provider_error.get("status")
+                ) or status
+                message = _clean_provider_error_text(
+                    provider_error.get("message")
+                )
+            elif isinstance(parsed, dict):
+                message = _clean_provider_error_text(parsed.get("message"))
+
+    if status and message:
+        return f"HTTP {error.code} {status}: {message}"
+    if message:
+        return f"HTTP {error.code}: {message}"
+    if status:
+        return f"HTTP {error.code} {status}"
+    return f"HTTP {error.code}"
+
+
 def _default_json_transport(
     request: urllib.request.Request,
     timeout_seconds: float,
@@ -399,16 +412,18 @@ def _default_json_transport(
         with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
             payload = response.read()
     except urllib.error.HTTPError as error:
+        context = _http_error_context(error)
         if error.code == 429:
             raise GeminiProviderError(
-                "AI generation is temporarily quota-limited."
+                f"AI generation is temporarily quota-limited. {context}."
             ) from error
         if error.code in {401, 403}:
             raise GeminiProviderError(
-                "AI generation is not available with the server configuration."
+                "AI generation is not available with the server configuration. "
+                f"{context}."
             ) from error
         raise GeminiProviderError(
-            "The AI provider could not complete the request."
+            f"The AI provider could not complete the request. {context}."
         ) from error
     except (TimeoutError, urllib.error.URLError) as error:
         raise GeminiProviderError(
@@ -457,22 +472,6 @@ def _clean_string(value: Any, maximum_characters: int) -> str:
     return " ".join(value.split())[:maximum_characters].strip()
 
 
-def _clean_int(value: Any, minimum: int, maximum: int, default: int) -> int:
-    if isinstance(value, bool):
-        return default
-    if isinstance(value, int):
-        return min(max(value, minimum), maximum)
-    if isinstance(value, float):
-        return min(max(int(value), minimum), maximum)
-    if isinstance(value, str):
-        try:
-            parsed = int(float(value.strip()))
-        except ValueError:
-            return default
-        return min(max(parsed, minimum), maximum)
-    return default
-
-
 def _stable_block_id(kind: str, index: int) -> str:
     safe_kind = re.sub(r"[^a-z0-9]+", "-", kind.lower()).strip("-") or "block"
     return f"{safe_kind}-{index + 1}"
@@ -509,109 +508,174 @@ def _is_composed_result(value: Any) -> bool:
     )
 
 
-class DiagramSanitizer(HTMLParser):
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self.output: list[str] = []
-        self.tag_stack: list[str] = []
-        self.skip_depth = 0
+def _normalize_diagram(
+    value: dict[str, Any],
+    visual_alt: str,
+) -> dict[str, Any]:
+    diagram_type = value.get("diagramType")
+    if diagram_type not in DIAGRAM_TYPES:
+        diagram_type = "flowchart"
 
-    def handle_starttag(
-        self,
-        tag: str,
-        attrs: list[tuple[str, str | None]],
-    ) -> None:
-        tag = tag.lower()
-        if tag not in ALLOWED_DIAGRAM_TAGS:
-            self.skip_depth += 1
-            return
-        if self.skip_depth:
-            return
-
-        clean_attrs = self._clean_attrs(tag, attrs)
-        attr_text = "".join(
-            f' {name}="{self._escape(value)}"'
-            for name, value in clean_attrs
-        )
-        self.output.append(f"<{tag}{attr_text}>")
-        self.tag_stack.append(tag)
-
-    def handle_endtag(self, tag: str) -> None:
-        tag = tag.lower()
-        if tag not in ALLOWED_DIAGRAM_TAGS:
-            if self.skip_depth:
-                self.skip_depth -= 1
-            return
-        if self.skip_depth:
-            return
-        if tag in self.tag_stack:
-            while self.tag_stack:
-                open_tag = self.tag_stack.pop()
-                self.output.append(f"</{open_tag}>")
-                if open_tag == tag:
-                    break
-
-    def handle_data(self, data: str) -> None:
-        if not self.skip_depth:
-            self.output.append(self._escape(data[:500]))
-
-    def get_html(self) -> str:
-        while self.tag_stack:
-            self.output.append(f"</{self.tag_stack.pop()}>")
-        return "".join(self.output).strip()[:16000]
-
-    def _clean_attrs(
-        self,
-        tag: str,
-        attrs: list[tuple[str, str | None]],
-    ) -> list[tuple[str, str]]:
-        clean_attrs: list[tuple[str, str]] = []
-        allowed = ALLOWED_GLOBAL_ATTRIBUTES | (
-            ALLOWED_SVG_ATTRIBUTES if tag in {"svg", "path", "circle", "rect", "line", "polyline"} else set()
-        )
-        for raw_name, raw_value in attrs:
-            name = raw_name.lower()
-            value = "" if raw_value is None else raw_value.strip()
-            if name.startswith("on") or name not in allowed:
+    raw_nodes = value.get("nodes")
+    nodes: list[dict[str, str]] = []
+    id_map: dict[str, str] = {}
+    used_ids: set[str] = set()
+    if isinstance(raw_nodes, list):
+        for index, raw_node in enumerate(raw_nodes[:18]):
+            if not isinstance(raw_node, dict):
                 continue
-            if name == "class":
-                classes = [
-                    item
-                    for item in value.split()
-                    if item in ALLOWED_DIAGRAM_CLASSES
-                ]
-                if classes:
-                    clean_attrs.append((name, " ".join(classes)))
+            label = _clean_string(raw_node.get("label"), 100)
+            if not label:
                 continue
-            if name == "role" and value not in {"img", "list", "group"}:
-                continue
-            if re.search(r"javascript:|data:|url\(", value, re.IGNORECASE):
-                continue
-            clean_attrs.append((name, value[:500]))
-        return clean_attrs
+            raw_id = _clean_string(raw_node.get("id"), 40)
+            safe_id = re.sub(r"[^a-zA-Z0-9_-]+", "-", raw_id).strip("-")
+            if not safe_id or safe_id in used_ids:
+                safe_id = f"n{len(nodes) + 1}"
+            while safe_id in used_ids:
+                safe_id = f"n{len(nodes) + 1}-{index + 1}"
+            used_ids.add(safe_id)
+            if raw_id and raw_id not in id_map:
+                id_map[raw_id] = safe_id
+            id_map[safe_id] = safe_id
 
-    @staticmethod
-    def _escape(value: str) -> str:
-        return (
-            value.replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-            .replace('"', "&quot;")
+            role = raw_node.get("role")
+            if role not in DIAGRAM_NODE_ROLES:
+                role = "process"
+            nodes.append(
+                {
+                    "id": safe_id,
+                    "label": label,
+                    "description": _clean_string(
+                        raw_node.get("description"),
+                        220,
+                    ),
+                    "role": role,
+                    "lane": _clean_string(raw_node.get("lane"), 60),
+                    "group": _clean_string(raw_node.get("group"), 60),
+                }
+            )
+
+    if len(nodes) < 2:
+        raise GeminiProviderError(
+            "The AI provider returned an incomplete diagram structure."
         )
 
+    node_ids = {node["id"] for node in nodes}
+    raw_edges = value.get("edges")
+    edges: list[dict[str, str]] = []
+    seen_edges: set[tuple[str, str, str]] = set()
+    if isinstance(raw_edges, list):
+        for raw_edge in raw_edges[:30]:
+            if not isinstance(raw_edge, dict):
+                continue
+            raw_source = _clean_string(raw_edge.get("source"), 40)
+            raw_target = _clean_string(raw_edge.get("target"), 40)
+            source = id_map.get(raw_source, raw_source)
+            target = id_map.get(raw_target, raw_target)
+            if source not in node_ids or target not in node_ids:
+                continue
+            kind = raw_edge.get("kind")
+            if kind not in DIAGRAM_EDGE_KINDS:
+                kind = "direct"
+            edge_key = (source, target, kind)
+            if edge_key in seen_edges:
+                continue
+            seen_edges.add(edge_key)
+            edges.append(
+                {
+                    "source": source,
+                    "target": target,
+                    "label": _clean_string(raw_edge.get("label"), 80),
+                    "kind": kind,
+                }
+            )
 
-def sanitize_diagram_html(value: str) -> str:
-    parser = DiagramSanitizer()
-    parser.feed(value)
-    parser.close()
-    return parser.get_html()
+    connected_pairs = {(edge["source"], edge["target"]) for edge in edges}
+
+    def connect_sequence(sequence: list[dict[str, str]]) -> None:
+        for index in range(len(sequence) - 1):
+            pair = (sequence[index]["id"], sequence[index + 1]["id"])
+            if pair in connected_pairs:
+                continue
+            edges.append(
+                {
+                    "source": pair[0],
+                    "target": pair[1],
+                    "label": "",
+                    "kind": "direct",
+                }
+            )
+            connected_pairs.add(pair)
+
+    if diagram_type in {"flowchart", "cycle", "timeline", "causeEffect"}:
+        connect_sequence(nodes)
+    elif not edges:
+        connect_sequence(nodes)
+
+    if diagram_type == "flowchart":
+        if not any(node["role"] == "start" for node in nodes):
+            nodes[0]["role"] = "start"
+        if not any(node["role"] == "end" for node in nodes):
+            nodes[-1]["role"] = "end"
+    elif diagram_type == "cycle":
+        loop_pair = (nodes[-1]["id"], nodes[0]["id"])
+        if loop_pair not in connected_pairs:
+            edges.append(
+                {
+                    "source": nodes[-1]["id"],
+                    "target": nodes[0]["id"],
+                    "label": "cycle repeats",
+                    "kind": "feedback",
+                }
+            )
+            connected_pairs.add(loop_pair)
+    elif diagram_type == "causeEffect":
+        if not any(node["role"] == "cause" for node in nodes):
+            nodes[0]["role"] = "cause"
+        if not any(node["role"] == "effect" for node in nodes):
+            nodes[-1]["role"] = "effect"
+
+    raw_lanes = value.get("lanes")
+    lanes: list[dict[str, str]] = []
+    lane_ids: set[str] = set()
+    if isinstance(raw_lanes, list):
+        for raw_lane in raw_lanes[:8]:
+            if not isinstance(raw_lane, dict):
+                continue
+            lane_id = _clean_string(raw_lane.get("id"), 60)
+            label = _clean_string(raw_lane.get("label"), 80)
+            if not lane_id or not label or lane_id in lane_ids:
+                continue
+            lane_ids.add(lane_id)
+            lanes.append({"id": lane_id, "label": label})
+
+    if diagram_type == "swimlane":
+        for node in nodes:
+            lane_id = node["lane"] or "main"
+            node["lane"] = lane_id
+            if lane_id not in lane_ids:
+                lane_ids.add(lane_id)
+                lanes.append({"id": lane_id, "label": lane_id.replace("-", " ").title()})
+        for lane in lanes:
+            connect_sequence([node for node in nodes if node["lane"] == lane["id"]])
+
+    return {
+        "version": 2,
+        "type": diagram_type,
+        "title": _clean_string(value.get("title"), 120) or visual_alt,
+        "summary": _clean_string(value.get("summary"), 320),
+        "nodes": nodes,
+        "edges": edges,
+        "lanes": lanes,
+    }
 
 
 class GeminiPipeline:
     def __init__(
         self,
         *,
-        api_key: str | None = None,
+        text_api_key: str | None = None,
+        image_api_key: str | None = None,
         text_model: str | None = None,
         image_model: str | None = None,
         diagram_model: str | None = None,
@@ -620,24 +684,32 @@ class GeminiPipeline:
         cache_dir: str | os.PathLike[str] | None = None,
         cache_enabled: bool = True,
     ) -> None:
-        self.api_key = (
-            api_key if api_key is not None else os.getenv("GEMINI_API_KEY", "")
+        self.text_api_key = (
+            text_api_key
+            if text_api_key is not None
+            else os.getenv("DEV_GEMINI_API_KEY", "")
+        ).strip()
+        self.image_api_key = (
+            image_api_key
+            if image_api_key is not None
+            else os.getenv("PROD_GEMINI_API_KEY", "")
         ).strip()
         self.text_model = (
             text_model
             if text_model is not None
-            else os.getenv("GEMINI_TEXT_MODEL", DEFAULT_TEXT_MODEL)
+            else os.getenv("GEMINI_TEXT_MODEL", "")
         ).strip()
         self.image_model = (
             image_model
             if image_model is not None
-            else os.getenv("GEMINI_IMAGE_MODEL", DEFAULT_IMAGE_MODEL)
+            else os.getenv("GEMINI_IMAGE_MODEL", "")
         ).strip()
+        configured_diagram_model = os.getenv("GEMINI_DIAGRAM_MODEL", "")
         self.diagram_model = (
             diagram_model
             if diagram_model is not None
-            else os.getenv("GEMINI_DIAGRAM_MODEL", DEFAULT_DIAGRAM_MODEL)
-        ).strip()
+            else configured_diagram_model
+        ).strip() or self.text_model
         self.transport = transport or _default_json_transport
         self.clock = clock
         self.cache_enabled = cache_enabled
@@ -646,8 +718,10 @@ class GeminiPipeline:
         self.cache_lock = Lock()
 
     async def generate(self, user_input: str) -> dict[str, Any]:
-        if not self.api_key:
-            raise GeminiConfigurationError("AI generation is not configured.")
+        if not self.text_api_key or not self.text_model:
+            raise GeminiConfigurationError(
+                "AI text generation is not configured."
+            )
 
         cached = self._get_cached_result(user_input)
         if cached is not None:
@@ -668,14 +742,13 @@ class GeminiPipeline:
         visual_alt: str,
     ) -> dict[str, Any] | None:
         if visual_strategy == "diagram":
-            try:
-                return await asyncio.to_thread(
-                    self._generate_diagram,
-                    visual_prompt,
-                    visual_alt,
-                )
-            except GeminiProviderError:
+            if not self.text_api_key or not self.diagram_model:
                 return None
+            return await asyncio.to_thread(
+                self._generate_diagram,
+                visual_prompt,
+                visual_alt,
+            )
         if visual_strategy == "image":
             return await self._try_generate_visual(
                 {
@@ -692,6 +765,8 @@ class GeminiPipeline:
         self,
         notes: dict[str, Any],
     ) -> dict[str, Any] | None:
+        if not self.image_api_key or not self.image_model:
+            return None
         try:
             return await asyncio.to_thread(
                 self._generate_image,
@@ -724,7 +799,8 @@ class GeminiPipeline:
                 source_input = cached.get("input")
                 result = cached.get("result")
                 if (
-                    isinstance(source_input, str)
+                    cached.get("schemaVersion") == CACHE_SCHEMA_VERSION
+                    and isinstance(source_input, str)
                     and isinstance(result, dict)
                     and _is_composed_result(result)
                     and _similar_enough(user_input, source_input)
@@ -736,6 +812,7 @@ class GeminiPipeline:
         if not self.cache_enabled:
             return
         payload = {
+            "schemaVersion": CACHE_SCHEMA_VERSION,
             "input": user_input,
             "createdAt": self.clock(),
             "result": result,
@@ -779,6 +856,7 @@ class GeminiPipeline:
         }
         response = self._request_model(
             self.text_model,
+            self.text_api_key,
             payload,
             TEXT_REQUEST_TIMEOUT_SECONDS,
         )
@@ -881,6 +959,7 @@ class GeminiPipeline:
         }
         response = self._request_model(
             self.text_model,
+            self.text_api_key,
             payload,
             PLANNER_REQUEST_TIMEOUT_SECONDS,
         )
@@ -1080,6 +1159,7 @@ class GeminiPipeline:
         }
         response = self._request_model(
             self.diagram_model,
+            self.text_api_key,
             payload,
             DIAGRAM_REQUEST_TIMEOUT_SECONDS,
         )
@@ -1098,34 +1178,17 @@ class GeminiPipeline:
             structured = json.loads(text)
         except json.JSONDecodeError as error:
             raise GeminiProviderError(
-                "The AI provider returned malformed diagram HTML."
+                "The AI provider returned malformed diagram data."
             ) from error
         if not isinstance(structured, dict):
             raise GeminiProviderError(
-                "The AI provider returned malformed diagram HTML."
+                "The AI provider returned malformed diagram data."
             )
 
-        html = sanitize_diagram_html(_clean_string(structured.get("html"), 18000))
-        if not html:
-            raise GeminiProviderError("The AI provider returned no diagram.")
-        canvas_width = _clean_int(
-            structured.get("canvasWidth"),
-            900,
-            3600,
-            1600,
-        )
-        canvas_height = _clean_int(
-            structured.get("canvasHeight"),
-            600,
-            2800,
-            1000,
-        )
         return {
             "kind": "diagram",
-            "html": html,
             "alt": visual_alt,
-            "canvasWidth": canvas_width,
-            "canvasHeight": canvas_height,
+            "diagram": _normalize_diagram(structured, visual_alt),
         }
 
     def _generate_image(
@@ -1146,6 +1209,7 @@ class GeminiPipeline:
         }
         response = self._request_model(
             self.image_model,
+            self.image_api_key,
             payload,
             IMAGE_REQUEST_TIMEOUT_SECONDS,
         )
@@ -1185,6 +1249,7 @@ class GeminiPipeline:
     def _request_model(
         self,
         model: str,
+        api_key: str,
         payload: dict[str, Any],
         timeout_seconds: float,
     ) -> dict[str, Any]:
@@ -1194,7 +1259,7 @@ class GeminiPipeline:
             data=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
             headers={
                 "Content-Type": "application/json",
-                "x-goog-api-key": self.api_key,
+                "x-goog-api-key": api_key,
             },
             method="POST",
         )

@@ -1,14 +1,20 @@
 import base64
+import io
 import json
 import unittest
+import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 from backend.services.gemini_pipeline import (
     GeminiConfigurationError,
     GeminiPipeline,
+    GeminiProviderError,
+    _default_json_transport,
+    _normalize_diagram,
 )
 
 
@@ -109,11 +115,36 @@ def image_block() -> dict[str, Any]:
 
 
 def diagram_response(
-    html: str,
     *,
-    canvas_width: int = 2200,
-    canvas_height: int = 1100,
+    diagram_type: str = "flowchart",
+    node_count: int = 5,
 ) -> dict[str, Any]:
+    nodes = [
+        {
+            "id": f"n{index + 1}",
+            "label": f"Car stage {index + 1}",
+            "description": f"What happens during stage {index + 1}.",
+            "role": (
+                "start"
+                if index == 0
+                else "end"
+                if index == node_count - 1
+                else "process"
+            ),
+            "lane": "powertrain" if diagram_type == "swimlane" else "",
+            "group": "Power" if index < node_count / 2 else "Motion",
+        }
+        for index in range(node_count)
+    ]
+    edges = [
+        {
+            "source": f"n{index + 1}",
+            "target": f"n{index + 2}",
+            "label": "then",
+            "kind": "direct",
+        }
+        for index in range(node_count - 1)
+    ]
     return {
         "candidates": [
             {
@@ -122,9 +153,16 @@ def diagram_response(
                         {
                             "text": json.dumps(
                                 {
-                                    "html": html,
-                                    "canvasWidth": canvas_width,
-                                    "canvasHeight": canvas_height,
+                                    "diagramType": diagram_type,
+                                    "title": "How a car creates motion",
+                                    "summary": "Energy moves through connected vehicle systems.",
+                                    "nodes": nodes,
+                                    "edges": edges,
+                                    "lanes": (
+                                        [{"id": "powertrain", "label": "Powertrain"}]
+                                        if diagram_type == "swimlane"
+                                        else []
+                                    ),
                                 }
                             )
                         }
@@ -169,13 +207,75 @@ class StubTransport:
         return self.responses.pop(0)
 
 
+TEST_DEV_KEY = "dev-secret"
+TEST_PROD_KEY = "prod-secret"
+TEST_TEXT_MODEL = "text-test-model"
+TEST_DIAGRAM_MODEL = "diagram-test-model"
+TEST_IMAGE_MODEL = "image-test-model"
+
+
+class GeminiTransportTests(unittest.TestCase):
+    def test_http_error_includes_sanitized_provider_context(self) -> None:
+        body = json.dumps(
+            {
+                "error": {
+                    "code": 400,
+                    "message": "Publisher model is not found.",
+                    "status": "INVALID_ARGUMENT",
+                }
+            }
+        ).encode("utf-8")
+        error = urllib.error.HTTPError(
+            "https://generativelanguage.googleapis.com/v1beta/models/test:generateContent",
+            400,
+            "Bad Request",
+            {},
+            io.BytesIO(body),
+        )
+        request = urllib.request.Request("https://example.test")
+
+        with patch("urllib.request.urlopen", side_effect=error):
+            with self.assertRaisesRegex(
+                GeminiProviderError,
+                "HTTP 400 INVALID_ARGUMENT: Publisher model is not found",
+            ):
+                _default_json_transport(request, 1)
+
+    def test_quota_error_reports_429_context(self) -> None:
+        body = json.dumps(
+            {
+                "error": {
+                    "code": 429,
+                    "message": "Quota exceeded.",
+                    "status": "RESOURCE_EXHAUSTED",
+                }
+            }
+        ).encode("utf-8")
+        error = urllib.error.HTTPError(
+            "https://generativelanguage.googleapis.com/v1beta/models/test:generateContent",
+            429,
+            "Too Many Requests",
+            {},
+            io.BytesIO(body),
+        )
+        request = urllib.request.Request("https://example.test")
+
+        with patch("urllib.request.urlopen", side_effect=error):
+            with self.assertRaisesRegex(
+                GeminiProviderError,
+                "temporarily quota-limited. HTTP 429 RESOURCE_EXHAUSTED",
+            ):
+                _default_json_transport(request, 1)
+
+
 class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
     async def test_text_only_uses_notes_and_planner_requests(self) -> None:
         transport = StubTransport([text_response(), planner_response()])
         pipeline = GeminiPipeline(
-            api_key="server-secret",
-            text_model="gemini-2.5-flash-lite",
-            image_model="gemini-2.5-flash-image",
+            text_api_key=TEST_DEV_KEY,
+            image_api_key=TEST_PROD_KEY,
+            text_model=TEST_TEXT_MODEL,
+            image_model=TEST_IMAGE_MODEL,
             transport=transport,
             cache_enabled=False,
         )
@@ -185,11 +285,16 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(transport.requests), 2)
         notes_request, _ = transport.requests[0]
         planner_request, _ = transport.requests[1]
-        self.assertIn("gemini-2.5-flash-lite", notes_request.full_url)
-        self.assertNotIn("server-secret", notes_request.full_url)
+        self.assertIn(TEST_TEXT_MODEL, notes_request.full_url)
+        self.assertIn(TEST_TEXT_MODEL, planner_request.full_url)
+        self.assertNotIn(TEST_DEV_KEY, notes_request.full_url)
         self.assertEqual(
             dict(notes_request.header_items())["X-goog-api-key"],
-            "server-secret",
+            TEST_DEV_KEY,
+        )
+        self.assertEqual(
+            dict(planner_request.header_items())["X-goog-api-key"],
+            TEST_DEV_KEY,
         )
         notes_body = json.loads(notes_request.data.decode("utf-8"))
         planner_body = json.loads(planner_request.data.decode("utf-8"))
@@ -226,7 +331,10 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
         pipeline = GeminiPipeline(
-            api_key="server-secret",
+            text_api_key=TEST_DEV_KEY,
+            image_api_key=TEST_PROD_KEY,
+            text_model=TEST_TEXT_MODEL,
+            image_model=TEST_IMAGE_MODEL,
             transport=transport,
             cache_enabled=False,
         )
@@ -240,25 +348,14 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["_visualRequests"][0]["blockId"], "diagram-2")
         self.assertIn("glucose", result["_visualRequests"][0]["visualPrompt"].lower())
 
-    async def test_generate_visual_returns_sanitized_rich_diagram(self) -> None:
-        transport = StubTransport(
-            [
-                diagram_response(
-                    '<section class="diagram hero-diagram workflow wide fake" onclick="bad()">'
-                    '<div class="step start input reveal"><span class="step-number">1</span>'
-                    '<h3 class="title">Glucose enters</h3>'
-                    '<p class="detail">Chemical energy is available.</p></div>'
-                    '<script>alert(1)</script>'
-                    '<span class="arrow draw">-></span>'
-                    '<span class="edge-label yes">pass</span>'
-                    '<div class="step end output pulse"><strong>ATP</strong>'
-                    '<p class="note">Usable cell energy.</p></div>'
-                    "</section>"
-                )
-            ]
-        )
+    async def test_generate_visual_returns_structured_adaptive_diagram(self) -> None:
+        transport = StubTransport([diagram_response(node_count=9)])
         pipeline = GeminiPipeline(
-            api_key="server-secret",
+            text_api_key=TEST_DEV_KEY,
+            image_api_key=TEST_PROD_KEY,
+            text_model=TEST_TEXT_MODEL,
+            diagram_model=TEST_DIAGRAM_MODEL,
+            image_model=TEST_IMAGE_MODEL,
             transport=transport,
             cache_enabled=False,
         )
@@ -270,19 +367,199 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(len(transport.requests), 1)
-        self.assertIn("gemini-2.5-flash", transport.requests[0][0].full_url)
+        self.assertIn(TEST_DIAGRAM_MODEL, transport.requests[0][0].full_url)
+        self.assertEqual(
+            dict(transport.requests[0][0].header_items())["X-goog-api-key"],
+            TEST_DEV_KEY,
+        )
         request_body = json.loads(transport.requests[0][0].data.decode("utf-8"))
         self.assertEqual(request_body["generationConfig"]["maxOutputTokens"], 4200)
         self.assertEqual(visual["kind"], "diagram")
-        self.assertIn('class="diagram hero-diagram workflow wide"', visual["html"])
-        self.assertIn('class="step start input reveal"', visual["html"])
-        self.assertIn('class="edge-label yes"', visual["html"])
-        self.assertIn('class="arrow draw"', visual["html"])
-        self.assertIn('class="step end output pulse"', visual["html"])
-        self.assertEqual(visual["canvasWidth"], 2200)
-        self.assertEqual(visual["canvasHeight"], 1100)
-        self.assertNotIn("onclick", visual["html"])
-        self.assertNotIn("script", visual["html"])
+        self.assertEqual(visual["diagram"]["version"], 2)
+        self.assertEqual(visual["diagram"]["type"], "flowchart")
+        self.assertEqual(len(visual["diagram"]["nodes"]), 9)
+        self.assertEqual(len(visual["diagram"]["edges"]), 8)
+        self.assertEqual(visual["diagram"]["nodes"][0]["role"], "start")
+        self.assertEqual(visual["diagram"]["nodes"][-1]["role"], "end")
+        self.assertNotIn("html", visual)
+
+    async def test_diagram_accepts_omitted_optional_structure_fields(self) -> None:
+        transport = StubTransport(
+            [
+                {
+                    "candidates": [
+                        {
+                            "content": {
+                                "parts": [
+                                    {
+                                        "text": json.dumps(
+                                            {
+                                                "diagramType": "flowchart",
+                                                "title": "Car power flow",
+                                                "nodes": [
+                                                    {
+                                                        "id": "n1",
+                                                        "label": "Fuel ignites",
+                                                        "description": "Combustion releases energy.",
+                                                        "role": "start",
+                                                    },
+                                                    {
+                                                        "id": "n2",
+                                                        "label": "Wheels turn",
+                                                        "description": "The drivetrain transfers torque.",
+                                                        "role": "end",
+                                                    },
+                                                ],
+                                                "edges": [
+                                                    {"source": "n1", "target": "n2"}
+                                                ],
+                                            }
+                                        )
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            ]
+        )
+        pipeline = GeminiPipeline(
+            text_api_key=TEST_DEV_KEY,
+            diagram_model=TEST_DIAGRAM_MODEL,
+            transport=transport,
+            cache_enabled=False,
+        )
+
+        visual = await pipeline.generate_visual(
+            "diagram",
+            "Explain how a car turns fuel into motion.",
+            "Car power flow",
+        )
+
+        self.assertEqual(visual["diagram"]["nodes"][0]["lane"], "")
+        self.assertEqual(visual["diagram"]["nodes"][0]["group"], "")
+        self.assertEqual(visual["diagram"]["edges"][0]["kind"], "direct")
+
+    async def test_diagram_provider_error_is_not_silently_discarded(self) -> None:
+        transport = StubTransport(
+            [{"candidates": [{"content": {"parts": [{"text": "not-json"}]}}]}]
+        )
+        pipeline = GeminiPipeline(
+            text_api_key=TEST_DEV_KEY,
+            diagram_model=TEST_DIAGRAM_MODEL,
+            transport=transport,
+            cache_enabled=False,
+        )
+
+        with self.assertRaisesRegex(GeminiProviderError, "malformed diagram data"):
+            await pipeline.generate_visual(
+                "diagram",
+                "Explain a process.",
+                "Process diagram",
+            )
+
+    def test_normalizer_supports_every_hardcoded_diagram_type(self) -> None:
+        diagram_types = {
+            "flowchart",
+            "swimlane",
+            "decisionTree",
+            "cycle",
+            "timeline",
+            "comparisonMatrix",
+            "systemMap",
+            "causeEffect",
+        }
+        base_nodes = [
+            {
+                "id": f"n{index}",
+                "label": f"Node {index}",
+                "description": "Specific explanation",
+                "role": "process",
+                "lane": "driver",
+                "group": "Vehicle",
+            }
+            for index in range(1, 6)
+        ]
+        base_edges = [
+            {
+                "source": f"n{index}",
+                "target": f"n{index + 1}",
+                "label": "next",
+                "kind": "direct",
+            }
+            for index in range(1, 5)
+        ]
+
+        for diagram_type in diagram_types:
+            with self.subTest(diagram_type=diagram_type):
+                normalized = _normalize_diagram(
+                    {
+                        "diagramType": diagram_type,
+                        "title": "Vehicle system",
+                        "summary": "A structured explanation.",
+                        "nodes": base_nodes,
+                        "edges": base_edges,
+                        "lanes": [{"id": "driver", "label": "Driver"}],
+                    },
+                    "Vehicle system diagram",
+                )
+                self.assertEqual(normalized["type"], diagram_type)
+                self.assertEqual(len(normalized["nodes"]), 5)
+                self.assertTrue(normalized["edges"])
+
+        cycle = _normalize_diagram(
+            {
+                "diagramType": "cycle",
+                "title": "Engine cycle",
+                "summary": "",
+                "nodes": base_nodes,
+                "edges": base_edges,
+                "lanes": [],
+            },
+            "Engine cycle",
+        )
+        self.assertTrue(any(edge["kind"] == "feedback" for edge in cycle["edges"]))
+
+    def test_normalizer_repairs_partial_sequential_connections(self) -> None:
+        nodes = [
+            {
+                "id": f"n{index}",
+                "label": f"Stage {index}",
+                "description": "Specific explanation",
+                "role": "process",
+                "lane": "",
+                "group": "",
+            }
+            for index in range(1, 5)
+        ]
+        normalized = _normalize_diagram(
+            {
+                "diagramType": "flowchart",
+                "title": "Four-stage process",
+                "summary": "",
+                "nodes": nodes,
+                "edges": [
+                    {
+                        "source": "n1",
+                        "target": "n2",
+                        "label": "begins",
+                        "kind": "direct",
+                    },
+                    {
+                        "source": "missing",
+                        "target": "n4",
+                        "label": "invalid",
+                        "kind": "direct",
+                    },
+                ],
+                "lanes": [],
+            },
+            "Four-stage process",
+        )
+
+        pairs = {(edge["source"], edge["target"]) for edge in normalized["edges"]}
+        self.assertTrue({("n1", "n2"), ("n2", "n3"), ("n3", "n4")} <= pairs)
+        self.assertFalse(any(edge["source"] == "missing" for edge in normalized["edges"]))
 
     async def test_image_strategy_uses_no_text_prompt_prefix(self) -> None:
         transport = StubTransport(
@@ -300,7 +577,10 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
         pipeline = GeminiPipeline(
-            api_key="server-secret",
+            text_api_key=TEST_DEV_KEY,
+            image_api_key=TEST_PROD_KEY,
+            text_model=TEST_TEXT_MODEL,
+            image_model=TEST_IMAGE_MODEL,
             transport=transport,
             cache_enabled=False,
         )
@@ -315,7 +595,19 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(transport.requests), 3)
         image_request, _ = transport.requests[2]
-        self.assertIn("gemini-2.5-flash-image", image_request.full_url)
+        self.assertIn(TEST_IMAGE_MODEL, image_request.full_url)
+        self.assertEqual(
+            dict(transport.requests[0][0].header_items())["X-goog-api-key"],
+            TEST_DEV_KEY,
+        )
+        self.assertEqual(
+            dict(transport.requests[1][0].header_items())["X-goog-api-key"],
+            TEST_DEV_KEY,
+        )
+        self.assertEqual(
+            dict(image_request.header_items())["X-goog-api-key"],
+            TEST_PROD_KEY,
+        )
         image_body = json.loads(image_request.data.decode("utf-8"))
         prompt = image_body["contents"][0]["parts"][0]["text"]
         self.assertIn("absolutely no text", prompt)
@@ -341,17 +633,15 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
                         }
                     ],
                 ),
-                diagram_response(
-                    '<section class="diagram hero-diagram">'
-                    '<div class="step input">Evaporation</div>'
-                    '<span class="arrow draw">-></span>'
-                    '<div class="step output">Condensation</div>'
-                    "</section>"
-                ),
+                diagram_response(diagram_type="cycle", node_count=4),
             ]
         )
         pipeline = GeminiPipeline(
-            api_key="server-secret",
+            text_api_key=TEST_DEV_KEY,
+            image_api_key=TEST_PROD_KEY,
+            text_model=TEST_TEXT_MODEL,
+            diagram_model=TEST_DIAGRAM_MODEL,
+            image_model=TEST_IMAGE_MODEL,
             transport=transport,
             cache_dir=cache_dir,
         )
@@ -374,7 +664,11 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
 
         cached_transport = StubTransport([])
         cached_pipeline = GeminiPipeline(
-            api_key="server-secret",
+            text_api_key=TEST_DEV_KEY,
+            image_api_key=TEST_PROD_KEY,
+            text_model=TEST_TEXT_MODEL,
+            diagram_model=TEST_DIAGRAM_MODEL,
+            image_model=TEST_IMAGE_MODEL,
             transport=cached_transport,
             cache_dir=cache_dir,
         )
@@ -396,7 +690,10 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
         pipeline = GeminiPipeline(
-            api_key="server-secret",
+            text_api_key=TEST_DEV_KEY,
+            image_api_key=TEST_PROD_KEY,
+            text_model=TEST_TEXT_MODEL,
+            image_model=TEST_IMAGE_MODEL,
             transport=transport,
             cache_enabled=False,
         )
@@ -410,13 +707,57 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(transport.requests), 1)
         self.assertIsNone(visual)
 
-    async def test_missing_key_fails_before_any_request(self) -> None:
+    async def test_missing_text_key_fails_before_any_request(self) -> None:
         transport = StubTransport([])
         pipeline = GeminiPipeline(
-            api_key="",
+            text_api_key="",
+            image_api_key=TEST_PROD_KEY,
+            text_model=TEST_TEXT_MODEL,
+            image_model=TEST_IMAGE_MODEL,
             transport=transport,
             cache_enabled=False,
         )
+
+        with self.assertRaises(GeminiConfigurationError):
+            await pipeline.generate("Explain ATP.")
+
+        self.assertEqual(transport.requests, [])
+
+    async def test_missing_image_key_returns_none_without_request(self) -> None:
+        transport = StubTransport([image_response()])
+        pipeline = GeminiPipeline(
+            text_api_key=TEST_DEV_KEY,
+            image_api_key="",
+            text_model=TEST_TEXT_MODEL,
+            image_model=TEST_IMAGE_MODEL,
+            transport=transport,
+            cache_enabled=False,
+        )
+
+        visual = await pipeline.generate_visual(
+            "image",
+            "A diagram of ATP production.",
+            "ATP production diagram.",
+        )
+
+        self.assertIsNone(visual)
+        self.assertEqual(transport.requests, [])
+
+    async def test_legacy_gemini_key_env_is_ignored(self) -> None:
+        transport = StubTransport([])
+        with patch.dict(
+            "os.environ",
+            {
+                "GEMINI_API_KEY": "legacy-secret",
+                "GEMINI_TEXT_MODEL": TEST_TEXT_MODEL,
+                "GEMINI_IMAGE_MODEL": TEST_IMAGE_MODEL,
+            },
+            clear=True,
+        ):
+            pipeline = GeminiPipeline(
+                transport=transport,
+                cache_enabled=False,
+            )
 
         with self.assertRaises(GeminiConfigurationError):
             await pipeline.generate("Explain ATP.")
@@ -434,7 +775,10 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
         pipeline = GeminiPipeline(
-            api_key="server-secret",
+            text_api_key=TEST_DEV_KEY,
+            image_api_key=TEST_PROD_KEY,
+            text_model=TEST_TEXT_MODEL,
+            image_model=TEST_IMAGE_MODEL,
             transport=transport,
             cache_enabled=False,
         )
@@ -456,7 +800,10 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
         pipeline = GeminiPipeline(
-            api_key="server-secret",
+            text_api_key=TEST_DEV_KEY,
+            image_api_key=TEST_PROD_KEY,
+            text_model=TEST_TEXT_MODEL,
+            image_model=TEST_IMAGE_MODEL,
             transport=transport,
             cache_enabled=False,
         )

@@ -1,0 +1,594 @@
+.figure {
+  --diagram-ink: var(--canvas-text);
+  --diagram-muted: var(--canvas-muted);
+  --diagram-paper: var(--canvas-soft);
+  --diagram-ground: var(--canvas-surface);
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  color: var(--diagram-ink);
+  background:
+    radial-gradient(circle at 8% 8%, color-mix(in srgb, var(--diagram-muted) 10%, transparent), transparent 30%),
+    linear-gradient(145deg, color-mix(in srgb, var(--diagram-ground) 92%, transparent), var(--diagram-ground));
+}
+
+.header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem 1.5rem;
+  padding: 1.5rem 1.5rem 1.25rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--diagram-muted) 22%, transparent);
+}
+
+.typeLabel,
+.relationshipTitle,
+.columnLabel {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: var(--diagram-muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.title {
+  margin: 0;
+  font-size: clamp(1.2rem, 2vw, 1.65rem);
+  font-weight: 650;
+  letter-spacing: -0.025em;
+  line-height: 1.08;
+  text-wrap: balance;
+}
+
+.summary {
+  grid-column: 1 / -1;
+  max-width: 70ch;
+  margin: 0;
+  color: var(--diagram-muted);
+  font-size: 0.9rem;
+  line-height: 1.55;
+  text-wrap: pretty;
+}
+
+.nodeCount {
+  align-self: start;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid color-mix(in srgb, var(--diagram-muted) 22%, transparent);
+  border-radius: 0.45rem;
+  color: var(--diagram-muted);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  padding: clamp(1rem, 2.6vw, 2rem);
+  overflow: auto;
+}
+
+.node {
+  width: clamp(11.5rem, 18vw, 15.5rem);
+  min-height: 8.5rem;
+  padding: 1rem;
+  border: 1px solid color-mix(in srgb, var(--diagram-muted) 24%, transparent);
+  border-radius: 0.9rem;
+  color: var(--diagram-ink);
+  background: color-mix(in srgb, var(--diagram-paper) 92%, transparent);
+  box-shadow: 0 1rem 2.5rem color-mix(in srgb, var(--canvas-bg) 18%, transparent);
+}
+
+.nodeMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-height: 1.35rem;
+  margin-bottom: 0.7rem;
+}
+
+.nodeIndex,
+.cycleIndex,
+.timelineMarker {
+  display: grid;
+  width: 1.65rem;
+  height: 1.65rem;
+  place-items: center;
+  border-radius: 0.5rem;
+  color: var(--canvas-bg);
+  background: var(--diagram-ink);
+  font-size: 0.68rem;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+
+.role {
+  color: var(--diagram-muted);
+  font-size: 0.63rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.nodeTitle {
+  margin: 0;
+  font-size: 0.98rem;
+  font-weight: 680;
+  letter-spacing: -0.012em;
+  line-height: 1.25;
+  text-wrap: balance;
+}
+
+.nodeDescription {
+  margin: 0.5rem 0 0;
+  color: var(--diagram-muted);
+  font-size: 0.78rem;
+  line-height: 1.48;
+  text-wrap: pretty;
+}
+
+.start,
+.input,
+.cause {
+  border-left: 0.28rem solid color-mix(in srgb, var(--diagram-muted) 70%, var(--diagram-ink));
+}
+
+.end,
+.output,
+.effect {
+  border-color: color-mix(in srgb, var(--diagram-ink) 46%, transparent);
+  background: color-mix(in srgb, var(--diagram-paper) 76%, var(--diagram-ground));
+}
+
+.decision {
+  border-style: dashed;
+  background: color-mix(in srgb, var(--diagram-paper) 78%, var(--diagram-ground));
+}
+
+.process,
+.actor,
+.milestone,
+.category {
+  border-top-color: color-mix(in srgb, var(--diagram-muted) 36%, transparent);
+}
+
+.milestone .nodeIndex,
+.milestone .role,
+.category .role {
+  font-variant-numeric: tabular-nums;
+}
+
+.horizontalViewport {
+  min-width: min-content;
+}
+
+.flowTrack,
+.laneTrack {
+  display: flex;
+  align-items: center;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.flowItem {
+  display: flex;
+  align-items: center;
+}
+
+.connector {
+  display: flex;
+  width: clamp(4rem, 7vw, 7rem);
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--diagram-muted);
+}
+
+.arrow,
+.cycleArrow,
+.causalArrow {
+  font-size: 1.5rem;
+  font-weight: 300;
+}
+
+.edgeLabel,
+.branchLabels span {
+  max-width: 6.5rem;
+  padding: 0.25rem 0.45rem;
+  border: 1px solid color-mix(in srgb, var(--diagram-muted) 20%, transparent);
+  border-radius: 99rem;
+  color: var(--diagram-muted);
+  background: var(--diagram-ground);
+  font-size: 0.64rem;
+  font-weight: 650;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.feedbackRail,
+.cycleReturn {
+  display: flex;
+  width: fit-content;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 1.5rem auto 0;
+  padding: 0.55rem 0.8rem;
+  border: 1px dashed color-mix(in srgb, var(--diagram-muted) 35%, transparent);
+  border-radius: 0.65rem;
+  color: var(--diagram-muted);
+  font-size: 0.75rem;
+}
+
+.laneStack {
+  display: grid;
+  min-width: min-content;
+  gap: 0.75rem;
+}
+
+.lane {
+  display: grid;
+  grid-template-columns: 9rem minmax(0, 1fr);
+  align-items: stretch;
+  border: 1px solid color-mix(in srgb, var(--diagram-muted) 18%, transparent);
+  border-radius: 0.85rem;
+  overflow: hidden;
+}
+
+.laneTitle {
+  display: flex;
+  align-items: center;
+  margin: 0;
+  padding: 1rem;
+  border-right: 1px solid color-mix(in srgb, var(--diagram-muted) 18%, transparent);
+  color: var(--diagram-muted);
+  background: color-mix(in srgb, var(--diagram-paper) 48%, transparent);
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.laneTrack {
+  min-height: 11rem;
+  padding: 1rem;
+}
+
+.laneTrack .node {
+  width: 12.5rem;
+  min-height: 7.5rem;
+}
+
+.relationships {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid color-mix(in srgb, var(--diagram-muted) 18%, transparent);
+}
+
+.relationshipList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.relationship {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 0.55rem;
+  color: var(--diagram-muted);
+  background: color-mix(in srgb, var(--diagram-paper) 70%, transparent);
+  font-size: 0.7rem;
+}
+
+.relationship em {
+  font-size: 0.65rem;
+}
+
+.relationshipArrow {
+  color: var(--diagram-ink);
+}
+
+.tree {
+  display: grid;
+  min-width: 42rem;
+  gap: 3.4rem;
+}
+
+.treeLevel {
+  position: relative;
+  display: flex;
+  justify-content: space-evenly;
+  gap: 1.5rem;
+}
+
+.treeLevel:not(:first-child)::before {
+  position: absolute;
+  top: -2.25rem;
+  left: 10%;
+  width: 80%;
+  height: 1px;
+  content: "";
+  background: color-mix(in srgb, var(--diagram-muted) 36%, transparent);
+}
+
+.treeNodeWrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.treeNodeWrap:not(:only-child)::before {
+  position: absolute;
+  top: -2.25rem;
+  width: 1px;
+  height: 2.25rem;
+  content: "";
+  background: color-mix(in srgb, var(--diagram-muted) 36%, transparent);
+}
+
+.branchLabels {
+  position: absolute;
+  top: -1.8rem;
+  display: flex;
+  gap: 0.25rem;
+  transform: translateY(-50%);
+}
+
+.cycleWrap {
+  min-width: min-content;
+  padding: 1rem;
+  border: 1px dashed color-mix(in srgb, var(--diagram-muted) 30%, transparent);
+  border-radius: 8rem;
+}
+
+.cycleTrack {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin: 0;
+  padding: 1.2rem;
+  list-style: none;
+}
+
+.cycleItem {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.cycleIndex {
+  flex: 0 0 auto;
+  border-radius: 99rem;
+}
+
+.cycleItem .node {
+  width: 12rem;
+}
+
+.cycleItem:last-child .cycleArrow {
+  display: none;
+}
+
+.timeline {
+  position: relative;
+  display: grid;
+  max-width: 56rem;
+  gap: 0;
+  margin: 0 auto;
+  padding: 0;
+  list-style: none;
+}
+
+.timelineItem {
+  position: relative;
+  display: grid;
+  grid-template-columns: 2.25rem minmax(0, 1fr);
+  gap: 1.25rem;
+  min-height: 10.5rem;
+}
+
+.timelineMarker {
+  z-index: 1;
+  border-radius: 99rem;
+}
+
+.timelineLine {
+  position: absolute;
+  top: 1.65rem;
+  bottom: 0;
+  left: 0.81rem;
+  width: 1px;
+  background: color-mix(in srgb, var(--diagram-muted) 44%, transparent);
+}
+
+.timelineItem .node {
+  width: 100%;
+  min-height: auto;
+  margin-bottom: 1.25rem;
+}
+
+.matrix {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 0.75rem;
+  min-width: 34rem;
+}
+
+.matrixColumn {
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--diagram-muted) 22%, transparent);
+  border-radius: 0.9rem;
+}
+
+.matrixTitle {
+  margin: 0;
+  padding: 0.9rem 1rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--diagram-muted) 22%, transparent);
+  background: color-mix(in srgb, var(--diagram-paper) 60%, transparent);
+  font-size: 0.8rem;
+  font-weight: 720;
+}
+
+.matrixCells {
+  display: grid;
+  gap: 0.6rem;
+  padding: 0.6rem;
+}
+
+.matrixCells .node {
+  width: 100%;
+  min-height: 7.5rem;
+  box-shadow: none;
+}
+
+.systemMap {
+  min-width: 44rem;
+}
+
+.systemLayers {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.systemLayer {
+  display: grid;
+  grid-template-columns: 9rem minmax(0, 1fr);
+  gap: 1rem;
+  align-items: center;
+  padding: 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--diagram-muted) 18%, transparent);
+  border-radius: 0.85rem;
+  background: color-mix(in srgb, var(--diagram-paper) 26%, transparent);
+}
+
+.layerLabel span {
+  color: var(--diagram-muted);
+  font-size: 0.65rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.layerLabel h4 {
+  margin: 0.25rem 0 0;
+  font-size: 0.82rem;
+  line-height: 1.25;
+}
+
+.layerNodes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.65rem;
+}
+
+.layerNodes .node {
+  width: 100%;
+  min-height: 7.5rem;
+  box-shadow: none;
+}
+
+.causeEffect {
+  display: grid;
+  grid-template-columns: minmax(13rem, 1fr) auto minmax(13rem, 1fr) auto minmax(13rem, 1fr);
+  gap: 0.85rem;
+  align-items: center;
+  min-width: 48rem;
+}
+
+.causeColumn,
+.mechanismColumn,
+.effectColumn {
+  display: grid;
+  gap: 0.65rem;
+  align-content: center;
+  padding: 0.8rem;
+  border-radius: 0.9rem;
+  background: color-mix(in srgb, var(--diagram-paper) 36%, transparent);
+}
+
+.causeColumn .node,
+.mechanismColumn .node,
+.effectColumn .node {
+  width: 100%;
+  min-height: 7.5rem;
+  box-shadow: none;
+}
+
+.causalArrow {
+  color: var(--diagram-muted);
+}
+
+.empty {
+  display: grid;
+  min-height: 20rem;
+  place-items: center;
+  color: var(--diagram-muted);
+  background: var(--diagram-ground);
+  font-size: 0.9rem;
+}
+
+.motion .node,
+.motion .lane,
+.motion .systemLayer,
+.motion .matrixColumn {
+  animation: enter 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.motion .node:nth-child(2),
+.motion .systemLayer:nth-child(2),
+.motion .matrixColumn:nth-child(2) {
+  animation-delay: 70ms;
+}
+
+.motion .node:nth-child(3),
+.motion .systemLayer:nth-child(3),
+.motion .matrixColumn:nth-child(3) {
+  animation-delay: 140ms;
+}
+
+@keyframes enter {
+  from {
+    opacity: 0;
+    transform: translateY(0.5rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 700px) {
+  .header {
+    padding: 1.15rem;
+  }
+
+  .body {
+    padding: 1rem;
+  }
+
+  .node {
+    width: 11.5rem;
+  }
+
+  .lane {
+    grid-template-columns: 6.5rem minmax(0, 1fr);
+  }
+
+  .laneTitle {
+    padding: 0.7rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .motion .node,
+  .motion .lane,
+  .motion .systemLayer,
+  .motion .matrixColumn {
+    animation: none;
+  }
+}
