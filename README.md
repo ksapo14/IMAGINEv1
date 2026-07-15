@@ -1,4 +1,4 @@
-# IMAGINEv1
+# Imagine v1
 
 Real-time speech workspace that turns typed or transcribed input into a planned
 visual note canvas with concise text, diagrams, generated images, or callouts.
@@ -8,7 +8,7 @@ typed input or Deepgram transcript
   -> Gemini 2.5 Flash Lite notes
   -> Gemini 2.5 Flash Lite composition planner
   -> immediate multi-block canvas response
-  -> async sanitized HTML diagram or raster visual jobs
+  -> async structured diagram-data or raster visual jobs
   -> persistent local visual cache for similar repeat prompts
   -> latest result
 ```
@@ -32,11 +32,12 @@ Copy `.env.example` to `.env` and provide server-only API keys:
 NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8010
 
 DEEPGRAM_API_KEY=your-deepgram-key
-GEMINI_API_KEY=your-gemini-key
+DEV_GEMINI_API_KEY=your-dev-gemini-key
+PROD_GEMINI_API_KEY=your-prod-gemini-key
 
-GEMINI_TEXT_MODEL=gemini-2.5-flash-lite
-GEMINI_DIAGRAM_MODEL=gemini-2.5-flash
-GEMINI_IMAGE_MODEL=gemini-2.5-flash-image
+GEMINI_TEXT_MODEL=your-text-model-id
+GEMINI_DIAGRAM_MODEL=
+GEMINI_IMAGE_MODEL=your-image-model-id
 VISUAL_CACHE_DIR=.cache/visuals
 ```
 
@@ -45,17 +46,17 @@ FastAPI backend uses port `8010`.
 
 ## Cost controls
 
-- Every uncached manual submission first makes one small Flash Lite request for
+- Every uncached manual submission first makes one small text-model request for
   notes, then one planner request that decides layout, visual balance, theme,
   and which blocks need visuals.
 - The planner can return a text-led, visual-led, sequence, comparison, or
   balanced canvas with multiple blocks.
-- Flowcharts, processes, comparisons, systems, timelines, and abstract concepts
-  render as richer async HTML diagrams with a separate diagram model, avoiding
-  image-model cost.
-- Diagram jobs return their own canvas width and height, so horizontal or
-  vertical workflows can scroll inside the visual panel instead of being
-  squeezed into the viewport.
+- Flowcharts, swimlanes, decision trees, cycles, timelines, comparison matrices,
+  system maps, and cause-effect explanations render through hardcoded React
+  components. Gemini supplies only the typed nodes and relationships.
+- Diagram node counts adapt to the explanation: concise topics stay compact,
+  while substantial processes can expand to 7-14 meaningful nodes. Wide
+  structures scroll inside the visual panel instead of being compressed.
 - Similar repeated prompts can reuse `.cache/visuals` with no Gemini request.
 - Raster image prompts are prefixed with a no-text rule so diagrams do not
   contain incorrect generated labels.
@@ -69,13 +70,14 @@ FastAPI backend uses port `8010`.
 
 ## Secret handling
 
-`DEEPGRAM_API_KEY` and `GEMINI_API_KEY` are read only by FastAPI. They must
-never use a `NEXT_PUBLIC_` prefix. The Gemini key is sent from the backend in
-the `x-goog-api-key` header; it is not placed in URLs or API responses.
+`DEEPGRAM_API_KEY`, `DEV_GEMINI_API_KEY`, and `PROD_GEMINI_API_KEY` are read
+only by FastAPI. They must never use a `NEXT_PUBLIC_` prefix. Gemini keys are
+sent from the backend in the `x-goog-api-key` header; they are not placed in
+URLs or API responses.
 
-Generated diagram HTML is sanitized on the backend and rendered by the
-frontend in a sandboxed frame. Scripts, links, event handlers, styles, and
-unknown classes are removed before the browser sees the diagram.
+Generated diagrams contain structured text data only. The model cannot supply
+HTML, CSS, scripts, links, event handlers, or arbitrary visual classes; trusted
+frontend components own all diagram markup and styling.
 
 `.env` and `.env.*` are excluded from Git and Docker build contexts, while
 `.env.example` contains names and non-secret defaults only. The Docker setup

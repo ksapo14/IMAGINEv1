@@ -89,12 +89,62 @@ class GenerateRequest(BaseModel):
     userInput: str = Field(..., min_length=1, max_length=4000)
 
 
+class DiagramNode(BaseModel):
+    id: str
+    label: str
+    description: str
+    role: Literal[
+        "process",
+        "start",
+        "end",
+        "decision",
+        "input",
+        "output",
+        "actor",
+        "milestone",
+        "cause",
+        "effect",
+        "category",
+    ]
+    lane: str
+    group: str
+
+
+class DiagramEdge(BaseModel):
+    source: str
+    target: str
+    label: str
+    kind: Literal["direct", "branch", "feedback", "association"]
+
+
+class DiagramLane(BaseModel):
+    id: str
+    label: str
+
+
+class StructuredDiagram(BaseModel):
+    version: Literal[2]
+    type: Literal[
+        "flowchart",
+        "swimlane",
+        "decisionTree",
+        "cycle",
+        "timeline",
+        "comparisonMatrix",
+        "systemMap",
+        "causeEffect",
+    ]
+    title: str
+    summary: str
+    nodes: list[DiagramNode]
+    edges: list[DiagramEdge]
+    lanes: list[DiagramLane]
+
+
 class GeneratedVisual(BaseModel):
     kind: Literal["diagram", "generated"]
     alt: str
-    html: str | None = None
-    canvasWidth: int | None = None
-    canvasHeight: int | None = None
+    diagram: StructuredDiagram | None = None
     dataUrl: str | None = None
     mimeType: str | None = None
 
@@ -154,18 +204,26 @@ async def run_visual_job(
     visual_prompt: str,
     visual_alt: str,
 ) -> None:
-    visual = await gemini_pipeline.generate_visual(
-        visual_strategy,
-        visual_prompt,
-        visual_alt,
-    )
+    failure_reason = ""
+    try:
+        visual = await gemini_pipeline.generate_visual(
+            visual_strategy,
+            visual_prompt,
+            visual_alt,
+        )
+    except GeminiProviderError as error:
+        visual = None
+        failure_reason = str(error)
     if visual is None:
+        warning = "The notes are ready, but the visual could not be generated."
+        if failure_reason:
+            warning = f"{warning} {failure_reason}"
         with visual_jobs_lock:
             visual_jobs[job_id] = {
                 "status": "failed",
                 "blockId": block_id,
                 "visual": None,
-                "warning": "The notes are ready, but the visual could not be generated.",
+                "warning": warning,
             }
             batch = visual_batches.get(batch_id)
             if batch:
