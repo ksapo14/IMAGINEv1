@@ -3,6 +3,10 @@ node_modules/
 out/
 dist/
 build/
+.vinext/
+.wrangler/
+outputs/
+work/
 __pycache__/
 .venv/
 *.pyc
