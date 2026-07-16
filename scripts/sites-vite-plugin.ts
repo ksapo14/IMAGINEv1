@@ -52,7 +52,7 @@ export function sites(): Plugin {
           await rename(serverEntry, appEntry);
           await writeFile(
             serverEntry,
-            `${workerMarker}\nconst worker = {\n  async fetch(request, _env, context) {\n    try {\n      const { default: handler } = await import("./app.js");\n      return await handler(request, context);\n    } catch (error) {\n      const name = error instanceof Error ? error.name : "UnknownError";\n      const message = error instanceof Error ? error.message : String(error);\n      console.error("[DEBUG] [dist/server/index.js] Worker module load failed", { name, message });\n      return new Response(JSON.stringify({ name, message }), {\n        status: 500,\n        headers: { "content-type": "application/json; charset=utf-8" },\n      });\n    }\n  },\n};\n\nexport default worker;\n`,
+            `${workerMarker}\nimport handler from "./app.js";\n\nconst worker = {\n  fetch(request, _env, context) {\n    return handler(request, context);\n  },\n};\n\nexport default worker;\n`,
           );
         }
       }
