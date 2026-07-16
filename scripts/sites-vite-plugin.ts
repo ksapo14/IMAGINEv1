@@ -52,7 +52,7 @@ export function sites(): Plugin {
           await rename(serverEntry, appEntry);
           await writeFile(
             serverEntry,
-            `${workerMarker}\nimport handler from "./app.js";\n\nconst worker = {\n  fetch(request, env, context) {\n    return handler.fetch(request, env, context);\n  },\n};\n\nexport default worker;\n`,
+            `${workerMarker}\nimport handler from "./app.js";\n\nconst worker = {\n  fetch(request, _env, context) {\n    return handler(request, context);\n  },\n};\n\nexport default worker;\n`,
           );
         }
       }
