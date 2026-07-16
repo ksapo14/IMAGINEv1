@@ -7,19 +7,19 @@ export const metadata: Metadata = {
   metadataBase: new URL(
     process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"
   ),
-  title: "Imagine v1 by Imagineer | Speak ideas into view",
+  title: "Imagine v1 by Imagineer | The board keeps up",
   description:
-    "Turn speech and typed prompts into structured notes, diagrams, and visual explanations in one live learning canvas.",
+    "A live classroom assistant that listens to teachers and draws every idea as it is explained.",
   openGraph: {
-    title: "Imagine v1 by Imagineer | Speak ideas into view",
+    title: "Imagine v1 by Imagineer | The board keeps up",
     description:
-      "Turn speech and typed prompts into structured notes, diagrams, and visual explanations."
+      "A live classroom assistant that turns teaching into visual understanding."
   },
   twitter: {
     card: "summary",
-    title: "Imagine v1 by Imagineer | Speak ideas into view",
+    title: "Imagine v1 by Imagineer | The board keeps up",
     description:
-      "Turn speech and typed prompts into structured notes, diagrams, and visual explanations."
+      "A live classroom assistant that turns teaching into visual understanding."
   },
   icons: {
     icon: "/brand/imagineer-shortform.png",
