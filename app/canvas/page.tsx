@@ -120,19 +120,19 @@ type VisualJobResponse = {
 };
 
 const paletteClasses: Record<ThemePalette, string> = {
-  slate: "canvas-tone canvas-palette-slate",
-  sage: "canvas-tone canvas-palette-sage",
-  ember: "canvas-tone canvas-palette-ember",
-  indigo: "canvas-tone canvas-palette-indigo",
-  mono: "canvas-tone canvas-palette-mono"
+  slate: "bg-[var(--canvas-bg)] text-[var(--canvas-text)] transition-colors duration-300",
+  sage: "bg-[var(--canvas-bg)] text-[var(--canvas-text)] transition-colors duration-300",
+  ember: "bg-[var(--canvas-bg)] text-[var(--canvas-text)] transition-colors duration-300",
+  indigo: "bg-[var(--canvas-bg)] text-[var(--canvas-text)] transition-colors duration-300",
+  mono: "bg-[var(--canvas-bg)] text-[var(--canvas-text)] transition-colors duration-300"
 };
 
 const accentClasses: Record<ThemePalette, string> = {
-  slate: "canvas-card canvas-card-slate",
-  sage: "canvas-card canvas-card-sage",
-  ember: "canvas-card canvas-card-ember",
-  indigo: "canvas-card canvas-card-indigo",
-  mono: "canvas-card canvas-card-mono"
+  slate: "border-[var(--canvas-slate-border)] bg-[var(--canvas-slate-bg)] text-[var(--canvas-text)] shadow-[0_20px_60px_var(--shadow)]",
+  sage: "border-[var(--canvas-sage-border)] bg-[var(--canvas-sage-bg)] text-[var(--canvas-text)] shadow-[0_20px_60px_var(--shadow)]",
+  ember: "border-[var(--canvas-ember-border)] bg-[var(--canvas-ember-bg)] text-[var(--canvas-text)] shadow-[0_20px_60px_var(--shadow)]",
+  indigo: "border-[var(--canvas-indigo-border)] bg-[var(--canvas-indigo-bg)] text-[var(--canvas-text)] shadow-[0_20px_60px_var(--shadow)]",
+  mono: "border-[var(--canvas-mono-border)] bg-[var(--canvas-mono-bg)] text-[var(--canvas-text)] shadow-[0_20px_60px_var(--shadow)]"
 };
 
 const blockSizeClasses: Record<BlockSize, string> = {
@@ -266,13 +266,13 @@ function VisualPanel({
     return (
       <div
         role="status"
-        className={`${heightClass} canvas-visual-surface grid place-items-center px-6 text-center`}
+        className={`${heightClass} grid place-items-center bg-[var(--canvas-surface)] px-6 text-center`}
       >
         <div className="max-w-sm">
-          <p className="canvas-primary-text text-sm font-semibold">
+          <p className="text-sm font-semibold text-[var(--canvas-text)]">
             Visual unavailable
           </p>
-          <p className="canvas-secondary-text mt-2 text-sm leading-6">
+          <p className="mt-2 text-sm leading-6 text-[var(--canvas-muted)]">
             The rest of the canvas is ready. Try the prompt again to rebuild
             this visual.
           </p>
@@ -283,7 +283,7 @@ function VisualPanel({
 
   if (block.visual?.kind === "diagram") {
     return (
-      <div className={`${heightClass} canvas-diagram-frame overflow-hidden`}>
+      <div className={`${heightClass} overflow-hidden bg-[#f4f2ec]`}>
         <StructuredDiagram
           diagram={block.visual.diagram}
           alt={block.visual.alt}
@@ -295,7 +295,7 @@ function VisualPanel({
 
   if (block.visual?.kind === "generated") {
     return (
-      <div className={`canvas-visual-surface grid ${heightClass} place-items-center`}>
+      <div className={`grid ${heightClass} place-items-center bg-[var(--canvas-surface)]`}>
         <img
           src={block.visual.dataUrl}
           alt={block.visual.alt}
@@ -308,10 +308,10 @@ function VisualPanel({
   return (
     <div
       role="status"
-      className={`${heightClass} canvas-visual-surface relative overflow-hidden`}
+      className={`${heightClass} relative overflow-hidden bg-[var(--canvas-surface)]`}
     >
       <div className="absolute inset-0 animate-pulse bg-[linear-gradient(110deg,transparent,rgba(255,255,255,0.62),transparent)]" />
-      <div className="canvas-secondary-text grid h-full place-items-center text-sm font-medium">
+      <div className="grid h-full place-items-center text-sm font-medium text-[var(--canvas-muted)]">
         <span className="flex items-center gap-2">
           <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
           Building visual
@@ -353,21 +353,21 @@ function CompositionCard({
         }
       >
         {block.title ? (
-          <h2 className="canvas-primary-text text-balance text-xl font-semibold leading-tight sm:text-2xl">
+          <h2 className="text-balance text-xl font-semibold leading-tight text-[var(--canvas-text)] sm:text-2xl">
             {block.title}
           </h2>
         ) : null}
         {block.body ? (
-          <p className="canvas-secondary-text max-w-[65ch] text-pretty text-base leading-7">
+          <p className="max-w-[65ch] text-pretty text-base leading-7 text-[var(--canvas-muted)]">
             {block.body}
           </p>
         ) : null}
 
         {block.items.length > 0 && block.kind === "timeline" ? (
-          <ol className="canvas-secondary-text space-y-3 text-sm leading-6">
+          <ol className="space-y-3 text-sm leading-6 text-[var(--canvas-muted)]">
             {block.items.map((item, index) => (
               <li key={`${block.blockId}-${item}`} className="flex gap-3">
-                <span className="canvas-soft-cell mt-0.5 inline-flex h-7 min-w-7 items-center justify-center rounded-lg text-xs font-semibold tabular-nums">
+                <span className="mt-0.5 inline-flex h-7 min-w-7 items-center justify-center rounded-lg bg-[var(--canvas-soft)] text-xs font-semibold tabular-nums text-[var(--canvas-text)]">
                   {index + 1}
                 </span>
                 <span>{item}</span>
@@ -379,17 +379,17 @@ function CompositionCard({
             {block.items.map((item) => (
               <div
                 key={`${block.blockId}-${item}`}
-                className="canvas-soft-cell rounded-2xl px-4 py-3 text-sm leading-6"
+                className="rounded-2xl bg-[var(--canvas-soft)] px-4 py-3 text-sm leading-6 text-[var(--canvas-text)]"
               >
                 {item}
               </div>
             ))}
           </div>
         ) : block.items.length > 0 ? (
-          <ul className="canvas-secondary-text space-y-3 text-base leading-7">
+          <ul className="space-y-3 text-base leading-7 text-[var(--canvas-muted)]">
             {block.items.map((item) => (
               <li key={`${block.blockId}-${item}`} className="flex gap-3">
-                <span className="canvas-bullet mt-3 h-1.5 w-1.5 shrink-0 rounded-full" />
+                <span className="mt-3 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--canvas-muted)]" />
                 <span>{item}</span>
               </li>
             ))}
@@ -404,20 +404,20 @@ function EmptyState() {
   return (
     <section className="mx-auto grid w-full max-w-5xl gap-8 lg:grid-cols-[1fr_0.85fr] lg:items-center">
       <div>
-        <p className="canvas-secondary-text mb-4 text-sm font-semibold">
+        <p className="mb-4 text-sm font-semibold text-[var(--canvas-muted)]">
           live teaching canvas
         </p>
-        <h1 className="canvas-primary-text text-balance text-4xl font-semibold leading-[1.02] sm:text-6xl">
+        <h1 className="text-balance text-4xl font-semibold leading-[1.02] text-[var(--canvas-text)] sm:text-6xl">
           Start speaking to generate structured notes.
         </h1>
       </div>
-      <div className="canvas-skeleton grid gap-3 rounded-[1.4rem] p-4">
-        <div className="canvas-skeleton-block h-24 rounded-2xl" />
+      <div className="grid gap-3 rounded-[1.4rem] bg-[var(--canvas-surface)] p-4">
+        <div className="h-24 rounded-2xl bg-[var(--canvas-soft)]" />
         <div className="grid grid-cols-2 gap-3">
-          <div className="canvas-skeleton-block h-28 rounded-2xl opacity-70" />
-          <div className="canvas-skeleton-block h-28 rounded-2xl opacity-70" />
+          <div className="h-28 rounded-2xl bg-[var(--canvas-soft)] opacity-70" />
+          <div className="h-28 rounded-2xl bg-[var(--canvas-soft)] opacity-70" />
         </div>
-        <div className="canvas-skeleton-block h-16 rounded-2xl" />
+        <div className="h-16 rounded-2xl bg-[var(--canvas-soft)]" />
       </div>
     </section>
   );
@@ -429,13 +429,13 @@ function LoadingState() {
       role="status"
       className="mx-auto grid w-full max-w-6xl gap-5 lg:grid-cols-12"
     >
-      <div className="canvas-skeleton rounded-[1.35rem] p-7 lg:col-span-5">
-        <div className="canvas-skeleton-block mb-5 h-5 w-28 animate-pulse rounded" />
-        <div className="canvas-skeleton-block mb-3 h-10 w-4/5 animate-pulse rounded" />
-        <div className="canvas-skeleton-block h-10 w-3/5 animate-pulse rounded" />
+      <div className="rounded-[1.35rem] bg-[var(--canvas-surface)] p-7 lg:col-span-5">
+        <div className="mb-5 h-5 w-28 animate-pulse rounded bg-[var(--canvas-soft)]" />
+        <div className="mb-3 h-10 w-4/5 animate-pulse rounded bg-[var(--canvas-soft)]" />
+        <div className="h-10 w-3/5 animate-pulse rounded bg-[var(--canvas-soft)]" />
       </div>
-      <div className="canvas-skeleton h-[420px] rounded-[1.35rem] lg:col-span-7">
-        <div className="canvas-secondary-text grid h-full place-items-center text-sm font-medium">
+      <div className="h-[420px] rounded-[1.35rem] bg-[var(--canvas-surface)] lg:col-span-7">
+        <div className="grid h-full place-items-center text-sm font-medium text-[var(--canvas-muted)]">
           <span className="flex items-center gap-2">
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
             Planning canvas
@@ -450,10 +450,10 @@ function ResultCanvas({ result }: { result: GenerateResponse }) {
   return (
     <section aria-live="polite" className="w-full">
       <div className="mx-auto mb-7 max-w-7xl">
-        <p className="canvas-secondary-text mb-3 text-sm font-semibold">
+        <p className="mb-3 text-sm font-semibold text-[var(--canvas-muted)]">
           {result.layoutMode.replace(/([A-Z])/g, " $1").toLowerCase()}
         </p>
-        <h1 className="canvas-primary-text max-w-4xl text-balance text-4xl font-semibold leading-[1.04] sm:text-6xl">
+        <h1 className="max-w-4xl text-balance text-4xl font-semibold leading-[1.04] text-[var(--canvas-text)] sm:text-6xl">
           {result.title}
         </h1>
       </div>
@@ -913,30 +913,30 @@ export default function Home() {
 
   const pageTone = result?.theme.palette
     ? paletteClasses[result.theme.palette]
-    : "canvas-tone canvas-palette-slate";
+    : "bg-[var(--canvas-bg)] text-[var(--canvas-text)] transition-colors duration-300";
 
   return (
-    <main className="canvas-page">
-      <a href="#workspace" className="skip-link">
+    <main className="min-h-dvh bg-[var(--page)] text-[var(--text)]">
+      <a href="#workspace" className="fixed left-3 top-3 z-[100] -translate-y-[calc(100%+28px)] rounded bg-[var(--signal)] px-[15px] py-[11px] font-[750] text-[var(--signal-ink)] transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] focus-visible:translate-y-0">
         Skip to workspace
       </a>
-      <header className="canvas-route-header">
-        <Link href="/" className="canvas-back-link">
+      <header className="fixed inset-x-0 top-0 z-40 grid h-[68px] grid-cols-[1fr_auto_1fr] items-center border-b border-[var(--line)] bg-[color-mix(in_srgb,var(--page)_85%,transparent)] py-0 pl-6 pr-[18px] backdrop-blur-[20px] max-[767px]:grid-cols-[1fr_auto] max-[767px]:px-3 max-[767px]:pl-4 [&>p]:m-0 [&>p]:font-[var(--mono)] [&>p]:text-[11px] [&>p]:uppercase [&>p]:text-[var(--text-soft)] max-[767px]:[&>p]:hidden [&_.theme-toggle]:justify-self-end">
+        <Link href="/" className="inline-flex w-max items-center gap-[10px] font-[820]">
           <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-          <span className="brand-logo-stack brand-logo-stack-canvas" aria-hidden="true">
+          <span className="relative h-[30px] w-[30px] flex-none" aria-hidden="true">
             <Image
               src="/brand/imagineer-shortform.png"
               alt=""
               width={30}
               height={30}
-              className="brand-logo brand-logo-canvas brand-logo-dark"
+              className="brand-logo-dark absolute inset-0 h-[30px] w-[30px] rounded-[7px] shadow-[0_0_0_1px_color-mix(in_srgb,var(--signal)_22%,transparent)] max-[767px]:h-7 max-[767px]:w-7 max-[767px]:rounded-md"
             />
             <Image
               src="/brand/imagineer-shortform-light.png"
               alt=""
               width={30}
               height={30}
-              className="brand-logo brand-logo-canvas brand-logo-light"
+              className="brand-logo-light absolute inset-0 hidden h-[30px] w-[30px] rounded-[7px] shadow-[0_0_0_1px_color-mix(in_srgb,var(--signal)_22%,transparent)] max-[767px]:h-7 max-[767px]:w-7 max-[767px]:rounded-md"
             />
           </span>
           <span>IMAGINE V1</span>
@@ -945,21 +945,21 @@ export default function Home() {
         <ThemeToggle />
       </header>
 
-      <section id="workspace" className={`canvas-workspace ${pageTone}`}>
-        <div className="canvas-workspace-meta">
+      <section id="workspace" className={`relative min-h-dvh px-[max(18px,4vw)] pb-[150px] pt-28 max-[767px]:px-[14px] max-[767px]:pb-[184px] max-[767px]:pt-[108px] ${pageTone}`}>
+        <div className="absolute left-[max(18px,4vw)] right-[max(18px,4vw)] top-[86px] flex justify-between font-[var(--mono)] text-[10px] uppercase text-[var(--canvas-muted)] max-[767px]:left-[14px] max-[767px]:right-[14px]">
           <span>Explain anything</span>
           <span>Voice or text</span>
         </div>
 
         {error ? (
-          <div role="alert" className="product-notice product-notice-error">{error}</div>
+          <div role="alert" className="fixed left-1/2 top-[84px] z-50 w-[min(calc(100%-32px),480px)] -translate-x-1/2 rounded-lg border border-red-200 bg-red-50 px-[18px] py-3 text-center text-sm text-red-700">{error}</div>
         ) : generationWarning ? (
-          <div role="status" className="product-notice product-notice-warning">{generationWarning}</div>
+          <div role="status" className="fixed left-1/2 top-[84px] z-50 w-[min(calc(100%-32px),480px)] -translate-x-1/2 rounded-lg border border-amber-200 bg-amber-50 px-[18px] py-3 text-center text-sm text-amber-800">{generationWarning}</div>
         ) : speechNotice ? (
-          <div role="status" className="product-notice">{speechNotice}</div>
+          <div role="status" className="fixed left-1/2 top-[84px] z-50 w-[min(calc(100%-32px),480px)] -translate-x-1/2 rounded-lg border border-[#d8d8d0] bg-white px-[18px] py-3 text-center text-sm text-[#646a64]">{speechNotice}</div>
         ) : null}
 
-        <div className="canvas-route-content">
+        <div className="grid min-h-[calc(100dvh-260px)] items-center">
           {isGenerating ? (
             <LoadingState />
           ) : result ? (
@@ -969,7 +969,7 @@ export default function Home() {
           )}
         </div>
 
-        <form onSubmit={handleSubmit} className="canvas-route-composer">
+        <form onSubmit={handleSubmit} className="fixed bottom-[18px] left-[18px] right-[18px] z-[35] mx-auto flex w-[min(820px,calc(100%-36px))] items-end gap-2 rounded-xl border border-[var(--line-strong)] bg-[color-mix(in_srgb,var(--panel)_92%,transparent)] p-[7px] shadow-[0_24px_70px_var(--shadow)] backdrop-blur-[20px] max-[767px]:bottom-[10px] max-[767px]:left-[10px] max-[767px]:right-[10px] max-[767px]:w-[calc(100%-20px)] max-[767px]:flex-wrap max-[767px]:[&_textarea]:basis-full">
           <label htmlFor="speech-input" className="sr-only">Speech input</label>
           <Textarea
             id="speech-input"
@@ -981,12 +981,12 @@ export default function Home() {
             onKeyDown={handleInputKeyDown}
             placeholder="Explain a concept, system, or process..."
             rows={1}
-            className="min-h-14 flex-1 resize-none rounded-lg border-0 px-5 py-[1.05rem] text-base leading-6 shadow-none"
+            className="min-h-14 flex-1 resize-none rounded-lg border-0 bg-transparent px-5 py-[1.05rem] text-base leading-6 text-[var(--text)] shadow-none placeholder:text-[var(--text-soft)] max-[767px]:w-full"
           />
           <Button
             type="submit"
             disabled={!displayValue.trim() || isGenerating}
-            className="canvas-submit h-14 w-14 shrink-0 rounded-lg px-0 active:scale-[0.97]"
+            className="h-14 w-14 shrink-0 rounded-lg bg-[var(--signal)] px-0 text-[var(--signal-ink)] hover:bg-[var(--signal)] hover:opacity-[0.88] active:scale-[0.97] max-[767px]:w-[calc(50%-4px)]"
             aria-label="Submit input"
           >
             {isGenerating ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" /> : <ArrowUp className="h-5 w-5" aria-hidden="true" />}
@@ -994,7 +994,7 @@ export default function Home() {
           <Button
             type="button"
             onClick={() => void startTranscription()}
-            className={`h-14 w-14 shrink-0 rounded-lg px-0 active:scale-[0.97] ${speechStatus === "idle" ? "canvas-mic-idle" : "bg-red-600 text-white"}`}
+            className={`h-14 w-14 shrink-0 rounded-lg px-0 active:scale-[0.97] max-[767px]:w-[calc(50%-4px)] ${speechStatus === "idle" ? "bg-[var(--canvas-text)] text-[var(--canvas-bg)]" : "bg-red-600 text-white"}`}
             aria-label={speechStatus === "idle" ? "Start microphone" : "Stop microphone"}
           >
             {speechStatus === "connecting" ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" /> : speechStatus === "listening" ? <MicOff className="h-5 w-5" aria-hidden="true" /> : <Mic className="h-5 w-5" aria-hidden="true" />}

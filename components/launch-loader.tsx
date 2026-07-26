@@ -134,20 +134,20 @@ export function LaunchLoader() {
   return (
     <div
       ref={root}
-      className="launch-loader"
+      className="launch-loader fixed inset-0 z-[90] grid place-items-center overflow-hidden bg-[var(--page)] text-[var(--text)]"
       role="status"
       aria-label="Loading Imagine v1"
       tabIndex={-1}
     >
-      <div className="loader-word" aria-hidden="true">
+      <div className="loader-word flex overflow-hidden font-[var(--display)] text-[clamp(3.8rem,12vw,10rem)] font-[850] leading-[0.8]" aria-hidden="true">
         {"IMAGINE V1".split("").map((letter, index) => (
-          <span className="loader-letter" key={`${letter}-${index}`}>
+          <span className="loader-letter block" key={`${letter}-${index}`}>
             {letter === " " ? "\u00a0" : letter}
           </span>
         ))}
       </div>
-      <div className="loader-track" aria-hidden="true">
-        <span className="loader-progress" />
+      <div className="absolute bottom-[9vh] left-[8vw] right-[8vw] h-0.5 overflow-hidden bg-[var(--line)]" aria-hidden="true">
+        <span className="loader-progress block h-full w-full origin-left scale-x-0 bg-[var(--signal)]" />
       </div>
     </div>
   );
