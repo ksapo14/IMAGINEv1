@@ -143,6 +143,24 @@ a:focus-visible {
   display: none;
 }
 
+.diagram-motion .diagram-enter {
+  animation: diagram-enter 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.diagram-motion .diagram-enter:nth-child(2) {
+  animation-delay: 70ms;
+}
+
+.diagram-motion .diagram-enter:nth-child(3) {
+  animation-delay: 140ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .diagram-motion .diagram-enter {
+    animation: none;
+  }
+}
+
 :root[data-theme="light"] .brand-logo-dark {
   display: none;
 }

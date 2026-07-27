@@ -1,5 +1,1 @@
-fastapi
-uvicorn[standard]
-pydantic
-websockets
-python-dotenv
+-r backend/requirements.txt

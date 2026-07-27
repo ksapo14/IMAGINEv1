@@ -47,7 +47,9 @@ try {
   Write-Host "Press Ctrl+C to stop the dev stack."
 
   # Keep Next.js in the foreground so npm run dev behaves like a normal dev server.
-  & $next dev
+  # Pin the advertised port. Next otherwise silently selects 3001 or 3002,
+  # which can leave the browser pointed at a stale app on port 3000.
+  & $next dev -p 3000
 }
 finally {
   if ($backend -and -not $backend.HasExited) {

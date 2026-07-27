@@ -21,9 +21,9 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
-  StructuredDiagram,
-  type StructuredDiagramData
-} from "@/components/diagrams/structured-diagram";
+  DiagramRenderer,
+  type BuildingBlockDiagramData
+} from "@/components/building-blocks";
 
 type SpeechStatus = "idle" | "connecting" | "listening";
 type LayoutMode =
@@ -77,7 +77,7 @@ type GeneratedVisual =
   | {
       kind: "diagram";
       alt: string;
-      diagram: StructuredDiagramData;
+      diagram: BuildingBlockDiagramData;
     }
   | {
       kind: "generated";
@@ -205,7 +205,8 @@ function getDeepgramFailureMessage(message: DeepgramMessage) {
 
 async function fetchDeepgramStatus() {
   const response = await fetch(getTranscriptionStatusUrl(), {
-    cache: "no-store"
+    cache: "no-store",
+    signal: AbortSignal.timeout(8000)
   });
 
   if (!response.ok) {
@@ -213,6 +214,28 @@ async function fetchDeepgramStatus() {
   }
 
   return (await response.json()) as DeepgramStatusResponse;
+}
+
+function getApiErrorMessage(problem: unknown) {
+  if (!problem || typeof problem !== "object" || !("detail" in problem)) {
+    return null;
+  }
+
+  const detail = problem.detail;
+  if (typeof detail === "string") {
+    return detail;
+  }
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) =>
+        item && typeof item === "object" && "msg" in item
+          ? String(item.msg)
+          : ""
+      )
+      .filter(Boolean);
+    return messages.length > 0 ? messages.join(" ") : null;
+  }
+  return null;
 }
 
 async function fetchVisualJob(jobId: string, signal?: AbortSignal) {
@@ -284,7 +307,7 @@ function VisualPanel({
   if (block.visual?.kind === "diagram") {
     return (
       <div className={`${heightClass} overflow-hidden bg-[#f4f2ec]`}>
-        <StructuredDiagram
+        <DiagramRenderer
           diagram={block.visual.diagram}
           alt={block.visual.alt}
           motion={motion}
@@ -366,7 +389,7 @@ function CompositionCard({
         {block.items.length > 0 && block.kind === "timeline" ? (
           <ol className="space-y-3 text-sm leading-6 text-[var(--canvas-muted)]">
             {block.items.map((item, index) => (
-              <li key={`${block.blockId}-${item}`} className="flex gap-3">
+              <li key={`${block.blockId}-${index}-${item}`} className="flex gap-3">
                 <span className="mt-0.5 inline-flex h-7 min-w-7 items-center justify-center rounded-lg bg-[var(--canvas-soft)] text-xs font-semibold tabular-nums text-[var(--canvas-text)]">
                   {index + 1}
                 </span>
@@ -376,9 +399,9 @@ function CompositionCard({
           </ol>
         ) : block.items.length > 0 && block.kind === "comparison" ? (
           <div className="grid gap-3 sm:grid-cols-2">
-            {block.items.map((item) => (
+            {block.items.map((item, index) => (
               <div
-                key={`${block.blockId}-${item}`}
+                key={`${block.blockId}-${index}-${item}`}
                 className="rounded-2xl bg-[var(--canvas-soft)] px-4 py-3 text-sm leading-6 text-[var(--canvas-text)]"
               >
                 {item}
@@ -387,8 +410,8 @@ function CompositionCard({
           </div>
         ) : block.items.length > 0 ? (
           <ul className="space-y-3 text-base leading-7 text-[var(--canvas-muted)]">
-            {block.items.map((item) => (
-              <li key={`${block.blockId}-${item}`} className="flex gap-3">
+            {block.items.map((item, index) => (
+              <li key={`${block.blockId}-${index}-${item}`} className="flex gap-3">
                 <span className="mt-3 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--canvas-muted)]" />
                 <span>{item}</span>
               </li>
@@ -470,7 +493,7 @@ function ResultCanvas({ result }: { result: GenerateResponse }) {
   );
 }
 
-export default function Home() {
+export default function CanvasPage() {
   const [capturedInput, setCapturedInput] = useState("");
   const [liveTranscript, setLiveTranscript] = useState("");
   const [error, setError] = useState("");
@@ -757,7 +780,7 @@ export default function Home() {
               }
             : block
         ),
-        warning: job.warning
+        warning: job.warning ?? current.warning
       };
     });
   }, []);
@@ -790,7 +813,7 @@ export default function Home() {
       visualJobControllers.current.set(jobId, controller);
 
       try {
-        for (let attempt = 0; attempt < 60; attempt += 1) {
+        for (let attempt = 0; attempt < 100; attempt += 1) {
           await new Promise((resolve) => window.setTimeout(resolve, 1000));
           if (!activeVisualJobs.current.has(jobId)) {
             return;
@@ -807,7 +830,9 @@ export default function Home() {
           activeVisualJobs.current.delete(jobId);
           if (job.status === "complete" && job.visual) {
             patchVisualBlock(job);
-            setGenerationWarning(job.warning ?? "");
+            if (job.warning) {
+              setGenerationWarning(job.warning);
+            }
             return;
           }
 
@@ -858,6 +883,8 @@ export default function Home() {
     setResult(null);
     setIsGenerating(true);
     activeVisualJobs.current.clear();
+    visualJobControllers.current.forEach((controller) => controller.abort());
+    visualJobControllers.current.clear();
 
     try {
       const response = await fetch(`${API_BASE_URL}/api/generate`, {
@@ -867,11 +894,10 @@ export default function Home() {
       });
 
       if (!response.ok) {
-        const problem = (await response.json().catch(() => null)) as {
-          detail?: string;
-        } | null;
+        const problem = (await response.json().catch(() => null)) as unknown;
         throw new Error(
-          problem?.detail ?? "The generation request could not be completed."
+          getApiErrorMessage(problem) ??
+            "The generation request could not be completed."
         );
       }
 
@@ -980,6 +1006,7 @@ export default function Home() {
             }}
             onKeyDown={handleInputKeyDown}
             placeholder="Explain a concept, system, or process..."
+            maxLength={4000}
             rows={1}
             className="min-h-14 flex-1 resize-none rounded-lg border-0 bg-transparent px-5 py-[1.05rem] text-base leading-6 text-[var(--text)] shadow-none placeholder:text-[var(--text-soft)] max-[767px]:w-full"
           />

@@ -10,10 +10,13 @@ from typing import Any
 from unittest.mock import patch
 
 from backend.services.gemini_pipeline import (
+    CACHE_SCHEMA_VERSION,
+    DIAGRAM_THINKING_BUDGET,
     GeminiConfigurationError,
     GeminiPipeline,
     GeminiProviderError,
     _default_json_transport,
+    _infer_diagram_type,
     _normalize_diagram,
 )
 
@@ -119,32 +122,83 @@ def diagram_response(
     diagram_type: str = "flowchart",
     node_count: int = 5,
 ) -> dict[str, Any]:
-    nodes = [
+    blocks = [
         {
-            "id": f"n{index + 1}",
-            "label": f"Car stage {index + 1}",
+            "type": "block",
+            "id": f"b{index + 1}",
+            "heading": f"Car stage {index + 1}",
             "description": f"What happens during stage {index + 1}.",
-            "role": (
-                "start"
-                if index == 0
-                else "end"
-                if index == node_count - 1
-                else "process"
-            ),
-            "lane": "powertrain" if diagram_type == "swimlane" else "",
-            "group": "Power" if index < node_count / 2 else "Motion",
         }
         for index in range(node_count)
     ]
-    edges = [
-        {
-            "source": f"n{index + 1}",
-            "target": f"n{index + 2}",
-            "label": "then",
-            "kind": "direct",
+    diagram = {
+        "version": 3,
+        "type": diagram_type,
+        "title": "How a car creates motion",
+        "description": "Energy moves through connected vehicle systems.",
+    }
+    if diagram_type == "flowchart":
+        diagram["lines"] = [
+            {"type": "blockLine", "id": "main-line", "blocks": blocks}
+        ]
+    elif diagram_type == "tree":
+        diagram["root"] = {
+            "id": "root",
+            "heading": "Vehicle",
+            "description": "The complete system.",
+            "children": [
+                {
+                    "id": "power",
+                    "heading": "Power",
+                    "description": "Creates motion.",
+                    "children": [],
+                },
+                {
+                    "id": "control",
+                    "heading": "Control",
+                    "description": "Directs motion.",
+                    "children": [],
+                },
+            ],
         }
-        for index in range(node_count - 1)
-    ]
+    elif diagram_type == "vennDiagram":
+        diagram.update(
+            {
+                "left": {"heading": "Electric", "items": ["Battery"]},
+                "right": {"heading": "Gas", "items": ["Fuel tank"]},
+                "similar": {"heading": "Both", "items": ["Wheels"]},
+            }
+        )
+    elif diagram_type == "pieChart":
+        diagram["portions"] = [
+            {"heading": "Motion", "proportion": 70},
+            {"heading": "Heat", "proportion": 30},
+        ]
+    else:
+        diagram.update(
+            {
+                "center": {
+                    "type": "round",
+                    "id": "vehicle",
+                    "heading": "Vehicle",
+                    "description": "The central system.",
+                },
+                "surrounding": [
+                    {
+                        "type": "round",
+                        "id": "power",
+                        "heading": "Power",
+                        "description": "Creates motion.",
+                    },
+                    {
+                        "type": "round",
+                        "id": "control",
+                        "heading": "Control",
+                        "description": "Directs motion.",
+                    },
+                ],
+            }
+        )
     return {
         "candidates": [
             {
@@ -152,18 +206,7 @@ def diagram_response(
                     "parts": [
                         {
                             "text": json.dumps(
-                                {
-                                    "diagramType": diagram_type,
-                                    "title": "How a car creates motion",
-                                    "summary": "Energy moves through connected vehicle systems.",
-                                    "nodes": nodes,
-                                    "edges": edges,
-                                    "lanes": (
-                                        [{"id": "powertrain", "label": "Powertrain"}]
-                                        if diagram_type == "swimlane"
-                                        else []
-                                    ),
-                                }
+                                diagram
                             )
                         }
                     ],
@@ -298,7 +341,7 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
         )
         notes_body = json.loads(notes_request.data.decode("utf-8"))
         planner_body = json.loads(planner_request.data.decode("utf-8"))
-        self.assertEqual(notes_body["generationConfig"]["maxOutputTokens"], 256)
+        self.assertEqual(notes_body["generationConfig"]["maxOutputTokens"], 512)
         self.assertEqual(planner_body["generationConfig"]["maxOutputTokens"], 900)
         self.assertEqual(result["layoutMode"], "textDominant")
         self.assertEqual(result["blocks"][0]["kind"], "notes")
@@ -374,16 +417,206 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
         )
         request_body = json.loads(transport.requests[0][0].data.decode("utf-8"))
         self.assertEqual(request_body["generationConfig"]["maxOutputTokens"], 4200)
+        self.assertEqual(
+            request_body["generationConfig"]["thinkingConfig"]["thinkingBudget"],
+            DIAGRAM_THINKING_BUDGET,
+        )
+        self.assertGreater(DIAGRAM_THINKING_BUDGET, 0)
+        self.assertEqual(
+            request_body["generationConfig"]["responseMimeType"],
+            "application/json",
+        )
+        response_schema = request_body["generationConfig"]["responseSchema"]
+        self.assertEqual(response_schema["properties"]["type"]["enum"], ["flowchart"])
+        self.assertIn("lines", response_schema["required"])
+        self.assertNotIn("root", response_schema["properties"])
         self.assertEqual(visual["kind"], "diagram")
-        self.assertEqual(visual["diagram"]["version"], 2)
+        self.assertEqual(visual["diagram"]["version"], 3)
         self.assertEqual(visual["diagram"]["type"], "flowchart")
-        self.assertEqual(len(visual["diagram"]["nodes"]), 9)
-        self.assertEqual(len(visual["diagram"]["edges"]), 8)
-        self.assertEqual(visual["diagram"]["nodes"][0]["role"], "start")
-        self.assertEqual(visual["diagram"]["nodes"][-1]["role"], "end")
+        self.assertEqual(len(visual["diagram"]["lines"]), 1)
+        self.assertEqual(len(visual["diagram"]["lines"][0]["blocks"]), 8)
+        self.assertEqual(
+            visual["diagram"]["lines"][0]["blocks"][0]["type"], "block"
+        )
         self.assertNotIn("html", visual)
 
-    async def test_diagram_accepts_omitted_optional_structure_fields(self) -> None:
+    async def test_explicit_user_diagram_type_overrides_visual_prompt_heuristics(
+        self,
+    ) -> None:
+        cases = (
+            (
+                "Create a pie chart comparing product categories.",
+                "Show categories as a sequential flowchart.",
+                "pieChart",
+            ),
+            (
+                "Create a tree diagram of revenue percentages.",
+                "Show revenue percentages as proportional pie slices.",
+                "tree",
+            ),
+        )
+
+        for user_input, misleading_visual_prompt, expected_type in cases:
+            with self.subTest(expected_type=expected_type):
+                transport = StubTransport(
+                    [
+                        text_response(
+                            strategy="diagram",
+                            visual_prompt=misleading_visual_prompt,
+                            visual_alt="Requested diagram.",
+                        ),
+                        planner_response(
+                            layout_mode="visualDominant",
+                            blocks=[
+                                {
+                                    **diagram_block(),
+                                    "visualPrompt": misleading_visual_prompt,
+                                    "visualAlt": "Requested diagram.",
+                                }
+                            ],
+                        ),
+                        diagram_response(diagram_type=expected_type),
+                    ]
+                )
+                pipeline = GeminiPipeline(
+                    text_api_key=TEST_DEV_KEY,
+                    diagram_model=TEST_DIAGRAM_MODEL,
+                    text_model=TEST_TEXT_MODEL,
+                    transport=transport,
+                    cache_enabled=False,
+                )
+
+                composition = await pipeline.generate(user_input)
+                visual_request = composition["_visualRequests"][0]
+                self.assertEqual(visual_request["diagramType"], expected_type)
+                self.assertTrue(
+                    visual_request["visualPrompt"].startswith(
+                        f"REQUIRED_DIAGRAM_TYPE={expected_type}\n"
+                    )
+                )
+
+                visual = await pipeline.generate_visual(
+                    visual_request["visualStrategy"],
+                    visual_request["visualPrompt"],
+                    visual_request["visualAlt"],
+                )
+                self.assertEqual(visual["diagram"]["type"], expected_type)
+                diagram_request = json.loads(
+                    transport.requests[2][0].data.decode("utf-8")
+                )
+                self.assertEqual(
+                    diagram_request["generationConfig"]["responseSchema"]
+                    ["properties"]["type"]["enum"],
+                    [expected_type],
+                )
+
+    def test_explicit_visual_prompt_type_overrides_topic_words(self) -> None:
+        cases = (
+            ("Flowchart for baking an apple pie", "flowchart"),
+            ("Flow chart comparing both tree branches", "flowchart"),
+            ("Tree diagram of percentages and market shares", "tree"),
+            ("Tree chart comparing pie distributions", "tree"),
+            ("Use a tree diagram to organize pie chart categories", "tree"),
+            ("Venn diagram comparing pie charts", "vennDiagram"),
+            ("VennDiagram for tree branch percentages", "vennDiagram"),
+            ("Pie chart showing a sequential process", "pieChart"),
+            ("Use pieChart for tree species", "pieChart"),
+            ("Mind map about tree branches and percentages", "mindMap"),
+            ("MindMap for a comparison of both categories", "mindMap"),
+        )
+
+        for visual_prompt, expected_type in cases:
+            with self.subTest(visual_prompt=visual_prompt):
+                self.assertEqual(
+                    _infer_diagram_type(visual_prompt),
+                    expected_type,
+                )
+
+    def test_cache_schema_invalidates_old_diagram_type_choices(self) -> None:
+        self.assertEqual(CACHE_SCHEMA_VERSION, 4)
+
+    async def test_diagram_retries_invalid_argument_with_compatibility_payload(
+        self,
+    ) -> None:
+        requests: list[tuple[urllib.request.Request, float]] = []
+        responses: list[object] = [
+            GeminiProviderError(
+                "The AI provider could not complete the request. "
+                "HTTP 400 INVALID_ARGUMENT: Request contains an invalid argument."
+            ),
+            diagram_response(),
+        ]
+
+        def transport(
+            request: urllib.request.Request,
+            timeout_seconds: float,
+        ) -> dict[str, Any]:
+            requests.append((request, timeout_seconds))
+            response = responses.pop(0)
+            if isinstance(response, Exception):
+                raise response
+            assert isinstance(response, dict)
+            return response
+
+        pipeline = GeminiPipeline(
+            text_api_key=TEST_DEV_KEY,
+            diagram_model=TEST_DIAGRAM_MODEL,
+            transport=transport,
+            cache_enabled=False,
+        )
+
+        visual = await pipeline.generate_visual(
+            "diagram",
+            "Explain a process from start to finish.",
+            "Process flowchart",
+        )
+
+        self.assertEqual(visual["diagram"]["type"], "flowchart")
+        self.assertEqual(len(requests), 2)
+        first_body = json.loads(requests[0][0].data.decode("utf-8"))
+        retry_body = json.loads(requests[1][0].data.decode("utf-8"))
+        self.assertIn("responseSchema", first_body["generationConfig"])
+        self.assertNotIn("responseSchema", retry_body["generationConfig"])
+        self.assertNotIn("responseMimeType", retry_body["generationConfig"])
+        self.assertNotIn("thinkingConfig", retry_body["generationConfig"])
+
+    async def test_diagram_compatibility_retry_accepts_json_fence(self) -> None:
+        fenced_response = diagram_response()
+        raw_json = fenced_response["candidates"][0]["content"]["parts"][0]["text"]
+        fenced_response["candidates"][0]["content"]["parts"][0]["text"] = (
+            f"```json\n{raw_json}\n```"
+        )
+        responses: list[object] = [
+            GeminiProviderError("HTTP 400 INVALID_ARGUMENT"),
+            fenced_response,
+        ]
+
+        def transport(
+            request: urllib.request.Request,
+            timeout_seconds: float,
+        ) -> dict[str, Any]:
+            response = responses.pop(0)
+            if isinstance(response, Exception):
+                raise response
+            assert isinstance(response, dict)
+            return response
+
+        pipeline = GeminiPipeline(
+            text_api_key=TEST_DEV_KEY,
+            diagram_model=TEST_DIAGRAM_MODEL,
+            transport=transport,
+            cache_enabled=False,
+        )
+
+        visual = await pipeline.generate_visual(
+            "diagram",
+            "Explain a process.",
+            "Process flowchart",
+        )
+
+        self.assertEqual(visual["diagram"]["type"], "flowchart")
+
+    async def test_diagram_repairs_duplicate_component_ids(self) -> None:
         transport = StubTransport(
             [
                 {
@@ -394,24 +627,35 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
                                     {
                                         "text": json.dumps(
                                             {
-                                                "diagramType": "flowchart",
+                                                "version": 3,
+                                                "type": "flowchart",
                                                 "title": "Car power flow",
-                                                "nodes": [
+                                                "description": "Fuel becomes motion.",
+                                                "lines": [
                                                     {
-                                                        "id": "n1",
-                                                        "label": "Fuel ignites",
-                                                        "description": "Combustion releases energy.",
-                                                        "role": "start",
-                                                    },
-                                                    {
-                                                        "id": "n2",
-                                                        "label": "Wheels turn",
-                                                        "description": "The drivetrain transfers torque.",
-                                                        "role": "end",
-                                                    },
-                                                ],
-                                                "edges": [
-                                                    {"source": "n1", "target": "n2"}
+                                                        "type": "blockLine",
+                                                        "id": "line",
+                                                        "blocks": [
+                                                            {
+                                                                "type": "block",
+                                                                "id": "same",
+                                                                "heading": "Fuel ignites",
+                                                                "description": "Combustion releases energy.",
+                                                            },
+                                                            {
+                                                                "type": "block",
+                                                                "id": "same-2",
+                                                                "heading": "Wheels turn",
+                                                                "description": "The drivetrain transfers torque.",
+                                                            },
+                                                            {
+                                                                "type": "block",
+                                                                "id": "same",
+                                                                "heading": "Car moves",
+                                                                "description": "The repaired ID must keep advancing.",
+                                                            },
+                                                        ],
+                                                    }
                                                 ],
                                             }
                                         )
@@ -436,9 +680,10 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
             "Car power flow",
         )
 
-        self.assertEqual(visual["diagram"]["nodes"][0]["lane"], "")
-        self.assertEqual(visual["diagram"]["nodes"][0]["group"], "")
-        self.assertEqual(visual["diagram"]["edges"][0]["kind"], "direct")
+        blocks = visual["diagram"]["lines"][0]["blocks"]
+        self.assertEqual(blocks[0]["id"], "same")
+        self.assertEqual(blocks[1]["id"], "same-2")
+        self.assertEqual(blocks[2]["id"], "same-3")
 
     async def test_diagram_provider_error_is_not_silently_discarded(self) -> None:
         transport = StubTransport(
@@ -461,105 +706,56 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
     def test_normalizer_supports_every_hardcoded_diagram_type(self) -> None:
         diagram_types = {
             "flowchart",
-            "swimlane",
-            "decisionTree",
-            "cycle",
-            "timeline",
-            "comparisonMatrix",
-            "systemMap",
-            "causeEffect",
+            "tree",
+            "vennDiagram",
+            "pieChart",
+            "mindMap",
         }
-        base_nodes = [
-            {
-                "id": f"n{index}",
-                "label": f"Node {index}",
-                "description": "Specific explanation",
-                "role": "process",
-                "lane": "driver",
-                "group": "Vehicle",
-            }
-            for index in range(1, 6)
-        ]
-        base_edges = [
-            {
-                "source": f"n{index}",
-                "target": f"n{index + 1}",
-                "label": "next",
-                "kind": "direct",
-            }
-            for index in range(1, 5)
-        ]
 
         for diagram_type in diagram_types:
             with self.subTest(diagram_type=diagram_type):
+                response = diagram_response(diagram_type=diagram_type)
+                raw = json.loads(response["candidates"][0]["content"]["parts"][0]["text"])
                 normalized = _normalize_diagram(
-                    {
-                        "diagramType": diagram_type,
-                        "title": "Vehicle system",
-                        "summary": "A structured explanation.",
-                        "nodes": base_nodes,
-                        "edges": base_edges,
-                        "lanes": [{"id": "driver", "label": "Driver"}],
-                    },
+                    raw,
                     "Vehicle system diagram",
                 )
                 self.assertEqual(normalized["type"], diagram_type)
-                self.assertEqual(len(normalized["nodes"]), 5)
-                self.assertTrue(normalized["edges"])
+                self.assertEqual(normalized["version"], 3)
 
-        cycle = _normalize_diagram(
-            {
-                "diagramType": "cycle",
-                "title": "Engine cycle",
-                "summary": "",
-                "nodes": base_nodes,
-                "edges": base_edges,
-                "lanes": [],
-            },
-            "Engine cycle",
+    def test_diagram_schema_does_not_use_numeric_enum_values(self) -> None:
+        from backend.services.gemini_pipeline import DIAGRAM_RESPONSE_SCHEMA
+
+        self.assertNotIn("anyOf", DIAGRAM_RESPONSE_SCHEMA)
+        version_schema = DIAGRAM_RESPONSE_SCHEMA["properties"]["version"]
+        self.assertEqual(version_schema["type"], "INTEGER")
+        self.assertNotIn("enum", version_schema)
+        self.assertEqual(version_schema["minimum"], 3)
+        self.assertEqual(version_schema["maximum"], 3)
+        self.assertEqual(
+            set(DIAGRAM_RESPONSE_SCHEMA["properties"]["type"]["enum"]),
+            {"flowchart", "tree", "vennDiagram", "pieChart", "mindMap"},
         )
-        self.assertTrue(any(edge["kind"] == "feedback" for edge in cycle["edges"]))
 
-    def test_normalizer_repairs_partial_sequential_connections(self) -> None:
-        nodes = [
-            {
-                "id": f"n{index}",
-                "label": f"Stage {index}",
-                "description": "Specific explanation",
-                "role": "process",
-                "lane": "",
-                "group": "",
-            }
-            for index in range(1, 5)
-        ]
+    def test_normalizer_scales_pie_portions_to_one_hundred(self) -> None:
         normalized = _normalize_diagram(
             {
-                "diagramType": "flowchart",
-                "title": "Four-stage process",
-                "summary": "",
-                "nodes": nodes,
-                "edges": [
-                    {
-                        "source": "n1",
-                        "target": "n2",
-                        "label": "begins",
-                        "kind": "direct",
-                    },
-                    {
-                        "source": "missing",
-                        "target": "n4",
-                        "label": "invalid",
-                        "kind": "direct",
-                    },
+                "version": 3,
+                "type": "pieChart",
+                "title": "Energy output",
+                "description": "Provider proportions need repair.",
+                "portions": [
+                    {"heading": "Motion", "proportion": 2},
+                    {"heading": "Heat", "proportion": 1},
                 ],
-                "lanes": [],
             },
-            "Four-stage process",
+            "Energy output",
         )
 
-        pairs = {(edge["source"], edge["target"]) for edge in normalized["edges"]}
-        self.assertTrue({("n1", "n2"), ("n2", "n3"), ("n3", "n4")} <= pairs)
-        self.assertFalse(any(edge["source"] == "missing" for edge in normalized["edges"]))
+        self.assertEqual(
+            sum(portion["proportion"] for portion in normalized["portions"]),
+            100,
+        )
 
     async def test_image_strategy_uses_no_text_prompt_prefix(self) -> None:
         transport = StubTransport(
@@ -614,7 +810,7 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(visual["kind"], "generated")
         self.assertNotIn("source", visual)
 
-    async def test_repeated_similar_input_uses_persistent_cache(self) -> None:
+    async def test_only_repeated_exact_input_uses_persistent_cache(self) -> None:
         cache_dir = Path.cwd() / ".cache" / f"test-visual-cache-{uuid.uuid4().hex}"
         transport = StubTransport(
             [
@@ -633,7 +829,7 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
                         }
                     ],
                 ),
-                diagram_response(diagram_type="cycle", node_count=4),
+                diagram_response(diagram_type="flowchart", node_count=4),
             ]
         )
         pipeline = GeminiPipeline(
@@ -673,11 +869,16 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
             cache_dir=cache_dir,
         )
         second = await cached_pipeline.generate(
-            "Make a flowchart diagram of water cycle evaporation condensation precipitation."
+            "Create a flowchart diagram of water cycle evaporation condensation precipitation."
         )
 
         self.assertEqual(first_result, second)
         self.assertEqual(cached_transport.requests, [])
+        self.assertIsNone(
+            cached_pipeline._get_cached_result(
+                "Make a flowchart diagram of water cycle evaporation condensation precipitation."
+            )
+        )
 
     async def test_image_failure_returns_none_without_retry(self) -> None:
         transport = StubTransport(
