@@ -6,7 +6,7 @@ import re
 import time
 import uuid
 from collections import defaultdict, deque
-from collections.abc import Callable, Coroutine
+from collections.abc import AsyncIterator, Callable, Coroutine
 from threading import Lock
 from typing import Annotated, Literal
 from urllib.parse import urlencode
@@ -15,6 +15,7 @@ import urllib.request
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from fastapi.websockets import WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 import websockets
@@ -321,6 +322,7 @@ class CompositionBlock(BaseModel):
     size: Literal["compact", "medium", "large", "wide"]
     visual: GeneratedVisual | None = None
     visualJobId: str | None = None
+    recallPhrases: list[str] = Field(default_factory=list, max_length=3)
 
 
 class GenerateResponse(BaseModel):
@@ -423,6 +425,95 @@ async def run_visual_job(
             cache_payload[0],
             cache_payload[1],
         )
+
+
+async def schedule_visual_generation(
+    user_input: str,
+    result: dict[str, object],
+) -> None:
+    """Attach visual job IDs and start the same background work for every route."""
+    visual_requests = result.pop("_visualRequests", [])
+    pending_job_ids: set[str] = set()
+    visual_task_arguments: list[tuple[str, str, str, str, str]] = []
+    batch_id = uuid.uuid4().hex
+    now = time.monotonic()
+
+    if isinstance(visual_requests, list):
+        for visual_request in visual_requests:
+            if not isinstance(visual_request, dict):
+                continue
+            block_id = visual_request.get("blockId")
+            visual_strategy = visual_request.get("visualStrategy")
+            visual_prompt = visual_request.get("visualPrompt")
+            visual_alt = visual_request.get("visualAlt")
+            if (
+                not isinstance(block_id, str)
+                or visual_strategy not in {"diagram", "image"}
+                or not isinstance(visual_prompt, str)
+                or not isinstance(visual_alt, str)
+            ):
+                continue
+
+            job_id = uuid.uuid4().hex
+            pending_job_ids.add(job_id)
+            visual_task_arguments.append(
+                (
+                    job_id,
+                    block_id,
+                    str(visual_strategy),
+                    visual_prompt,
+                    visual_alt,
+                )
+            )
+            blocks = result.get("blocks")
+            if isinstance(blocks, list):
+                for block in blocks:
+                    if (
+                        isinstance(block, dict)
+                        and block.get("blockId") == block_id
+                    ):
+                        block["visualJobId"] = job_id
+                        break
+
+    if pending_job_ids:
+        with visual_jobs_lock:
+            sweep_visual_state_locked(now)
+            for job_id, block_id, _, _, _ in visual_task_arguments:
+                visual_jobs[job_id] = {
+                    "status": "pending",
+                    "blockId": block_id,
+                    "visual": None,
+                    "warning": None,
+                    "updatedAt": now,
+                }
+            visual_batches[batch_id] = {
+                "userInput": user_input,
+                "result": result,
+                "pendingJobIds": pending_job_ids,
+                "failed": False,
+                "updatedAt": now,
+            }
+
+        for (
+            job_id,
+            block_id,
+            visual_strategy,
+            visual_prompt,
+            visual_alt,
+        ) in visual_task_arguments:
+            track_visual_task(
+                run_visual_job(
+                    job_id,
+                    batch_id,
+                    block_id,
+                    user_input,
+                    visual_strategy,
+                    visual_prompt,
+                    visual_alt,
+                )
+            )
+    else:
+        await asyncio.to_thread(gemini_pipeline.cache_result, user_input, result)
 
 
 def get_deepgram_api_key() -> str:
@@ -536,90 +627,88 @@ async def generate_content(
             detail="The generation request failed unexpectedly.",
         ) from error
 
-    visual_requests = result.pop("_visualRequests", [])
-    pending_job_ids: set[str] = set()
-    visual_task_arguments: list[tuple[str, str, str, str, str]] = []
-    batch_id = uuid.uuid4().hex
-    now = time.monotonic()
-
-    if isinstance(visual_requests, list):
-        for visual_request in visual_requests:
-            if not isinstance(visual_request, dict):
-                continue
-            block_id = visual_request.get("blockId")
-            visual_strategy = visual_request.get("visualStrategy")
-            visual_prompt = visual_request.get("visualPrompt")
-            visual_alt = visual_request.get("visualAlt")
-            if (
-                not isinstance(block_id, str)
-                or visual_strategy not in {"diagram", "image"}
-                or not isinstance(visual_prompt, str)
-                or not isinstance(visual_alt, str)
-            ):
-                continue
-
-            job_id = uuid.uuid4().hex
-            pending_job_ids.add(job_id)
-            visual_task_arguments.append(
-                (
-                    job_id,
-                    block_id,
-                    str(visual_strategy),
-                    visual_prompt,
-                    visual_alt,
-                )
-            )
-            blocks = result.get("blocks")
-            if isinstance(blocks, list):
-                for block in blocks:
-                    if (
-                        isinstance(block, dict)
-                        and block.get("blockId") == block_id
-                    ):
-                        block["visualJobId"] = job_id
-                        break
-
-    if pending_job_ids:
-        with visual_jobs_lock:
-            sweep_visual_state_locked(now)
-            for job_id, block_id, _, _, _ in visual_task_arguments:
-                visual_jobs[job_id] = {
-                    "status": "pending",
-                    "blockId": block_id,
-                    "visual": None,
-                    "warning": None,
-                    "updatedAt": now,
-                }
-            visual_batches[batch_id] = {
-                "userInput": user_input,
-                "result": result,
-                "pendingJobIds": pending_job_ids,
-                "failed": False,
-                "updatedAt": now,
-            }
-
-        for (
-            job_id,
-            block_id,
-            visual_strategy,
-            visual_prompt,
-            visual_alt,
-        ) in visual_task_arguments:
-            track_visual_task(
-                run_visual_job(
-                    job_id,
-                    batch_id,
-                    block_id,
-                    user_input,
-                    visual_strategy,
-                    visual_prompt,
-                    visual_alt,
-                )
-            )
-    else:
-        await asyncio.to_thread(gemini_pipeline.cache_result, user_input, result)
-
+    await schedule_visual_generation(user_input, result)
     return GenerateResponse(**result)
+
+
+def encode_generation_event(event: dict[str, object]) -> str:
+    return json.dumps(event, separators=(",", ":")) + "\n"
+
+
+async def stream_generation_events(user_input: str) -> AsyncIterator[str]:
+    try:
+        async for event in gemini_pipeline.generate_stream(user_input):
+            if event.get("type") == "result":
+                raw_result = event.get("result")
+                if not isinstance(raw_result, dict):
+                    raise GeminiProviderError(
+                        "The AI provider returned an unexpected response."
+                    )
+                await schedule_visual_generation(user_input, raw_result)
+                response = GenerateResponse(**raw_result)
+                yield encode_generation_event(
+                    {
+                        "type": "result",
+                        "result": response.model_dump(mode="json"),
+                    }
+                )
+                yield encode_generation_event({"type": "done"})
+                return
+            if event.get("type") == "text_delta":
+                text_delta = event.get("text")
+                if isinstance(text_delta, str) and text_delta:
+                    yield encode_generation_event(
+                        {"type": "text_delta", "text": text_delta}
+                    )
+    except GeminiConfigurationError:
+        yield encode_generation_event(
+            {
+                "type": "error",
+                "message": "AI text generation is not configured.",
+            }
+        )
+    except GeminiProviderError:
+        logger.exception("The AI provider failed a streaming generation request.")
+        yield encode_generation_event(
+            {
+                "type": "error",
+                "message": (
+                    "The AI provider could not complete the generation request."
+                ),
+            }
+        )
+    except Exception:
+        logger.exception("Unexpected streaming generation failure.")
+        yield encode_generation_event(
+            {
+                "type": "error",
+                "message": "The generation request failed unexpectedly.",
+            }
+        )
+
+
+@app.post("/api/generate/stream")
+async def generate_content_stream(
+    payload: GenerateRequest,
+    request: Request,
+) -> StreamingResponse:
+    """Stream Gemini text deltas before returning the composed canvas."""
+    user_input = payload.userInput.strip()
+    if not user_input:
+        raise HTTPException(status_code=422, detail="Input cannot be empty.")
+
+    client_key = request.client.host if request.client else "unknown"
+    if not generation_rate_limiter.allow(client_key):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many generation requests. Please wait and try again.",
+        )
+
+    return StreamingResponse(
+        stream_generation_events(user_input),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 @app.get("/api/visual/{job_id}", response_model=VisualJobResponse)

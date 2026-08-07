@@ -14,7 +14,8 @@
     "build:docker": "next build",
     "start": "next start",
     "start:sites": "vinext start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:frontend": "node --experimental-strip-types tests/lesson-library.test.mjs"
   },
   "dependencies": {
     "@gsap/react": "^2.1.2",

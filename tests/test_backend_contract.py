@@ -1,3 +1,4 @@
+import json
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -5,6 +6,33 @@ from pydantic import ValidationError
 
 import backend.main as backend_main
 from backend.main import GenerateRequest, SlidingWindowRateLimiter
+from backend.services.gemini_pipeline import GeminiProviderError
+
+
+def composition_result() -> dict[str, object]:
+    return {
+        "title": "Cell energy",
+        "layoutMode": "textDominant",
+        "theme": {
+            "palette": "slate",
+            "density": "comfortable",
+            "motion": "none",
+        },
+        "blocks": [
+            {
+                "blockId": "notes-1",
+                "kind": "notes",
+                "title": "Cell energy",
+                "body": "",
+                "items": ["ATP powers cellular work."],
+                "size": "medium",
+                "visual": None,
+                "visualJobId": None,
+                "recallPhrases": [],
+            }
+        ],
+        "warning": None,
+    }
 
 
 class BackendContractTests(unittest.TestCase):
@@ -175,6 +203,103 @@ class VisualJobLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             backend_main.visual_jobs["stale-pending"]["status"],
             "failed",
+        )
+
+
+class StreamingGenerationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_stream_endpoint_returns_ndjson_and_uses_generation_limit(self) -> None:
+        client_key = "stream-endpoint-test"
+        backend_main.generation_rate_limiter.requests.pop(client_key, None)
+        request = backend_main.Request(
+            {
+                "type": "http",
+                "method": "POST",
+                "path": "/api/generate/stream",
+                "headers": [],
+                "query_string": b"",
+                "scheme": "http",
+                "server": ("testserver", 80),
+                "client": (client_key, 5000),
+            }
+        )
+        try:
+            response = await backend_main.generate_content_stream(
+                GenerateRequest(userInput="Explain ATP."),
+                request,
+            )
+
+            self.assertEqual(response.media_type, "application/x-ndjson")
+            self.assertEqual(
+                len(backend_main.generation_rate_limiter.requests[client_key]),
+                1,
+            )
+            await response.body_iterator.aclose()
+        finally:
+            backend_main.generation_rate_limiter.requests.pop(client_key, None)
+
+    async def test_stream_orders_deltas_result_and_done(self) -> None:
+        result = composition_result()
+
+        async def generate_stream(_: str):
+            yield {"type": "text_delta", "text": "Cell "}
+            yield {"type": "text_delta", "text": "energy"}
+            yield {"type": "result", "result": result}
+
+        with (
+            patch.object(
+                backend_main.gemini_pipeline,
+                "generate_stream",
+                new=generate_stream,
+            ),
+            patch.object(
+                backend_main,
+                "schedule_visual_generation",
+                new=AsyncMock(),
+            ) as schedule_visual_generation,
+        ):
+            events = [
+                json.loads(line)
+                async for line in backend_main.stream_generation_events(
+                    "Explain ATP."
+                )
+            ]
+
+        self.assertEqual(
+            [event["type"] for event in events],
+            ["text_delta", "text_delta", "result", "done"],
+        )
+        self.assertEqual(events[0]["text"] + events[1]["text"], "Cell energy")
+        self.assertEqual(events[2]["result"]["title"], "Cell energy")
+        schedule_visual_generation.assert_awaited_once_with(
+            "Explain ATP.",
+            result,
+        )
+
+    async def test_stream_sanitizes_provider_error(self) -> None:
+        async def generate_stream(_: str):
+            yield {"type": "text_delta", "text": "partial"}
+            raise GeminiProviderError("secret provider diagnostic")
+
+        with patch.object(
+            backend_main.gemini_pipeline,
+            "generate_stream",
+            new=generate_stream,
+        ):
+            events = [
+                json.loads(line)
+                async for line in backend_main.stream_generation_events(
+                    "Explain ATP."
+                )
+            ]
+
+        self.assertEqual(
+            [event["type"] for event in events],
+            ["text_delta", "error"],
+        )
+        self.assertNotIn("secret provider diagnostic", json.dumps(events))
+        self.assertEqual(
+            events[-1]["message"],
+            "The AI provider could not complete the generation request.",
         )
 
 

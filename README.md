@@ -16,6 +16,37 @@ typed input or Deepgram transcript
 Deepgram fills the input field but does not submit automatically. Press Enter
 or use the submit button to control when a paid Gemini request occurs.
 
+## Educator workspace
+
+`/canvas` is a local-first teaching dashboard with five views:
+
+- **Overview** summarizes prepared lessons and common recall phrases.
+- **Prepare** turns an outline or transcript into a previewable lesson pack
+  using the existing trusted diagram and image templates.
+- **Library** keeps prepared lesson previews in browser `localStorage`.
+- **Teach** reveals saved media only after an exact command shaped like
+  `imagine show me <recall phrase>`; unknown or conversational phrases never
+  fall through to generation.
+- **Live canvas** preserves on-the-spot generation for unplanned moments.
+
+The planner generates up to three recall phrases for each visual block. Phrases
+remain editable before teaching and must be unique within the lesson. Prepared
+lesson records are versioned so browser persistence can later be replaced by a
+cloud repository without changing the presentation model.
+
+Raster images are stored as data URLs and can reach browser storage limits.
+The dashboard reports quota failures instead of silently claiming the lesson
+was saved. Pending backend visual-job IDs are never persisted across reloads.
+
+## Live completion
+
+`POST /api/generate/stream` uses newline-delimited JSON. Gemini notes text is
+streamed to the browser as `text_delta` events while the final structured
+composition is still being planned. The stream then emits the normal composition
+as `result`, followed by `done`; visual blocks continue through the existing
+asynchronous visual-job system. The original buffered `/api/generate` endpoint
+remains available for compatibility.
+
 ## Local setup
 
 Install the existing frontend and backend dependencies:
@@ -51,9 +82,8 @@ FastAPI backend uses port `8010`.
   and which blocks need visuals.
 - The planner can return a text-led, visual-led, sequence, comparison, or
   balanced canvas with multiple blocks.
-- Flowcharts, swimlanes, decision trees, cycles, timelines, comparison matrices,
-  system maps, and cause-effect explanations render through hardcoded React
-  components. Gemini supplies only the typed nodes and relationships.
+- Flowcharts, trees, Venn diagrams, pie charts, and mind maps render through
+  hardcoded React components. Gemini supplies only typed nodes and relationships.
 - Diagram node counts adapt to the explanation: concise topics stay compact,
   while substantial processes can expand to 7-14 meaningful nodes. Wide
   structures scroll inside the visual panel instead of being compressed.
@@ -93,6 +123,8 @@ The backend tests mock Gemini and make no external requests:
 
 ```bash
 python -m unittest discover -s tests
+npm run test:frontend
+.\node_modules\.bin\tsc.cmd --noEmit
 npm run build
 ```
 

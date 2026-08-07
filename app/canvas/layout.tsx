@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Live Canvas | Imagine v1",
+  title: "Educator Workspace | Imagine v1",
   description:
-    "Speak or type an idea and turn it into structured notes, diagrams, and visual explanations."
+    "Prepare lesson visuals in advance, preview them, and recall them intentionally while teaching."
 };
 
 export default function CanvasLayout({

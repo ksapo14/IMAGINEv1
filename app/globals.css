@@ -159,6 +159,24 @@ a:focus-visible {
   .diagram-motion .diagram-enter {
     animation: none;
   }
+
+  .dashboard-marquee-track {
+    animation: none;
+  }
+}
+
+@keyframes dashboard-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.dashboard-marquee-track {
+  animation: dashboard-marquee 28s linear infinite;
+  will-change: transform;
 }
 
 :root[data-theme="light"] .brand-logo-dark {

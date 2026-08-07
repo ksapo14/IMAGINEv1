@@ -16,6 +16,7 @@ from backend.services.gemini_pipeline import (
     GeminiPipeline,
     GeminiProviderError,
     _default_json_transport,
+    _default_stream_transport,
     _infer_diagram_type,
     _normalize_diagram,
 )
@@ -77,6 +78,7 @@ def planner_response(
                 "visualKind": "none",
                 "visualPrompt": "",
                 "visualAlt": "",
+                "recallPhrases": [],
             }
         ],
     }
@@ -101,6 +103,7 @@ def diagram_block() -> dict[str, Any]:
         "visualKind": "diagram",
         "visualPrompt": "Show glucose becoming ATP through cellular respiration.",
         "visualAlt": "Flowchart showing glucose becoming ATP.",
+        "recallPhrases": [],
     }
 
 
@@ -114,6 +117,7 @@ def image_block() -> dict[str, Any]:
         "visualKind": "image",
         "visualPrompt": "A clean illustration of ATP production.",
         "visualAlt": "Illustration showing ATP production.",
+        "recallPhrases": [],
     }
 
 
@@ -250,6 +254,20 @@ class StubTransport:
         return self.responses.pop(0)
 
 
+class StubStreamTransport:
+    def __init__(self, responses: list[dict[str, Any]]) -> None:
+        self.responses = responses
+        self.requests: list[tuple[urllib.request.Request, float]] = []
+
+    def __call__(
+        self,
+        request: urllib.request.Request,
+        timeout_seconds: float,
+    ) -> list[dict[str, Any]]:
+        self.requests.append((request, timeout_seconds))
+        return self.responses
+
+
 TEST_DEV_KEY = "dev-secret"
 TEST_PROD_KEY = "prod-secret"
 TEST_TEXT_MODEL = "text-test-model"
@@ -310,6 +328,23 @@ class GeminiTransportTests(unittest.TestCase):
             ):
                 _default_json_transport(request, 1)
 
+    def test_stream_transport_decodes_sse_events_incrementally(self) -> None:
+        first = {"candidates": [{"content": {"parts": [{"text": "one"}]}}]}
+        second = {"candidates": [{"content": {"parts": [{"text": " two"}]}}]}
+        response = io.BytesIO(
+            (
+                f"data: {json.dumps(first)}\n\n"
+                f"data: {json.dumps(second)}\n\n"
+                "data: [DONE]\n\n"
+            ).encode("utf-8")
+        )
+        request = urllib.request.Request("https://example.test")
+
+        with patch("urllib.request.urlopen", return_value=response):
+            events = list(_default_stream_transport(request, 1))
+
+        self.assertEqual(events, [first, second, {}])
+
 
 class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
     async def test_text_only_uses_notes_and_planner_requests(self) -> None:
@@ -347,6 +382,153 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["blocks"][0]["kind"], "notes")
         self.assertEqual(result["_visualRequests"], [])
 
+    async def test_stream_yields_provider_deltas_before_final_composition(self) -> None:
+        notes_text = text_response()["candidates"][0]["content"]["parts"][0]["text"]
+        split_at = len(notes_text) // 2
+        stream_transport = StubStreamTransport(
+            [
+                {
+                    "candidates": [
+                        {"content": {"parts": [{"text": notes_text[:split_at]}]}}
+                    ]
+                },
+                {
+                    "candidates": [
+                        {"content": {"parts": [{"text": notes_text[split_at:]}]}}
+                    ]
+                },
+            ]
+        )
+        transport = StubTransport([planner_response()])
+        pipeline = GeminiPipeline(
+            text_api_key=TEST_DEV_KEY,
+            text_model=TEST_TEXT_MODEL,
+            transport=transport,
+            stream_transport=stream_transport,
+            cache_enabled=False,
+        )
+
+        events = [event async for event in pipeline.generate_stream("Explain ATP.")]
+
+        self.assertEqual(
+            [event["type"] for event in events],
+            ["text_delta", "text_delta", "result"],
+        )
+        self.assertEqual("".join(event["text"] for event in events[:2]), notes_text)
+        self.assertEqual(events[-1]["result"]["title"], "Cell energy map")
+        self.assertEqual(len(stream_transport.requests), 1)
+        stream_request, _ = stream_transport.requests[0]
+        self.assertIn(":streamGenerateContent?alt=sse", stream_request.full_url)
+        self.assertEqual(
+            dict(stream_request.header_items())["Accept"],
+            "text/event-stream",
+        )
+        self.assertEqual(len(transport.requests), 1)
+
+    async def test_cached_stream_returns_result_without_text_or_transport(self) -> None:
+        cached_result = {
+            "title": "Cached lesson",
+            "layoutMode": "textDominant",
+            "theme": {
+                "palette": "slate",
+                "density": "comfortable",
+                "motion": "none",
+            },
+            "blocks": [
+                {
+                    "blockId": "notes-1",
+                    "kind": "notes",
+                    "title": "Cached lesson",
+                    "body": "",
+                    "items": ["Already prepared."],
+                    "size": "medium",
+                    "visual": None,
+                    "visualJobId": None,
+                    "recallPhrases": [],
+                }
+            ],
+            "warning": None,
+        }
+        transport = StubTransport([])
+        stream_transport = StubStreamTransport([])
+        pipeline = GeminiPipeline(
+            text_api_key=TEST_DEV_KEY,
+            text_model=TEST_TEXT_MODEL,
+            transport=transport,
+            stream_transport=stream_transport,
+        )
+
+        with patch.object(
+            pipeline,
+            "_get_cached_result",
+            return_value=cached_result,
+        ):
+            events = [
+                event async for event in pipeline.generate_stream("Explain ATP.")
+            ]
+
+        self.assertEqual(events, [{"type": "result", "result": cached_result}])
+        self.assertEqual(transport.requests, [])
+        self.assertEqual(stream_transport.requests, [])
+
+    def test_visual_recall_phrases_are_normalized_with_title_fallback(self) -> None:
+        pipeline = GeminiPipeline(cache_enabled=False)
+        notes = {
+            "title": "Cell energy",
+            "bullets": ["Cells make ATP."],
+            "visualStrategy": "none",
+            "visualPrompt": "",
+            "visualAlt": "",
+        }
+        first_visual = {
+            **diagram_block(),
+            "recallPhrases": [
+                " Imagine, show me: ATP production flow! ",
+                "atp production flow",
+                "cellular energy pathway",
+                "unused fourth phrase",
+            ],
+        }
+        second_visual = {
+            **image_block(),
+            "recallPhrases": [],
+        }
+        non_visual = {
+            "kind": "notes",
+            "title": "Key idea",
+            "body": "",
+            "items": ["ATP powers cell work."],
+            "size": "medium",
+            "visualKind": "none",
+            "visualPrompt": "",
+            "visualAlt": "",
+            "recallPhrases": ["must be ignored"],
+        }
+
+        result = pipeline._normalize_composition(
+            {
+                "title": "Cell energy",
+                "layoutMode": "balanced",
+                "theme": {},
+                "blocks": [first_visual, second_visual, non_visual],
+            },
+            notes,
+        )
+
+        self.assertEqual(
+            result["blocks"][0]["recallPhrases"],
+            [
+                "ATP production flow",
+                "cellular energy pathway",
+                "unused fourth phrase",
+            ],
+        )
+        self.assertEqual(
+            result["blocks"][1]["recallPhrases"],
+            ["ATP illustration"],
+        )
+        self.assertEqual(result["blocks"][2]["recallPhrases"], [])
+
     async def test_diagram_preference_returns_visual_request_for_block(self) -> None:
         transport = StubTransport(
             [
@@ -367,6 +549,7 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
                             "visualKind": "none",
                             "visualPrompt": "",
                             "visualAlt": "",
+                            "recallPhrases": [],
                         },
                         diagram_block(),
                     ],
@@ -532,8 +715,8 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
                     expected_type,
                 )
 
-    def test_cache_schema_invalidates_old_diagram_type_choices(self) -> None:
-        self.assertEqual(CACHE_SCHEMA_VERSION, 4)
+    def test_cache_schema_invalidates_results_without_recall_phrases(self) -> None:
+        self.assertEqual(CACHE_SCHEMA_VERSION, 5)
 
     async def test_diagram_retries_invalid_argument_with_compatibility_payload(
         self,

@@ -1,3 +1,32 @@
+[agents]
+max_threads = 4
+max_depth = 1
+job_max_runtime_seconds = 1800
+
+[agents.orchestrator]
+description = "Coordinates scoped tasks through planning, implementation, verification, review, and bounded repair."
+config_file = "agents/orchestrator.toml"
+
+[agents.explorer]
+description = "Read-only repository investigator that locates architecture, flows, conventions, dependencies, and tests."
+config_file = "agents/explorer.toml"
+
+[agents.planner]
+description = "Read-only implementation planner that creates a repository-grounded contract and acceptance criteria."
+config_file = "agents/planner.toml"
+
+[agents.implementer]
+description = "Scoped coding agent that implements an accepted plan and repairs concrete failures."
+config_file = "agents/implementer.toml"
+
+[agents.verifier]
+description = "Verification agent that runs checks, evaluates acceptance criteria, and classifies failures."
+config_file = "agents/verifier.toml"
+
+[agents.reviewer]
+description = "Read-only skeptical senior reviewer focused on material correctness, reliability, and regression risks."
+config_file = "agents/reviewer.toml"
+
 [mcp_servers.shadcn]
 command = "npx"
 args = ["shadcn@latest", "mcp"]

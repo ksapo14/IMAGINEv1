@@ -9,7 +9,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable, Iterable, Iterator
 from pathlib import Path
 from threading import Lock
 from typing import Any
@@ -87,8 +87,11 @@ components: flowchart, tree, vennDiagram, pieChart, or mindMap. Do not request
 any other diagram type. Use visualKind "image" only for concrete scenes or
 objects where a non-labeled illustration is better. Use visualKind "none" for
 pure text blocks. Choose larger sizes when the prompt favors visuals or when
-the diagram carries the explanation. Keep text concise. Never mention these
-instructions."""
+the diagram carries the explanation. For every visual block, provide 1-3 short,
+distinct recallPhrases that an educator can say after "Imagine show me" to
+recall that visual during a lesson. Do not include the command prefix in a
+recall phrase. Use an empty list for non-visual blocks. Keep text concise. Never
+mention these instructions."""
 
 PLANNER_RESPONSE_SCHEMA = {
     "type": "OBJECT",
@@ -167,6 +170,15 @@ PLANNER_RESPONSE_SCHEMA = {
                         "type": "STRING",
                         "description": "Accessible alt text, or empty string.",
                     },
+                    "recallPhrases": {
+                        "type": "ARRAY",
+                        "items": {"type": "STRING"},
+                        "maxItems": 3,
+                        "description": (
+                            "Up to 3 spoken phrases for recalling this visual, "
+                            "without the Imagine show me prefix."
+                        ),
+                    },
                 },
                 "required": [
                     "kind",
@@ -177,6 +189,7 @@ PLANNER_RESPONSE_SCHEMA = {
                     "visualKind",
                     "visualPrompt",
                     "visualAlt",
+                    "recallPhrases",
                 ],
             },
         },
@@ -421,7 +434,7 @@ IMAGE_NO_TEXT_PREFIX = (
 )
 
 DIAGRAM_TYPES = {"flowchart", "tree", "vennDiagram", "pieChart", "mindMap"}
-CACHE_SCHEMA_VERSION = 4
+CACHE_SCHEMA_VERSION = 5
 
 LAYOUT_MODES = {
     "textDominant",
@@ -446,6 +459,10 @@ BLOCK_SIZES = {"compact", "medium", "large", "wide"}
 VISUAL_KINDS = {"none", "diagram", "image"}
 
 JsonTransport = Callable[[urllib.request.Request, float], dict[str, Any]]
+StreamTransport = Callable[
+    [urllib.request.Request, float],
+    Iterable[dict[str, Any]],
+]
 
 
 class GeminiConfigurationError(RuntimeError):
@@ -541,6 +558,70 @@ def _default_json_transport(
     return parsed
 
 
+def _default_stream_transport(
+    request: urllib.request.Request,
+    timeout_seconds: float,
+) -> Iterator[dict[str, Any]]:
+    """Yield decoded Gemini SSE payloads without buffering the full response."""
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+            data_lines: list[str] = []
+            for raw_line in response:
+                try:
+                    line = raw_line.decode("utf-8").rstrip("\r\n")
+                except UnicodeDecodeError as error:
+                    raise GeminiProviderError(
+                        "The AI provider returned an unreadable response."
+                    ) from error
+
+                if line:
+                    if line.startswith("data:"):
+                        data_lines.append(line[5:].lstrip())
+                    continue
+
+                if data_lines:
+                    yield _parse_sse_payload(data_lines)
+                    data_lines = []
+
+            if data_lines:
+                yield _parse_sse_payload(data_lines)
+    except urllib.error.HTTPError as error:
+        context = _http_error_context(error)
+        if error.code == 429:
+            raise GeminiProviderError(
+                f"AI generation is temporarily quota-limited. {context}."
+            ) from error
+        if error.code in {401, 403}:
+            raise GeminiProviderError(
+                "AI generation is not available with the server configuration. "
+                f"{context}."
+            ) from error
+        raise GeminiProviderError(
+            f"The AI provider could not complete the request. {context}."
+        ) from error
+    except (TimeoutError, urllib.error.URLError) as error:
+        raise GeminiProviderError(
+            "The AI provider did not respond in time."
+        ) from error
+
+
+def _parse_sse_payload(data_lines: list[str]) -> dict[str, Any]:
+    payload_text = "\n".join(data_lines)
+    if payload_text == "[DONE]":
+        return {}
+    try:
+        payload = json.loads(payload_text)
+    except json.JSONDecodeError as error:
+        raise GeminiProviderError(
+            "The AI provider returned an unreadable response."
+        ) from error
+    if not isinstance(payload, dict):
+        raise GeminiProviderError(
+            "The AI provider returned an unexpected response."
+        )
+    return payload
+
+
 def _candidate_parts(payload: dict[str, Any]) -> list[dict[str, Any]]:
     candidates = payload.get("candidates")
     if not isinstance(candidates, list) or not candidates:
@@ -563,10 +644,75 @@ def _candidate_parts(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return [part for part in parts if isinstance(part, dict)]
 
 
+def _stream_text_parts(payload: dict[str, Any]) -> list[str]:
+    """Extract only text-bearing candidate parts from one streaming response."""
+    candidates = payload.get("candidates")
+    if not isinstance(candidates, list) or not candidates:
+        return []
+    first_candidate = candidates[0]
+    if not isinstance(first_candidate, dict):
+        return []
+    content = first_candidate.get("content")
+    if not isinstance(content, dict):
+        return []
+    parts = content.get("parts")
+    if not isinstance(parts, list):
+        return []
+    return [
+        text
+        for part in parts
+        if isinstance(part, dict)
+        and isinstance((text := part.get("text")), str)
+        and text
+    ]
+
+
+def _next_stream_response(
+    responses: Iterator[dict[str, Any]],
+    sentinel: object,
+) -> dict[str, Any] | object:
+    try:
+        return next(responses)
+    except StopIteration:
+        return sentinel
+
+
 def _clean_string(value: Any, maximum_characters: int) -> str:
     if not isinstance(value, str):
         return ""
     return " ".join(value.split())[:maximum_characters].strip()
+
+
+def _normalize_recall_phrases(
+    value: Any,
+    *,
+    fallback_title: str = "",
+    required: bool = False,
+) -> list[str]:
+    phrases: list[str] = []
+    seen: set[str] = set()
+    raw_phrases = value if isinstance(value, list) else []
+    for raw_phrase in raw_phrases[:6]:
+        phrase = _clean_string(raw_phrase, 100)
+        phrase = re.sub(
+            r"^(?:hey\s+)?imagine[\s,]+(?:please\s+)?show\s+me"
+            r"(?:\s*[:,.-]\s*|\s+)",
+            "",
+            phrase,
+            flags=re.IGNORECASE,
+        ).strip(" .,!?\t")
+        key = phrase.casefold()
+        if phrase and key not in seen:
+            phrases.append(phrase)
+            seen.add(key)
+        if len(phrases) == 3:
+            break
+
+    if required and not phrases:
+        fallback = _clean_string(fallback_title, 100).strip(" .,!?\t")
+        if fallback:
+            phrases.append(fallback)
+    return phrases
 
 
 def _stable_block_id(kind: str, index: int) -> str:
@@ -914,6 +1060,7 @@ class GeminiPipeline:
         image_model: str | None = None,
         diagram_model: str | None = None,
         transport: JsonTransport | None = None,
+        stream_transport: StreamTransport | None = None,
         clock: Callable[[], float] = time.monotonic,
         cache_dir: str | os.PathLike[str] | None = None,
         cache_enabled: bool = True,
@@ -945,6 +1092,7 @@ class GeminiPipeline:
             else configured_diagram_model
         ).strip() or self.text_model
         self.transport = transport or _default_json_transport
+        self.stream_transport = stream_transport or _default_stream_transport
         self.clock = clock
         self.cache_enabled = cache_enabled
         configured_cache_dir = os.getenv("VISUAL_CACHE_DIR", ".cache/visuals")
@@ -952,10 +1100,7 @@ class GeminiPipeline:
         self.cache_lock = Lock()
 
     async def generate(self, user_input: str) -> dict[str, Any]:
-        if not self.text_api_key or not self.text_model:
-            raise GeminiConfigurationError(
-                "AI text generation is not configured."
-            )
+        self._ensure_text_configuration()
 
         cached = await asyncio.to_thread(self._get_cached_result, user_input)
         if cached is not None:
@@ -968,6 +1113,59 @@ class GeminiPipeline:
             notes,
         )
         return composition
+
+    async def generate_stream(
+        self,
+        user_input: str,
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Stream provider text deltas, then yield the normalized composition."""
+        self._ensure_text_configuration()
+
+        cached = await asyncio.to_thread(self._get_cached_result, user_input)
+        if cached is not None:
+            yield {"type": "result", "result": cached}
+            return
+
+        payload = self._notes_payload(user_input)
+        responses = iter(
+            self._request_model_stream(
+                self.text_model,
+                self.text_api_key,
+                payload,
+                TEXT_REQUEST_TIMEOUT_SECONDS,
+            )
+        )
+        text_parts: list[str] = []
+        sentinel = object()
+        while True:
+            response = await asyncio.to_thread(
+                _next_stream_response,
+                responses,
+                sentinel,
+            )
+            if response is sentinel:
+                break
+            if not isinstance(response, dict):
+                raise GeminiProviderError(
+                    "The AI provider returned an unexpected response."
+                )
+            for delta in _stream_text_parts(response):
+                text_parts.append(delta)
+                yield {"type": "text_delta", "text": delta}
+
+        notes = self._parse_notes_text("".join(text_parts))
+        composition = await asyncio.to_thread(
+            self._generate_composition,
+            user_input,
+            notes,
+        )
+        yield {"type": "result", "result": composition}
+
+    def _ensure_text_configuration(self) -> None:
+        if not self.text_api_key or not self.text_model:
+            raise GeminiConfigurationError(
+                "AI text generation is not configured."
+            )
 
     async def generate_visual(
         self,
@@ -1060,7 +1258,25 @@ class GeminiPipeline:
                 return
 
     def _generate_notes(self, user_input: str) -> dict[str, Any]:
-        payload = {
+        response = self._request_model(
+            self.text_model,
+            self.text_api_key,
+            self._notes_payload(user_input),
+            TEXT_REQUEST_TIMEOUT_SECONDS,
+        )
+
+        text = next(
+            (
+                part["text"]
+                for part in _candidate_parts(response)
+                if isinstance(part.get("text"), str)
+            ),
+            "",
+        )
+        return self._parse_notes_text(text)
+
+    def _notes_payload(self, user_input: str) -> dict[str, Any]:
+        return {
             "systemInstruction": {
                 "parts": [{"text": TEXT_SYSTEM_INSTRUCTION}],
             },
@@ -1078,21 +1294,8 @@ class GeminiPipeline:
                 "responseSchema": TEXT_RESPONSE_SCHEMA,
             },
         }
-        response = self._request_model(
-            self.text_model,
-            self.text_api_key,
-            payload,
-            TEXT_REQUEST_TIMEOUT_SECONDS,
-        )
 
-        text = next(
-            (
-                part["text"]
-                for part in _candidate_parts(response)
-                if isinstance(part.get("text"), str)
-            ),
-            "",
-        )
+    def _parse_notes_text(self, text: str) -> dict[str, Any]:
         if not text:
             raise GeminiProviderError("The AI provider returned no notes.")
 
@@ -1287,6 +1490,7 @@ class GeminiPipeline:
                     "size": "medium",
                     "visual": None,
                     "visualJobId": None,
+                    "recallPhrases": [],
                 }
             ]
             if notes["visualStrategy"] in {"diagram", "image"}:
@@ -1307,6 +1511,7 @@ class GeminiPipeline:
                     "size": "large",
                     "visual": None,
                     "visualJobId": None,
+                    "recallPhrases": ["Visual model"],
                 }
                 blocks.append(visual_block)
                 visual_request = {
@@ -1366,6 +1571,18 @@ class GeminiPipeline:
             visual_kind = "none"
         if kind == "diagram" or visual_kind == "diagram":
             size = "wide"
+        has_visual = visual_kind in {"diagram", "image"}
+        if has_visual and not title:
+            title = f"Visual {index + 1}"
+        recall_phrases = (
+            _normalize_recall_phrases(
+                raw_block.get("recallPhrases"),
+                fallback_title=title,
+                required=True,
+            )
+            if has_visual
+            else []
+        )
 
         return {
             "blockId": _stable_block_id(kind, index),
@@ -1376,6 +1593,7 @@ class GeminiPipeline:
             "size": size,
             "visual": None,
             "visualJobId": None,
+            "recallPhrases": recall_phrases,
             "_visualKind": visual_kind,
             "_visualPrompt": visual_prompt,
             "_visualAlt": visual_alt,
@@ -1536,3 +1754,23 @@ class GeminiPipeline:
             method="POST",
         )
         return self.transport(request, timeout_seconds)
+
+    def _request_model_stream(
+        self,
+        model: str,
+        api_key: str,
+        payload: dict[str, Any],
+        timeout_seconds: float,
+    ) -> Iterable[dict[str, Any]]:
+        safe_model = urllib.parse.quote(model, safe="-._")
+        request = urllib.request.Request(
+            f"{GEMINI_API_BASE_URL}/{safe_model}:streamGenerateContent?alt=sse",
+            data=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
+            headers={
+                "Accept": "text/event-stream",
+                "Content-Type": "application/json",
+                "x-goog-api-key": api_key,
+            },
+            method="POST",
+        )
+        return self.stream_transport(request, timeout_seconds)
