@@ -115,6 +115,10 @@ function normalizeBlock(value: unknown): CompositionBlock | null {
     ...block,
     items: block.items.filter((item): item is string => typeof item === "string"),
     recallPhrases,
+    visualAlt:
+      typeof block.visualAlt === "string"
+        ? block.visualAlt
+        : block.visual?.alt ?? "",
     visualJobId: null,
     visualFailed:
       block.visualFailed || (hadPendingVisual && !block.visual) || undefined

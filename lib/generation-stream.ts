@@ -1,5 +1,7 @@
 import type { GenerateResponse } from "@/components/workspace/types";
 
+export type GenerationMode = "live" | "prepare";
+
 type StreamEvent =
   | { type: "text_delta"; text: string }
   | { type: "result"; result: GenerateResponse }
@@ -47,11 +49,15 @@ function getApiErrorMessage(problem: unknown) {
   return null;
 }
 
-async function bufferedGeneration(userInput: string, signal: AbortSignal) {
+async function bufferedGeneration(
+  userInput: string,
+  mode: GenerationMode,
+  signal: AbortSignal
+) {
   const response = await fetch(`${API_BASE_URL}/api/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ userInput }),
+    body: JSON.stringify({ userInput, mode }),
     signal
   });
   if (!response.ok) {
@@ -66,17 +72,18 @@ async function bufferedGeneration(userInput: string, signal: AbortSignal) {
 export async function streamGeneration(
   userInput: string,
   handlers: StreamHandlers,
-  signal: AbortSignal
+  signal: AbortSignal,
+  mode: GenerationMode = "live"
 ) {
   const response = await fetch(`${API_BASE_URL}/api/generate/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ userInput }),
+    body: JSON.stringify({ userInput, mode }),
     signal
   });
 
   if (response.status === 404 || response.status === 405) {
-    const fallback = await bufferedGeneration(userInput, signal);
+    const fallback = await bufferedGeneration(userInput, mode, signal);
     handlers.onResult?.(fallback);
     return fallback;
   }

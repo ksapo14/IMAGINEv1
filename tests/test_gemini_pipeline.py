@@ -15,6 +15,7 @@ from backend.services.gemini_pipeline import (
     GeminiConfigurationError,
     GeminiPipeline,
     GeminiProviderError,
+    _cache_key,
     _default_json_transport,
     _default_stream_transport,
     _infer_diagram_type,
@@ -220,6 +221,43 @@ def diagram_response(
     }
 
 
+def prepare_planner_response(block_count: int = 3) -> dict[str, Any]:
+    diagram_types = [
+        "flowchart",
+        "tree",
+        "vennDiagram",
+        "pieChart",
+        "mindMap",
+    ]
+    structured = {
+        "title": "Cellular respiration sequence",
+        "theme": {
+            "palette": "sage",
+            "density": "comfortable",
+            "motion": "subtle",
+        },
+        "blocks": [
+            {
+                "title": f"Lesson visual {index + 1}",
+                "diagramType": diagram_types[index],
+                "visualPrompt": f"Show lesson stage {index + 1} and its relationships.",
+                "visualAlt": f"Diagram of lesson stage {index + 1}.",
+                "recallPhrases": [f"lesson stage {index + 1}"],
+            }
+            for index in range(block_count)
+        ],
+    }
+    return {
+        "candidates": [
+            {
+                "content": {
+                    "parts": [{"text": json.dumps(structured)}],
+                }
+            }
+        ]
+    }
+
+
 def image_response() -> dict[str, Any]:
     encoded = base64.b64encode(b"test-image").decode("ascii")
     return {
@@ -381,6 +419,77 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["layoutMode"], "textDominant")
         self.assertEqual(result["blocks"][0]["kind"], "notes")
         self.assertEqual(result["_visualRequests"], [])
+
+    async def test_prepare_uses_one_diagram_only_planner_request(self) -> None:
+        transport = StubTransport([prepare_planner_response(4)])
+        stream_transport = StubStreamTransport([])
+        pipeline = GeminiPipeline(
+            text_api_key=TEST_DEV_KEY,
+            text_model=TEST_TEXT_MODEL,
+            transport=transport,
+            stream_transport=stream_transport,
+            cache_enabled=False,
+        )
+
+        result = await pipeline.generate("Teach cellular respiration.", "prepare")
+
+        self.assertEqual(len(transport.requests), 1)
+        request_body = json.loads(transport.requests[0][0].data.decode("utf-8"))
+        instruction = request_body["systemInstruction"]["parts"][0]["text"]
+        schema = request_body["generationConfig"]["responseSchema"]
+        self.assertIn("3-5 distinct diagrams", instruction)
+        self.assertEqual(schema["properties"]["blocks"]["minItems"], 3)
+        self.assertEqual(schema["properties"]["blocks"]["maxItems"], 5)
+        self.assertEqual(len(result["blocks"]), 4)
+        self.assertTrue(all(block["kind"] == "diagram" for block in result["blocks"]))
+        self.assertTrue(all(block["body"] == "" for block in result["blocks"]))
+        self.assertTrue(all(block["items"] == [] for block in result["blocks"]))
+        self.assertTrue(all(block["visualAlt"] for block in result["blocks"]))
+        self.assertTrue(
+            all(1 <= len(block["recallPhrases"]) <= 3 for block in result["blocks"])
+        )
+        self.assertEqual(len(result["_visualRequests"]), 4)
+        self.assertTrue(
+            all(
+                request["visualStrategy"] == "diagram"
+                for request in result["_visualRequests"]
+            )
+        )
+        self.assertEqual(stream_transport.requests, [])
+
+    async def test_prepare_rejects_fewer_than_three_valid_diagrams(self) -> None:
+        pipeline = GeminiPipeline(
+            text_api_key=TEST_DEV_KEY,
+            text_model=TEST_TEXT_MODEL,
+            transport=StubTransport([prepare_planner_response(2)]),
+            cache_enabled=False,
+        )
+
+        with self.assertRaisesRegex(GeminiProviderError, "fewer than three"):
+            await pipeline.generate("Teach cellular respiration.", "prepare")
+
+    async def test_prepare_stream_returns_result_without_text_deltas(self) -> None:
+        transport = StubTransport([prepare_planner_response(3)])
+        stream_transport = StubStreamTransport([])
+        pipeline = GeminiPipeline(
+            text_api_key=TEST_DEV_KEY,
+            text_model=TEST_TEXT_MODEL,
+            transport=transport,
+            stream_transport=stream_transport,
+            cache_enabled=False,
+        )
+
+        events = [
+            event
+            async for event in pipeline.generate_stream(
+                "Teach cellular respiration.",
+                "prepare",
+            )
+        ]
+
+        self.assertEqual([event["type"] for event in events], ["result"])
+        self.assertEqual(len(events[0]["result"]["blocks"]), 3)
+        self.assertEqual(stream_transport.requests, [])
 
     async def test_stream_yields_provider_deltas_before_final_composition(self) -> None:
         notes_text = text_response()["candidates"][0]["content"]["parts"][0]["text"]
@@ -716,7 +825,13 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
                 )
 
     def test_cache_schema_invalidates_results_without_recall_phrases(self) -> None:
-        self.assertEqual(CACHE_SCHEMA_VERSION, 5)
+        self.assertEqual(CACHE_SCHEMA_VERSION, 6)
+
+    def test_cache_identity_separates_live_and_prepare_modes(self) -> None:
+        self.assertNotEqual(
+            _cache_key("Explain ATP", "live"),
+            _cache_key("Explain ATP", "prepare"),
+        )
 
     async def test_diagram_retries_invalid_argument_with_compatibility_payload(
         self,

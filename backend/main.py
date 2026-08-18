@@ -208,6 +208,7 @@ def track_visual_task(coroutine: Coroutine[object, object, None]) -> None:
 
 class GenerateRequest(BaseModel):
     userInput: str = Field(..., min_length=1, max_length=4000)
+    mode: Literal["live", "prepare"] = "live"
 
 
 class BlockComponent(BaseModel):
@@ -322,6 +323,7 @@ class CompositionBlock(BaseModel):
     size: Literal["compact", "medium", "large", "wide"]
     visual: GeneratedVisual | None = None
     visualJobId: str | None = None
+    visualAlt: str = ""
     recallPhrases: list[str] = Field(default_factory=list, max_length=3)
 
 
@@ -354,6 +356,7 @@ async def run_visual_job(
     visual_strategy: str,
     visual_prompt: str,
     visual_alt: str,
+    mode: Literal["live", "prepare"] = "live",
 ) -> None:
     failure_reason: str | None = None
     try:
@@ -373,7 +376,7 @@ async def run_visual_job(
 
     warning = None
     if visual is None:
-        warning = "The notes are ready, but the visual could not be generated."
+        warning = "The canvas is ready, but a visual could not be generated."
         if failure_reason:
             warning = f"{warning} {failure_reason}"
 
@@ -424,12 +427,14 @@ async def run_visual_job(
             gemini_pipeline.cache_result,
             cache_payload[0],
             cache_payload[1],
+            mode,
         )
 
 
 async def schedule_visual_generation(
     user_input: str,
     result: dict[str, object],
+    mode: Literal["live", "prepare"] = "live",
 ) -> None:
     """Attach visual job IDs and start the same background work for every route."""
     visual_requests = result.pop("_visualRequests", [])
@@ -488,6 +493,7 @@ async def schedule_visual_generation(
                 }
             visual_batches[batch_id] = {
                 "userInput": user_input,
+                "mode": mode,
                 "result": result,
                 "pendingJobIds": pending_job_ids,
                 "failed": False,
@@ -510,10 +516,16 @@ async def schedule_visual_generation(
                     visual_strategy,
                     visual_prompt,
                     visual_alt,
+                    mode,
                 )
             )
     else:
-        await asyncio.to_thread(gemini_pipeline.cache_result, user_input, result)
+        await asyncio.to_thread(
+            gemini_pipeline.cache_result,
+            user_input,
+            result,
+            mode,
+        )
 
 
 def get_deepgram_api_key() -> str:
@@ -611,7 +623,7 @@ async def generate_content(
         )
 
     try:
-        result = await gemini_pipeline.generate(user_input)
+        result = await gemini_pipeline.generate(user_input, payload.mode)
     except GeminiConfigurationError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
     except GeminiProviderError as error:
@@ -627,7 +639,7 @@ async def generate_content(
             detail="The generation request failed unexpectedly.",
         ) from error
 
-    await schedule_visual_generation(user_input, result)
+    await schedule_visual_generation(user_input, result, payload.mode)
     return GenerateResponse(**result)
 
 
@@ -635,16 +647,19 @@ def encode_generation_event(event: dict[str, object]) -> str:
     return json.dumps(event, separators=(",", ":")) + "\n"
 
 
-async def stream_generation_events(user_input: str) -> AsyncIterator[str]:
+async def stream_generation_events(
+    user_input: str,
+    mode: Literal["live", "prepare"] = "live",
+) -> AsyncIterator[str]:
     try:
-        async for event in gemini_pipeline.generate_stream(user_input):
+        async for event in gemini_pipeline.generate_stream(user_input, mode):
             if event.get("type") == "result":
                 raw_result = event.get("result")
                 if not isinstance(raw_result, dict):
                     raise GeminiProviderError(
                         "The AI provider returned an unexpected response."
                     )
-                await schedule_visual_generation(user_input, raw_result)
+                await schedule_visual_generation(user_input, raw_result, mode)
                 response = GenerateResponse(**raw_result)
                 yield encode_generation_event(
                     {
@@ -655,6 +670,8 @@ async def stream_generation_events(user_input: str) -> AsyncIterator[str]:
                 yield encode_generation_event({"type": "done"})
                 return
             if event.get("type") == "text_delta":
+                if mode == "prepare":
+                    continue
                 text_delta = event.get("text")
                 if isinstance(text_delta, str) and text_delta:
                     yield encode_generation_event(
@@ -705,7 +722,7 @@ async def generate_content_stream(
         )
 
     return StreamingResponse(
-        stream_generation_events(user_input),
+        stream_generation_events(user_input, payload.mode),
         media_type="application/x-ndjson",
         headers={"Cache-Control": "no-cache"},
     )

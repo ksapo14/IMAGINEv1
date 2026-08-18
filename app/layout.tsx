@@ -1,26 +1,10 @@
 import type { Metadata } from "next";
-import "lenis/dist/lenis.css";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
+import { getSiteOrigin } from "@/lib/site-origin";
 
 export const metadata: Metadata = {
-  metadataBase: new URL(
-    process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"
-  ),
-  title: "Imagine v1 by Imagineer | The board keeps up",
-  description:
-    "A live classroom assistant that listens to teachers and draws every idea as it is explained.",
-  openGraph: {
-    title: "Imagine v1 by Imagineer | The board keeps up",
-    description:
-      "A live classroom assistant that turns teaching into visual understanding."
-  },
-  twitter: {
-    card: "summary",
-    title: "Imagine v1 by Imagineer | The board keeps up",
-    description:
-      "A live classroom assistant that turns teaching into visual understanding."
-  },
+  metadataBase: new URL(getSiteOrigin()),
   icons: {
     icon: "/brand/imagineer-shortform.png",
     apple: "/brand/imagineer-shortform.png"

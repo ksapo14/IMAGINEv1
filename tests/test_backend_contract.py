@@ -40,6 +40,15 @@ class BackendContractTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             GenerateRequest(userInput="x" * 4001)
 
+    def test_generation_mode_defaults_to_live_and_rejects_unknown_values(self) -> None:
+        self.assertEqual(GenerateRequest(userInput="ATP").mode, "live")
+        self.assertEqual(
+            GenerateRequest(userInput="ATP", mode="prepare").mode,
+            "prepare",
+        )
+        with self.assertRaises(ValidationError):
+            GenerateRequest(userInput="ATP", mode="unknown")
+
     def test_rate_limiter_reopens_after_window(self) -> None:
         now = [100.0]
         limiter = SlidingWindowRateLimiter(
@@ -240,7 +249,8 @@ class StreamingGenerationTests(unittest.IsolatedAsyncioTestCase):
     async def test_stream_orders_deltas_result_and_done(self) -> None:
         result = composition_result()
 
-        async def generate_stream(_: str):
+        async def generate_stream(_: str, mode: str):
+            self.assertEqual(mode, "live")
             yield {"type": "text_delta", "text": "Cell "}
             yield {"type": "text_delta", "text": "energy"}
             yield {"type": "result", "result": result}
@@ -273,10 +283,11 @@ class StreamingGenerationTests(unittest.IsolatedAsyncioTestCase):
         schedule_visual_generation.assert_awaited_once_with(
             "Explain ATP.",
             result,
+            "live",
         )
 
     async def test_stream_sanitizes_provider_error(self) -> None:
-        async def generate_stream(_: str):
+        async def generate_stream(_: str, __: str):
             yield {"type": "text_delta", "text": "partial"}
             raise GeminiProviderError("secret provider diagnostic")
 
@@ -300,6 +311,39 @@ class StreamingGenerationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             events[-1]["message"],
             "The AI provider could not complete the generation request.",
+        )
+
+    async def test_prepare_stream_suppresses_text_deltas(self) -> None:
+        result = composition_result()
+
+        async def generate_stream(_: str, mode: str):
+            self.assertEqual(mode, "prepare")
+            yield {"type": "text_delta", "text": "hidden planning text"}
+            yield {"type": "result", "result": result}
+
+        with (
+            patch.object(
+                backend_main.gemini_pipeline,
+                "generate_stream",
+                new=generate_stream,
+            ),
+            patch.object(
+                backend_main,
+                "schedule_visual_generation",
+                new=AsyncMock(),
+            ),
+        ):
+            events = [
+                json.loads(line)
+                async for line in backend_main.stream_generation_events(
+                    "Prepare ATP.",
+                    "prepare",
+                )
+            ]
+
+        self.assertEqual(
+            [event["type"] for event in events],
+            ["result", "done"],
         )
 
 

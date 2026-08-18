@@ -90,7 +90,7 @@ function VisualPanel({
             Visual unavailable
           </p>
           <p className="mt-2 text-sm leading-6 text-[var(--canvas-muted)]">
-            The prepared notes remain available. Rebuild this lesson to retry the visual.
+            Rebuild this lesson to retry the diagram.
           </p>
         </div>
       </div>
@@ -124,6 +124,7 @@ function VisualPanel({
   return (
     <div
       role="status"
+      aria-label={block.visualAlt || `Building ${block.title || "diagram"}`}
       className={`${heightClass} relative overflow-hidden bg-[var(--canvas-surface)]`}
     >
       <div className="absolute inset-0 animate-pulse bg-[linear-gradient(110deg,transparent,rgba(255,255,255,0.16),transparent)]" />

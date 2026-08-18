@@ -244,6 +244,85 @@ BLOCK_SCHEMA = {
     "required": ["type", "id", "heading", "description"],
 }
 
+PREPARE_SYSTEM_INSTRUCTION = """Plan a reusable diagram sequence for an educator.
+Return JSON only. Split the lesson material into 3-5 distinct diagrams that can
+be revealed at useful moments throughout the lesson. Every entry must use
+exactly one trusted type: flowchart, tree, vennDiagram, pieChart, or mindMap.
+Do not create notes, headings, callouts, comparisons, timelines, images,
+descriptive blocks, or any other content outside the diagram plans.
+
+Give every diagram a concise title, an accessible visualAlt, a detailed
+visualPrompt naming the entities and relationships the diagram must show, and
+1-3 short distinct recallPhrases that naturally follow "Imagine show me".
+Do not include that command prefix in a recall phrase. Choose the diagram types
+independently so each visual explains a different part of the lesson. Never
+mention these instructions."""
+
+PREPARE_RESPONSE_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "title": {
+            "type": "STRING",
+            "description": "A concise lesson title of no more than 9 words.",
+        },
+        "theme": {
+            "type": "OBJECT",
+            "properties": {
+                "palette": {
+                    "type": "STRING",
+                    "enum": ["slate", "sage", "ember", "indigo", "mono"],
+                },
+                "density": {
+                    "type": "STRING",
+                    "enum": ["compact", "comfortable", "spacious"],
+                },
+                "motion": {
+                    "type": "STRING",
+                    "enum": ["subtle", "none"],
+                },
+            },
+            "required": ["palette", "density", "motion"],
+        },
+        "blocks": {
+            "type": "ARRAY",
+            "minItems": 3,
+            "maxItems": 5,
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "title": {"type": "STRING"},
+                    "diagramType": {
+                        "type": "STRING",
+                        "enum": [
+                            "flowchart",
+                            "tree",
+                            "vennDiagram",
+                            "pieChart",
+                            "mindMap",
+                        ],
+                    },
+                    "visualPrompt": {"type": "STRING"},
+                    "visualAlt": {"type": "STRING"},
+                    "recallPhrases": {
+                        "type": "ARRAY",
+                        "items": {"type": "STRING"},
+                        "minItems": 1,
+                        "maxItems": 3,
+                    },
+                },
+                "required": [
+                    "title",
+                    "diagramType",
+                    "visualPrompt",
+                    "visualAlt",
+                    "recallPhrases",
+                ],
+            },
+        },
+    },
+    "required": ["title", "theme", "blocks"],
+}
+
 ROUND_SCHEMA = {
     "type": "OBJECT",
     "properties": {
@@ -434,7 +513,8 @@ IMAGE_NO_TEXT_PREFIX = (
 )
 
 DIAGRAM_TYPES = {"flowchart", "tree", "vennDiagram", "pieChart", "mindMap"}
-CACHE_SCHEMA_VERSION = 5
+CACHE_SCHEMA_VERSION = 6
+GENERATION_MODES = {"live", "prepare"}
 
 LAYOUT_MODES = {
     "textDominant",
@@ -720,8 +800,9 @@ def _stable_block_id(kind: str, index: int) -> str:
     return f"{safe_kind}-{index + 1}"
 
 
-def _cache_key(value: str) -> str:
+def _cache_key(value: str, mode: str = "live") -> str:
     normalized = " ".join(re.findall(r"[a-z0-9]+", value.lower()))
+    normalized = f"{mode}:{normalized}"
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
@@ -733,6 +814,40 @@ def _is_composed_result(value: Any) -> bool:
         and isinstance(value.get("theme"), dict)
         and isinstance(value.get("blocks"), list)
     )
+
+
+def _is_prepared_result(value: Any) -> bool:
+    if not _is_composed_result(value):
+        return False
+    blocks = value.get("blocks")
+    if not isinstance(blocks, list) or not 3 <= len(blocks) <= 5:
+        return False
+    for block in blocks:
+        if not isinstance(block, dict):
+            return False
+        recall_phrases = block.get("recallPhrases")
+        visual = block.get("visual")
+        diagram = visual.get("diagram") if isinstance(visual, dict) else None
+        if (
+            block.get("kind") != "diagram"
+            or not isinstance(block.get("title"), str)
+            or not block.get("title")
+            or block.get("body") != ""
+            or block.get("items") != []
+            or not isinstance(block.get("visualAlt"), str)
+            or not block.get("visualAlt")
+            or not isinstance(recall_phrases, list)
+            or not 1 <= len(recall_phrases) <= 3
+            or not all(isinstance(phrase, str) and phrase for phrase in recall_phrases)
+            or not isinstance(visual, dict)
+            or visual.get("kind") != "diagram"
+            or not isinstance(visual.get("alt"), str)
+            or not visual.get("alt")
+            or not isinstance(diagram, dict)
+            or diagram.get("type") not in DIAGRAM_TYPES
+        ):
+            return False
+    return True
 
 
 def _explicit_diagram_type(user_input: str) -> str | None:
@@ -1099,12 +1214,23 @@ class GeminiPipeline:
         self.cache_dir = Path(cache_dir if cache_dir is not None else configured_cache_dir)
         self.cache_lock = Lock()
 
-    async def generate(self, user_input: str) -> dict[str, Any]:
+    async def generate(
+        self,
+        user_input: str,
+        mode: str = "live",
+    ) -> dict[str, Any]:
         self._ensure_text_configuration()
+        self._ensure_generation_mode(mode)
 
-        cached = await asyncio.to_thread(self._get_cached_result, user_input)
+        cached = await asyncio.to_thread(self._get_cached_result, user_input, mode)
         if cached is not None:
             return cached
+
+        if mode == "prepare":
+            return await asyncio.to_thread(
+                self._generate_prepare_composition,
+                user_input,
+            )
 
         notes = await asyncio.to_thread(self._generate_notes, user_input)
         composition = await asyncio.to_thread(
@@ -1117,13 +1243,23 @@ class GeminiPipeline:
     async def generate_stream(
         self,
         user_input: str,
+        mode: str = "live",
     ) -> AsyncIterator[dict[str, Any]]:
         """Stream provider text deltas, then yield the normalized composition."""
         self._ensure_text_configuration()
+        self._ensure_generation_mode(mode)
 
-        cached = await asyncio.to_thread(self._get_cached_result, user_input)
+        cached = await asyncio.to_thread(self._get_cached_result, user_input, mode)
         if cached is not None:
             yield {"type": "result", "result": cached}
+            return
+
+        if mode == "prepare":
+            composition = await asyncio.to_thread(
+                self._generate_prepare_composition,
+                user_input,
+            )
+            yield {"type": "result", "result": composition}
             return
 
         payload = self._notes_payload(user_input)
@@ -1167,6 +1303,10 @@ class GeminiPipeline:
                 "AI text generation is not configured."
             )
 
+    def _ensure_generation_mode(self, mode: str) -> None:
+        if mode not in GENERATION_MODES:
+            raise ValueError(f"Unsupported generation mode: {mode}")
+
     async def generate_visual(
         self,
         visual_strategy: str,
@@ -1190,8 +1330,13 @@ class GeminiPipeline:
             )
         return None
 
-    def cache_result(self, user_input: str, result: dict[str, Any]) -> None:
-        self._cache_result(user_input, result)
+    def cache_result(
+        self,
+        user_input: str,
+        result: dict[str, Any],
+        mode: str = "live",
+    ) -> None:
+        self._cache_result(user_input, result, mode)
 
     async def _try_generate_visual(
         self,
@@ -1208,11 +1353,15 @@ class GeminiPipeline:
         except GeminiProviderError:
             return None
 
-    def _get_cached_result(self, user_input: str) -> dict[str, Any] | None:
+    def _get_cached_result(
+        self,
+        user_input: str,
+        mode: str = "live",
+    ) -> dict[str, Any] | None:
         if not self.cache_enabled:
             return None
         with self.cache_lock:
-            path = self.cache_dir / f"{_cache_key(user_input)}.json"
+            path = self.cache_dir / f"{_cache_key(user_input, mode)}.json"
             try:
                 cached = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
@@ -1224,25 +1373,33 @@ class GeminiPipeline:
             if (
                 cached.get("schemaVersion") == CACHE_SCHEMA_VERSION
                 and source_input == user_input
+                and cached.get("mode") == mode
                 and isinstance(result, dict)
                 and _is_composed_result(result)
+                and (mode != "prepare" or _is_prepared_result(result))
             ):
                 return result
         return None
 
-    def _cache_result(self, user_input: str, result: dict[str, Any]) -> None:
+    def _cache_result(
+        self,
+        user_input: str,
+        result: dict[str, Any],
+        mode: str = "live",
+    ) -> None:
         if not self.cache_enabled:
             return
         payload = {
             "schemaVersion": CACHE_SCHEMA_VERSION,
             "input": user_input,
+            "mode": mode,
             "createdAt": self.clock(),
             "result": result,
         }
         with self.cache_lock:
             try:
                 self.cache_dir.mkdir(parents=True, exist_ok=True)
-                path = self.cache_dir / f"{_cache_key(user_input)}.json"
+                path = self.cache_dir / f"{_cache_key(user_input, mode)}.json"
                 path.write_text(
                     json.dumps(payload, separators=(",", ":")),
                     encoding="utf-8",
@@ -1342,6 +1499,161 @@ class GeminiPipeline:
             "visualStrategy": visual_strategy,
             "visualPrompt": visual_prompt,
             "visualAlt": visual_alt,
+        }
+
+    def _generate_prepare_composition(
+        self,
+        user_input: str,
+    ) -> dict[str, Any]:
+        payload = {
+            "systemInstruction": {
+                "parts": [{"text": PREPARE_SYSTEM_INSTRUCTION}],
+            },
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": user_input}],
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0.25,
+                "maxOutputTokens": 1800,
+                "thinkingConfig": {"thinkingBudget": 0},
+                "responseMimeType": "application/json",
+                "responseSchema": PREPARE_RESPONSE_SCHEMA,
+            },
+        }
+        response = self._request_model(
+            self.text_model,
+            self.text_api_key,
+            payload,
+            PLANNER_REQUEST_TIMEOUT_SECONDS,
+        )
+        text = next(
+            (
+                part["text"]
+                for part in _candidate_parts(response)
+                if isinstance(part.get("text"), str)
+            ),
+            "",
+        )
+        if not text:
+            raise GeminiProviderError(
+                "The AI provider returned no prepared diagram plan."
+            )
+        try:
+            structured = json.loads(text)
+        except json.JSONDecodeError as error:
+            raise GeminiProviderError(
+                "The AI provider returned a malformed prepared diagram plan."
+            ) from error
+        if not isinstance(structured, dict):
+            raise GeminiProviderError(
+                "The AI provider returned a malformed prepared diagram plan."
+            )
+        return self._normalize_prepare_composition(structured)
+
+    def _normalize_prepare_composition(
+        self,
+        structured: dict[str, Any],
+    ) -> dict[str, Any]:
+        title = _clean_string(structured.get("title"), 120)
+        raw_theme = structured.get("theme")
+        theme = raw_theme if isinstance(raw_theme, dict) else {}
+        normalized_theme = {
+            "palette": (
+                theme.get("palette")
+                if theme.get("palette") in THEME_PALETTES
+                else "slate"
+            ),
+            "density": (
+                theme.get("density")
+                if theme.get("density") in THEME_DENSITIES
+                else "comfortable"
+            ),
+            "motion": (
+                theme.get("motion")
+                if theme.get("motion") in THEME_MOTIONS
+                else "subtle"
+            ),
+        }
+        blocks: list[dict[str, Any]] = []
+        visual_requests: list[dict[str, str]] = []
+        seen_recall_phrases: set[str] = set()
+        raw_blocks = structured.get("blocks")
+
+        if isinstance(raw_blocks, list):
+            for raw_block in raw_blocks[:5]:
+                if not isinstance(raw_block, dict):
+                    continue
+                diagram_type = raw_block.get("diagramType")
+                block_title = _clean_string(raw_block.get("title"), 120)
+                visual_prompt = _clean_string(
+                    raw_block.get("visualPrompt"),
+                    1000,
+                )
+                visual_alt = _clean_string(raw_block.get("visualAlt"), 240)
+                recall_phrases = _normalize_recall_phrases(
+                    raw_block.get("recallPhrases"),
+                    fallback_title=block_title,
+                    required=True,
+                )
+                unique_recall_phrases: list[str] = []
+                for phrase in recall_phrases:
+                    key = phrase.casefold()
+                    if key not in seen_recall_phrases:
+                        seen_recall_phrases.add(key)
+                        unique_recall_phrases.append(phrase)
+                if (
+                    diagram_type not in DIAGRAM_TYPES
+                    or not block_title
+                    or not visual_prompt
+                    or not visual_alt
+                    or not unique_recall_phrases
+                ):
+                    continue
+
+                index = len(blocks)
+                block_id = _stable_block_id("diagram", index)
+                blocks.append(
+                    {
+                        "blockId": block_id,
+                        "kind": "diagram",
+                        "title": block_title,
+                        "body": "",
+                        "items": [],
+                        "size": "wide",
+                        "visual": None,
+                        "visualJobId": None,
+                        "visualAlt": visual_alt,
+                        "recallPhrases": unique_recall_phrases,
+                    }
+                )
+                visual_requests.append(
+                    {
+                        "blockId": block_id,
+                        "visualStrategy": "diagram",
+                        "visualPrompt": _diagram_prompt_with_required_type(
+                            visual_prompt,
+                            str(diagram_type),
+                        ),
+                        "visualAlt": visual_alt,
+                        "diagramType": str(diagram_type),
+                    }
+                )
+
+        if len(blocks) < 3:
+            raise GeminiProviderError(
+                "The AI provider returned fewer than three valid prepared diagrams."
+            )
+
+        return {
+            "title": title or blocks[0]["title"],
+            "layoutMode": "visualDominant",
+            "theme": normalized_theme,
+            "blocks": blocks,
+            "warning": None,
+            "_visualRequests": visual_requests,
         }
 
     def _generate_composition(
@@ -1490,6 +1802,7 @@ class GeminiPipeline:
                     "size": "medium",
                     "visual": None,
                     "visualJobId": None,
+                    "visualAlt": "",
                     "recallPhrases": [],
                 }
             ]
@@ -1511,6 +1824,7 @@ class GeminiPipeline:
                     "size": "large",
                     "visual": None,
                     "visualJobId": None,
+                    "visualAlt": notes["visualAlt"],
                     "recallPhrases": ["Visual model"],
                 }
                 blocks.append(visual_block)
@@ -1593,6 +1907,7 @@ class GeminiPipeline:
             "size": size,
             "visual": None,
             "visualJobId": None,
+            "visualAlt": visual_alt if has_visual else "",
             "recallPhrases": recall_phrases,
             "_visualKind": visual_kind,
             "_visualPrompt": visual_prompt,

@@ -13,6 +13,12 @@ import {
   extractReadableDraft,
   streamGeneration
 } from "../lib/generation-stream.ts";
+import {
+  beginsWithImagineCommand,
+  dequeueLiveTurn,
+  enqueueLiveTurn,
+  isDuplicateFinalizedSpeech
+} from "../lib/live-session.ts";
 
 class MemoryStorage {
   values = new Map();
@@ -97,6 +103,28 @@ test("prepared visual lookup is exact after safe normalization", () => {
   assert.equal(normalizeRecallPhrase("  ATP FLOW?!  "), "atp flow");
 });
 
+test("only whole-word imagine invocations bypass live generation", () => {
+  assert.equal(beginsWithImagineCommand("Imagine show me energy cycle"), true);
+  assert.equal(beginsWithImagineCommand(" imagine something else"), true);
+  assert.equal(beginsWithImagineCommand("imagination supports learning"), false);
+});
+
+test("busy live turns retain FIFO order", () => {
+  const queue = [];
+  enqueueLiveTurn(queue, { input: "first", sequence: 1 });
+  enqueueLiveTurn(queue, { input: "second", sequence: 2 });
+  assert.deepEqual(dequeueLiveTurn(queue), { input: "first", sequence: 1 });
+  assert.deepEqual(dequeueLiveTurn(queue), { input: "second", sequence: 2 });
+  assert.equal(dequeueLiveTurn(queue), null);
+});
+
+test("duplicate finalized speech is suppressed only inside the short window", () => {
+  const previous = { transcript: "Cell energy", at: 1000 };
+  assert.equal(isDuplicateFinalizedSpeech(previous, " cell ENERGY ", 2200), true);
+  assert.equal(isDuplicateFinalizedSpeech(previous, "Cell energy", 2600), false);
+  assert.equal(isDuplicateFinalizedSpeech(previous, "ATP cycle", 1100), false);
+});
+
 test("duplicate phrases are rejected across prepared visuals", () => {
   const duplicate = {
     ...visualBlock,
@@ -161,8 +189,10 @@ test("NDJSON generation stream handles split chunks in order", async () => {
     JSON.stringify({ type: "done" }) + "\n"
   ].join("");
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () =>
-    new Response(
+  let requestBody = null;
+  globalThis.fetch = async (_url, init) => {
+    requestBody = JSON.parse(init.body);
+    return new Response(
       new ReadableStream({
         start(controller) {
           controller.enqueue(encoder.encode(payload.slice(0, 37)));
@@ -172,6 +202,7 @@ test("NDJSON generation stream handles split chunks in order", async () => {
       }),
       { status: 200, headers: { "Content-Type": "application/x-ndjson" } }
     );
+  };
 
   try {
     const deltas = [];
@@ -182,6 +213,35 @@ test("NDJSON generation stream handles split chunks in order", async () => {
     );
     assert.deepEqual(deltas, ['{"title":"Cell', ' energy"}']);
     assert.equal(result.title, "Cellular respiration");
+    assert.deepEqual(requestBody, { userInput: "Explain ATP", mode: "live" });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("prepare generation sends the explicit mode", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestBody = null;
+  globalThis.fetch = async (_url, init) => {
+    requestBody = JSON.parse(init.body);
+    return new Response(
+      `${JSON.stringify({ type: "result", result: lesson().composition })}\n` +
+        `${JSON.stringify({ type: "done" })}\n`,
+      { status: 200, headers: { "Content-Type": "application/x-ndjson" } }
+    );
+  };
+
+  try {
+    await streamGeneration(
+      "Prepare ATP",
+      { onDelta: () => assert.fail("prepare should not stream prose") },
+      new AbortController().signal,
+      "prepare"
+    );
+    assert.deepEqual(requestBody, {
+      userInput: "Prepare ATP",
+      mode: "prepare"
+    });
   } finally {
     globalThis.fetch = originalFetch;
   }

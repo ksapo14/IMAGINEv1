@@ -1,51 +1,61 @@
 # Imagine v1
 
-Real-time speech workspace that turns typed or transcribed input into a planned
-visual note canvas with concise text, diagrams, generated images, or callouts.
+Real-time speech workspace with live visual notes and reusable prepared diagrams.
+
+## Public site
+
+The public product narrative is available at `/`, `/product`, `/educators`,
+`/schools`, and `/about`. Those routes use a marketing-only layout and shared
+components; they do not import or navigate into the educator workspace.
+
+The educator workspace remains directly addressable at `/canvas`. It is omitted
+from the public sitemap, disallowed in `robots.txt`, and marked
+`noindex, nofollow`. Its header branding is intentionally noninteractive so the
+public and teaching surfaces stay separate.
 
 ```text
-typed input or Deepgram transcript
-  -> Gemini 2.5 Flash Lite notes
-  -> Gemini 2.5 Flash Lite composition planner
-  -> immediate multi-block canvas response
-  -> async structured diagram-data or raster visual jobs
-  -> persistent local visual cache for similar repeat prompts
-  -> latest result
+Prepare mode
+  -> one diagram-sequence planner request
+  -> 3-5 trusted diagram jobs
+  -> browser lesson library
+
+Live Canvas
+  -> finalized typed or Deepgram turn
+  -> exact local prepared recall, or live notes/visual generation
 ```
 
-Deepgram fills the input field but does not submit automatically. Press Enter
-or use the submit button to control when a paid Gemini request occurs.
+Finalized Deepgram turns dispatch automatically while the microphone stays on.
+Ordinary turns received during an active generation are processed FIFO.
 
 ## Educator workspace
 
-`/canvas` is a local-first teaching dashboard with five views:
+`/canvas` is a local-first teaching dashboard with three views:
 
-- **Overview** summarizes prepared lessons and common recall phrases.
-- **Prepare** turns an outline or transcript into a previewable lesson pack
-  using the existing trusted diagram and image templates.
+- **Prepare** splits lesson material into 3-5 diagram-only teaching visuals.
 - **Library** keeps prepared lesson previews in browser `localStorage`.
-- **Teach** reveals saved media only after an exact command shaped like
-  `imagine show me <recall phrase>`; unknown or conversational phrases never
-  fall through to generation.
-- **Live canvas** preserves on-the-spot generation for unplanned moments.
+- **Live Canvas** combines live notes/visual generation with prepared recall.
 
-The planner generates up to three recall phrases for each visual block. Phrases
-remain editable before teaching and must be unique within the lesson. Prepared
-lesson records are versioned so browser persistence can later be replaced by a
-cloud repository without changing the presentation model.
+Each prepared diagram has one to three editable recall phrases that must be
+unique within its lesson. The exact command
+`imagine show me <recall phrase>` reveals the saved diagram locally without a
+generation request. Any other input beginning with the whole word `imagine` is
+handled locally and never falls through to generation; words such as
+`imagination` remain ordinary live input.
 
-Raster images are stored as data URLs and can reach browser storage limits.
-The dashboard reports quota failures instead of silently claiming the lesson
-was saved. Pending backend visual-job IDs are never persisted across reloads.
+Prepared outer blocks contain only diagram titles, recall phrases, and diagram
+jobs; they do not contain note, description, callout, comparison, timeline, or
+image blocks. Older mixed lesson records remain readable. Pending backend
+visual-job IDs are never persisted across reloads.
 
 ## Live completion
 
-`POST /api/generate/stream` uses newline-delimited JSON. Gemini notes text is
-streamed to the browser as `text_delta` events while the final structured
-composition is still being planned. The stream then emits the normal composition
-as `result`, followed by `done`; visual blocks continue through the existing
-asynchronous visual-job system. The original buffered `/api/generate` endpoint
-remains available for compatibility.
+Both generation endpoints accept `mode: "live" | "prepare"`, defaulting to
+`live`. `POST /api/generate/stream` uses newline-delimited JSON. Live mode emits
+notes as `text_delta` events before `result` and `done`. Prepare mode emits no
+descriptive text deltas and returns its diagram plan as `result`; its 3-5
+diagrams continue through the existing asynchronous visual-job system. Cache
+identity includes the mode so the same input cannot cross-contaminate Live and
+Prepare results. The buffered `/api/generate` endpoint remains compatible.
 
 ## Local setup
 
@@ -77,9 +87,8 @@ FastAPI backend uses port `8010`.
 
 ## Cost controls
 
-- Every uncached manual submission first makes one small text-model request for
-  notes, then one planner request that decides layout, visual balance, theme,
-  and which blocks need visuals.
+- Every uncached live turn first makes one small notes request, then a composition
+  planner request. Prepare uses one isolated diagram-sequence planner request.
 - The planner can return a text-led, visual-led, sequence, comparison, or
   balanced canvas with multiple blocks.
 - Flowcharts, trees, Venn diagrams, pie charts, and mind maps render through
@@ -87,14 +96,14 @@ FastAPI backend uses port `8010`.
 - Diagram node counts adapt to the explanation: concise topics stay compact,
   while substantial processes can expand to 7-14 meaningful nodes. Wide
   structures scroll inside the visual panel instead of being compressed.
-- Similar repeated prompts can reuse `.cache/visuals` with no Gemini request.
+- Exact repeated prompts in the same mode can reuse `.cache/visuals`.
 - Raster image prompts are prefixed with a no-text rule so diagrams do not
   contain incorrect generated labels.
 - The image model runs only for blocks where an unlabeled raster illustration is
   more useful than a diagram. If a visual job fails, completed text blocks
   remain visible without another retry.
 - Requests contain no conversation history and are limited to 4,000 input
-  characters. The notes request is capped at 256 output tokens; async diagram
+  characters. The notes request is capped at 512 output tokens; async diagram
   jobs use a larger output cap for detailed workflows.
 - The local backend permits 10 generation requests per client IP per minute.
 

@@ -53,6 +53,7 @@ export type CompositionBlock = {
   recallPhrases: string[];
   visual: GeneratedVisual | null;
   visualJobId: string | null;
+  visualAlt: string;
   visualFailed?: boolean;
 };
 
