@@ -26,7 +26,6 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { ThemeToggle } from "@/components/theme-toggle";
 import {
   CompositionCard,
   CompositionView,
@@ -67,6 +66,7 @@ import {
   type FinalizedSpeechTurn,
   type QueuedLiveTurn
 } from "@/lib/live-session";
+import { deriveCompositionSummary } from "@/lib/composition-summary";
 
 type DashboardTab = "prepare" | "library" | "live";
 
@@ -227,14 +227,14 @@ function StatusBanner({
     return null;
   }
   const tone = error
-    ? "border-red-300/50 bg-red-950/90 text-red-100"
+    ? "border-red-300 bg-red-50 text-red-800"
     : warning
-      ? "border-amber-300/50 bg-amber-950/90 text-amber-100"
-      : "border-[var(--line-strong)] bg-[color-mix(in_srgb,var(--panel)_94%,transparent)] text-[var(--text)]";
+      ? "border-amber-300 bg-amber-50 text-amber-900"
+      : "border-[var(--line)] bg-[var(--panel)] text-[var(--text)]";
   return (
     <div
       role={error ? "alert" : "status"}
-      className={`fixed left-1/2 top-[82px] z-50 w-[min(calc(100%-32px),620px)] -translate-x-1/2 rounded-xl border px-5 py-3 text-center text-sm shadow-[0_18px_60px_var(--shadow)] backdrop-blur-xl ${tone}`}
+      className={`fixed left-1/2 top-[82px] z-50 w-[min(calc(100%-32px),620px)] -translate-x-1/2 rounded-lg border px-5 py-3 text-center text-sm ${tone}`}
     >
       {message}
     </div>
@@ -245,9 +245,8 @@ function StreamingDraft({ text }: { text: string }) {
   return (
     <section
       aria-live="polite"
-      className="dashboard-reveal relative min-h-[420px] overflow-hidden rounded-[1.6rem] border border-[var(--line)] bg-[var(--panel)] p-7 sm:p-10"
+      className="dashboard-reveal min-h-[420px] overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--panel)] p-7 sm:p-10"
     >
-      <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,var(--signal),transparent)]" />
       <div className="mb-12 flex items-center justify-between">
         <span className="font-[var(--mono)] text-[10px] uppercase tracking-[0.12em] text-[var(--text-soft)]">
           Live completion
@@ -257,7 +256,7 @@ function StreamingDraft({ text }: { text: string }) {
           Writing now
         </span>
       </div>
-      <p className="max-w-4xl font-['Satoshi',var(--body)] text-[clamp(2rem,5vw,4.5rem)] font-semibold leading-[1.02] tracking-[-0.04em] text-[var(--text)]">
+      <p className="max-w-4xl font-[var(--display)] text-[clamp(2rem,5vw,4.5rem)] font-medium leading-[1.02] tracking-[-0.035em] text-[var(--text)]">
         {text || "Listening for the first idea…"}
         <span className="ml-1 inline-block h-[0.9em] w-[3px] animate-pulse bg-[var(--signal)] align-[-0.08em]" />
       </p>
@@ -267,7 +266,7 @@ function StreamingDraft({ text }: { text: string }) {
 
 function EmptyCanvas({ onPrepare }: { onPrepare: () => void }) {
   return (
-    <section className="dashboard-reveal mx-auto grid min-h-[55dvh] w-full max-w-6xl place-items-center rounded-[1.5rem] border border-dashed border-[var(--line-strong)] text-center">
+    <section className="dashboard-reveal mx-auto grid min-h-[55dvh] w-full place-items-center rounded-xl border border-dashed border-[var(--line)] bg-[var(--panel)] text-center">
       <div>
         <BookOpen className="mx-auto h-8 w-8 text-[var(--signal)]" />
         <h1 className="mt-5 text-3xl font-semibold">Live canvas ready</h1>
@@ -337,6 +336,34 @@ export default function CanvasPage() {
     () => lessons.find((lesson) => lesson.id === preparedLessonId) ?? null,
     [lessons, preparedLessonId]
   );
+  const liveSummary = useMemo(() => {
+    if (presentedBlock && selectedLesson) {
+      return {
+        source: "Presented visual",
+        title: presentedBlock.title || selectedLesson.title || "Prepared visual",
+        bullets: deriveCompositionSummary([presentedBlock])
+      };
+    }
+    if (result) {
+      return {
+        source: "Live result",
+        title: result.title || "Live composition",
+        bullets: deriveCompositionSummary(result.blocks)
+      };
+    }
+    if (selectedLesson) {
+      return {
+        source: "Armed lesson",
+        title: selectedLesson.title,
+        bullets: deriveCompositionSummary(selectedLesson.composition.blocks)
+      };
+    }
+    return {
+      source: "Canvas summary",
+      title: "Nothing displayed yet",
+      bullets: []
+    };
+  }, [presentedBlock, result, selectedLesson]);
 
   useEffect(() => {
     const loaded = loadLessonLibrary(window.localStorage);
@@ -1034,16 +1061,16 @@ export default function CanvasPage() {
   return (
     <main
       ref={shellRef}
-      className="min-h-dvh w-full max-w-full overflow-x-hidden bg-[var(--page)] text-[var(--text)]"
+      className="dashboard-root min-h-dvh w-full max-w-full overflow-x-hidden bg-[var(--page)] text-[var(--text)]"
     >
       <a
         href="#workspace"
-        className="fixed left-3 top-3 z-[100] -translate-y-[calc(100%+28px)] rounded bg-[var(--signal)] px-4 py-3 font-semibold text-[var(--signal-ink)] transition-transform focus-visible:translate-y-0"
+        className="fixed left-3 top-3 z-[100] -translate-y-[calc(100%+28px)] rounded-md bg-[var(--signal)] px-4 py-3 font-semibold text-[var(--signal-ink)] transition-transform focus-visible:translate-y-0"
       >
         Skip to workspace
       </a>
 
-      <header className="fixed inset-x-0 top-0 z-40 border-b border-[var(--line)] bg-[color-mix(in_srgb,var(--page)_86%,transparent)] backdrop-blur-[20px]">
+      <header className="fixed inset-x-0 top-0 z-40 border-b border-[var(--line)] bg-[var(--panel)]">
         <div className="mx-auto flex h-[68px] max-w-[1680px] items-center gap-5 px-4 sm:px-6">
           <div
             className="inline-flex shrink-0 items-center gap-3 font-[820]"
@@ -1068,14 +1095,14 @@ export default function CanvasPage() {
             <span className="hidden sm:inline">IMAGINE V1</span>
           </div>
 
-          <nav className="mx-auto flex max-w-full items-center gap-1 overflow-x-auto rounded-xl border border-[var(--line)] bg-[var(--panel)] p-1" aria-label="Workspace views">
+          <nav className="mx-auto flex max-w-full items-center gap-1 overflow-x-auto rounded-lg border border-[var(--line)] bg-[var(--page-deep)] p-1" aria-label="Workspace views">
             {tabs.map(({ id, label, icon: Icon }) => (
               <button
                 key={id}
                 type="button"
                 onClick={() => selectTab(id)}
                 aria-current={activeTab === id ? "page" : undefined}
-                className={`inline-flex h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-xs font-semibold transition-colors sm:px-4 ${
+                className={`inline-flex h-9 shrink-0 items-center gap-2 rounded-md px-3 text-xs font-semibold transition-colors sm:px-4 ${
                   activeTab === id
                     ? "bg-[var(--signal)] text-[var(--signal-ink)]"
                     : "text-[var(--text-soft)] hover:bg-[var(--panel-strong)] hover:text-[var(--text)]"
@@ -1086,7 +1113,6 @@ export default function CanvasPage() {
               </button>
             ))}
           </nav>
-          <ThemeToggle />
         </div>
       </header>
 
@@ -1098,19 +1124,19 @@ export default function CanvasPage() {
 
       <section
         id="workspace"
-        className={`relative min-h-dvh px-[max(16px,3.5vw)] pb-28 pt-[104px] ${pageTone}`}
+        className={`relative min-h-dvh px-[max(16px,3.5vw)] pb-40 pt-[104px] sm:pb-32 ${pageTone}`}
       >
         {activeTab === "prepare" ? (
           <div className="mx-auto grid max-w-[1540px] gap-5 lg:grid-cols-12">
-            <form onSubmit={handlePrepareSubmit} className="dashboard-reveal h-max rounded-[1.6rem] border border-[var(--line)] bg-[var(--panel)] p-6 lg:sticky lg:top-24 lg:col-span-4 lg:p-8">
+            <form onSubmit={handlePrepareSubmit} className="dashboard-reveal h-max rounded-xl border border-[var(--line)] bg-[var(--panel)] p-6 lg:sticky lg:top-24 lg:col-span-4 lg:p-8">
               <p className="font-[var(--mono)] text-[10px] uppercase tracking-[0.12em] text-[var(--text-soft)]">Prepare before class</p>
-              <h1 className="mt-5 text-balance font-['Satoshi',var(--body)] text-4xl font-semibold leading-none tracking-[-0.035em]">Prepare diagrams</h1>
+              <h1 className="mt-5 text-balance text-4xl leading-none">Prepare diagrams</h1>
               <div className="mt-9 space-y-5">
-                <label className="block text-sm font-semibold">Lesson title<input value={lessonTitle} onChange={(event) => setLessonTitle(event.target.value)} maxLength={120} placeholder="Cellular respiration" className="mt-2 h-12 w-full rounded-xl border border-[var(--line-strong)] bg-[var(--page)] px-4 text-[var(--text)] outline-none focus:border-[var(--signal)]" /></label>
-                <label className="block text-sm font-semibold">Subject <span className="font-normal text-[var(--text-soft)]">optional</span><input value={lessonSubject} onChange={(event) => setLessonSubject(event.target.value)} maxLength={80} placeholder="Biology · Grade 10" className="mt-2 h-12 w-full rounded-xl border border-[var(--line-strong)] bg-[var(--page)] px-4 text-[var(--text)] outline-none focus:border-[var(--signal)]" /></label>
-                <label className="block text-sm font-semibold">Lesson material<Textarea value={lessonSource} onChange={(event) => setLessonSource(event.target.value)} maxLength={3600} rows={12} placeholder="Paste the outline, transcript, or teaching notes you plan to cover…" className="mt-2 min-h-64 resize-y rounded-xl border-[var(--line-strong)] bg-[var(--page)] px-4 py-4 text-[var(--text)]" /></label>
+                <label className="block text-sm font-semibold">Lesson title<input value={lessonTitle} onChange={(event) => setLessonTitle(event.target.value)} maxLength={120} placeholder="Cellular respiration" className="mt-2 h-12 w-full rounded-lg border border-[var(--line)] bg-[var(--page)] px-4 text-[var(--text)] outline-none focus:border-[var(--signal)]" /></label>
+                <label className="block text-sm font-semibold">Subject <span className="font-normal text-[var(--text-soft)]">optional</span><input value={lessonSubject} onChange={(event) => setLessonSubject(event.target.value)} maxLength={80} placeholder="Biology · Grade 10" className="mt-2 h-12 w-full rounded-lg border border-[var(--line)] bg-[var(--page)] px-4 text-[var(--text)] outline-none focus:border-[var(--signal)]" /></label>
+                <label className="block text-sm font-semibold">Lesson material<Textarea value={lessonSource} onChange={(event) => setLessonSource(event.target.value)} maxLength={3600} rows={12} placeholder="Paste the outline, transcript, or teaching notes you plan to cover…" className="mt-2 min-h-64 resize-y rounded-lg border-[var(--line)] bg-[var(--page)] px-4 py-4 text-[var(--text)]" /></label>
               </div>
-              <Button type="submit" disabled={isGenerating || !lessonTitle.trim() || !lessonSource.trim()} className="mt-6 h-12 w-full rounded-xl bg-[var(--signal)] text-[var(--signal-ink)] hover:bg-[var(--signal)] hover:opacity-90">
+              <Button type="submit" disabled={isGenerating || !lessonTitle.trim() || !lessonSource.trim()} className="mt-6 h-12 w-full rounded-lg bg-[var(--signal)] text-[var(--signal-ink)] hover:bg-[var(--signal)] hover:opacity-90">
                 {isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
                 Generate 3–5 diagrams
               </Button>
@@ -1118,17 +1144,17 @@ export default function CanvasPage() {
             </form>
 
             <div className="min-w-0 lg:col-span-8">
-              {isGenerating ? <div role="status" className="dashboard-reveal grid min-h-[560px] place-items-center rounded-[1.6rem] border border-[var(--line)] bg-[var(--panel)]"><div className="text-center"><Loader2 className="mx-auto h-8 w-8 animate-spin text-[var(--signal)]" /><p className="mt-4 text-sm font-semibold">Planning 3–5 diagrams</p></div></div> : result ? <CompositionView result={result} eyebrow="Prepared diagrams" showRecallPhrases /> : <div className="dashboard-reveal grid min-h-[560px] place-items-center rounded-[1.6rem] border border-dashed border-[var(--line-strong)] bg-[var(--panel)] px-8 text-center"><div><Sparkles className="mx-auto h-8 w-8 text-[var(--signal)]" /><h2 className="mt-6 text-3xl font-semibold">No diagram pack selected</h2></div></div>}
+              {isGenerating ? <div role="status" className="dashboard-reveal grid min-h-[560px] place-items-center rounded-xl border border-[var(--line)] bg-[var(--panel)]"><div className="text-center"><Loader2 className="mx-auto h-8 w-8 animate-spin text-[var(--signal)]" /><p className="mt-4 text-sm font-semibold">Planning 3–5 diagrams</p></div></div> : result ? <CompositionView result={result} eyebrow="Prepared diagrams" showRecallPhrases /> : <div className="dashboard-reveal grid min-h-[560px] place-items-center rounded-xl border border-dashed border-[var(--line)] bg-[var(--panel)] px-8 text-center"><div><Sparkles className="mx-auto h-8 w-8 text-[var(--signal)]" /><h2 className="mt-6 text-3xl">No diagram pack selected</h2></div></div>}
 
               {preparedLesson ? (
-                <section className="dashboard-reveal mt-8 rounded-[1.5rem] border border-[var(--line)] bg-[var(--panel)] p-6">
+                <section className="dashboard-reveal mt-8 rounded-xl border border-[var(--line)] bg-[var(--panel)] p-6">
                   <div className="flex flex-wrap items-end justify-between gap-4">
                     <div><p className="font-[var(--mono)] text-[10px] uppercase tracking-[0.12em] text-[var(--text-soft)]">Recall phrases</p><h2 className="mt-2 text-2xl font-semibold">Spoken aliases</h2></div>
-                    <button type="button" onClick={() => openLesson(preparedLesson, "live")} className="rounded-xl bg-[var(--signal)] px-5 py-3 text-sm font-semibold text-[var(--signal-ink)]">Arm in Live Canvas</button>
+                    <button type="button" onClick={() => openLesson(preparedLesson, "live")} className="rounded-lg bg-[var(--signal)] px-5 py-3 text-sm font-semibold text-[var(--signal-ink)]">Arm in Live Canvas</button>
                   </div>
                   <div className="mt-6 grid gap-4 md:grid-cols-2">
                     {getPreparedVisuals(preparedLesson).map((block) => (
-                      <label key={block.blockId} className="rounded-xl border border-[var(--line)] bg-[var(--page)] p-4 text-sm font-semibold">{block.title || "Prepared visual"}<input value={block.recallPhrases.join(", ")} onChange={(event) => updateRecallPhrases(preparedLesson, block.blockId, event.target.value)} placeholder="energy cycle, atp flow" className="mt-3 h-11 w-full rounded-lg border border-[var(--line-strong)] bg-[var(--panel)] px-3 font-normal text-[var(--text)] outline-none focus:border-[var(--signal)]" /><span className="mt-2 block text-xs font-normal text-[var(--text-soft)]">Up to three comma-separated phrases.</span></label>
+                      <label key={block.blockId} className="rounded-lg border border-[var(--line)] bg-[var(--page)] p-4 text-sm font-semibold">{block.title || "Prepared visual"}<input value={block.recallPhrases.join(", ")} onChange={(event) => updateRecallPhrases(preparedLesson, block.blockId, event.target.value)} placeholder="energy cycle, atp flow" className="mt-3 h-11 w-full rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 font-normal text-[var(--text)] outline-none focus:border-[var(--signal)]" /><span className="mt-2 block text-xs font-normal text-[var(--text-soft)]">Up to three comma-separated phrases.</span></label>
                     ))}
                   </div>
                 </section>
@@ -1140,57 +1166,86 @@ export default function CanvasPage() {
         {activeTab === "library" ? (
           <div className="mx-auto max-w-[1540px]">
             <div className="dashboard-reveal flex flex-wrap items-end justify-between gap-6">
-              <div><p className="font-[var(--mono)] text-[10px] uppercase tracking-[0.12em] text-[var(--canvas-muted)]">Prepared locally</p><h1 className="mt-4 text-4xl font-semibold">Lesson library</h1></div>
-              <Button onClick={() => selectTab("prepare")} className="h-12 rounded-xl bg-[var(--signal)] px-6 text-[var(--signal-ink)] hover:bg-[var(--signal)]"><Plus className="mr-2 h-4 w-4" />New lesson</Button>
+              <div><p className="font-[var(--mono)] text-[10px] uppercase tracking-[0.12em] text-[var(--canvas-muted)]">Prepared locally</p><h1 className="mt-4 text-4xl">Lesson library</h1></div>
+              <Button onClick={() => selectTab("prepare")} className="h-12 rounded-lg bg-[var(--signal)] px-6 text-[var(--signal-ink)] hover:bg-[var(--signal)]"><Plus className="mr-2 h-4 w-4" />New lesson</Button>
             </div>
             {lessons.length > 0 ? (
               <div className="mt-16 grid grid-flow-dense gap-4 md:grid-cols-2 xl:grid-cols-3">
                 {lessons.map((lesson) => (
-                  <article key={lesson.id} className="dashboard-reveal group flex min-h-[330px] flex-col overflow-hidden rounded-[1.5rem] border border-[var(--line)] bg-[var(--panel)] p-6 transition-transform duration-500 hover:-translate-y-1">
-                    <div className="flex items-center justify-between"><span className="rounded-full border border-[var(--line)] px-3 py-1 font-[var(--mono)] text-[9px] uppercase tracking-[0.1em] text-[var(--text-soft)]">{lesson.status}</span><button type="button" onClick={() => deleteLesson(lesson.id)} aria-label={`Delete ${lesson.title}`} className="grid h-9 w-9 place-items-center rounded-full text-[var(--text-soft)] hover:bg-red-500/10 hover:text-red-300"><Trash2 className="h-4 w-4" /></button></div>
-                    <div className="mt-auto pt-16"><p className="text-sm text-[var(--text-soft)]">{lesson.subject || "General lesson"}</p><h2 className="mt-3 text-balance text-3xl font-semibold leading-none">{lesson.title}</h2><p className="mt-4 text-xs leading-5 text-[var(--text-soft)]">{getPreparedVisuals(lesson).length} visuals · Updated {new Date(lesson.updatedAt).toLocaleDateString()}</p></div>
-                    <div className="mt-7 grid grid-cols-2 gap-2"><button type="button" onClick={() => openLesson(lesson, "library")} className="rounded-xl border border-[var(--line-strong)] px-4 py-3 text-sm font-semibold hover:bg-[var(--panel-strong)]">Preview</button><button type="button" onClick={() => openLesson(lesson, "live")} className="rounded-xl bg-[var(--signal)] px-4 py-3 text-sm font-semibold text-[var(--signal-ink)]">Arm in live</button></div>
+                  <article key={lesson.id} className="dashboard-reveal flex min-h-[330px] flex-col overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--panel)] p-6">
+                    <div className="flex items-center justify-between"><span className="rounded-md border border-[var(--line)] bg-[var(--page)] px-3 py-1 font-[var(--mono)] text-[9px] uppercase tracking-[0.1em] text-[var(--text-soft)]">{lesson.status}</span><button type="button" onClick={() => deleteLesson(lesson.id)} aria-label={`Delete ${lesson.title}`} className="grid h-9 w-9 place-items-center rounded-md border border-transparent text-[var(--text-soft)] hover:border-red-200 hover:bg-red-50 hover:text-red-700"><Trash2 className="h-4 w-4" /></button></div>
+                    <div className="mt-auto pt-16"><p className="text-sm text-[var(--text-soft)]">{lesson.subject || "General lesson"}</p><h2 className="mt-3 text-balance text-3xl leading-none">{lesson.title}</h2><p className="mt-4 text-xs leading-5 text-[var(--text-soft)]">{getPreparedVisuals(lesson).length} visuals · Updated {new Date(lesson.updatedAt).toLocaleDateString()}</p></div>
+                    <div className="mt-7 grid grid-cols-2 gap-2"><button type="button" onClick={() => openLesson(lesson, "library")} className="rounded-lg border border-[var(--line)] px-4 py-3 text-sm font-semibold hover:bg-[var(--panel-strong)]">Preview</button><button type="button" onClick={() => openLesson(lesson, "live")} className="rounded-lg bg-[var(--signal)] px-4 py-3 text-sm font-semibold text-[var(--signal-ink)]">Arm in live</button></div>
                   </article>
                 ))}
               </div>
             ) : (
-              <div className="dashboard-reveal mt-16 grid min-h-[420px] place-items-center rounded-[1.5rem] border border-dashed border-[var(--line-strong)] text-center"><div><Library className="mx-auto h-8 w-8 text-[var(--signal)]" /><h2 className="mt-5 text-3xl font-semibold">No prepared lessons yet.</h2></div></div>
+              <div className="dashboard-reveal mt-16 grid min-h-[420px] place-items-center rounded-xl border border-dashed border-[var(--line)] bg-[var(--panel)] text-center"><div><Library className="mx-auto h-8 w-8 text-[var(--signal)]" /><h2 className="mt-5 text-3xl">No prepared lessons yet.</h2></div></div>
             )}
             {result && preparedLesson ? <div className="mt-20"><CompositionView result={preparedLesson.composition} eyebrow={`${preparedLesson.title} preview`} showRecallPhrases /></div> : null}
           </div>
         ) : null}
 
         {activeTab === "live" ? (
-          <div className="mx-auto max-w-[1540px]">
-            <div className="dashboard-reveal mb-8 flex flex-wrap items-center justify-between gap-4 rounded-[1.3rem] border border-[var(--line)] bg-[var(--panel)] p-4 sm:p-5">
+          <div className="mx-auto max-w-[1680px]">
+            <div className="dashboard-reveal mb-5 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4 sm:p-5">
               <div className="flex items-center gap-3"><Command className="h-4 w-4 text-[var(--signal)]" /><div><p className="font-[var(--mono)] text-[9px] uppercase tracking-[0.12em] text-[var(--text-soft)]">Armed lesson</p><p className="mt-1 font-semibold">{selectedLesson?.title ?? "None"}</p></div></div>
-              <select value={selectedLessonId} onChange={(event) => { setSelectedLessonId(event.target.value); setPresentedBlock(null); }} className="h-11 min-w-64 rounded-xl border border-[var(--line-strong)] bg-[var(--page)] px-4 text-sm text-[var(--text)] outline-none focus:border-[var(--signal)]">
+              <select value={selectedLessonId} onChange={(event) => { setSelectedLessonId(event.target.value); setPresentedBlock(null); }} className="h-11 w-full rounded-lg border border-[var(--line)] bg-[var(--page)] px-4 text-sm text-[var(--text)] outline-none focus:border-[var(--signal)] sm:w-auto sm:min-w-64">
                 <option value="">No prepared lesson</option>
                 {lessons.map((lesson) => <option key={lesson.id} value={lesson.id}>{lesson.title}</option>)}
               </select>
             </div>
 
-            <div className="grid min-h-[calc(100dvh-330px)] items-center">
-              {presentedBlock && selectedLesson ? <div className="dashboard-reveal"><CompositionCard block={presentedBlock} theme={selectedLesson.composition.theme} presentation showRecallPhrases /></div> : isGenerating ? <StreamingDraft text={streamDraft} /> : result ? <CompositionView result={result} eyebrow="Live canvas" /> : <EmptyCanvas onPrepare={() => selectTab("prepare")} />}
-            </div>
+            <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_300px] xl:items-start">
+              <div className="min-w-0">
+                <div className="grid min-h-[calc(100dvh-330px)] items-center">
+                  {presentedBlock && selectedLesson ? <div className="dashboard-reveal"><CompositionCard block={presentedBlock} theme={selectedLesson.composition.theme} presentation showRecallPhrases /></div> : isGenerating ? <StreamingDraft text={streamDraft} /> : result ? <CompositionView result={result} eyebrow="Live canvas" /> : <EmptyCanvas onPrepare={() => selectTab("prepare")} />}
+                </div>
 
-            {selectedLesson ? (
-              <div className="mt-8 flex flex-wrap gap-2 pb-20">
-                {getPreparedVisuals(selectedLesson).flatMap((block) => block.recallPhrases).map((phrase) => (
-                  <button key={phrase} type="button" onClick={() => dispatchTeachingTurn(`imagine show me ${phrase}`)} className="rounded-full border border-[var(--line-strong)] px-4 py-2 font-[var(--mono)] text-[10px] uppercase tracking-[0.08em] text-[var(--canvas-muted)] hover:border-[var(--signal)] hover:text-[var(--canvas-text)]">imagine show me {phrase}</button>
-                ))}
+                {selectedLesson ? (
+                  <div className="mt-5 flex flex-wrap gap-2 pb-20">
+                    {getPreparedVisuals(selectedLesson).flatMap((block) => block.recallPhrases).map((phrase) => (
+                      <button key={phrase} type="button" onClick={() => dispatchTeachingTurn(`imagine show me ${phrase}`)} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-4 py-2 font-[var(--mono)] text-[10px] uppercase tracking-[0.08em] text-[var(--canvas-muted)] hover:border-[var(--signal)] hover:text-[var(--canvas-text)]">imagine show me {phrase}</button>
+                    ))}
+                  </div>
+                ) : null}
               </div>
-            ) : null}
+
+              <aside
+                data-live-summary
+                aria-labelledby="live-summary-title"
+                aria-live="polite"
+                className="dashboard-reveal self-start rounded-xl border border-[var(--line)] bg-[var(--panel)] p-5 xl:sticky xl:top-24"
+              >
+                <p className="font-[var(--mono)] text-[10px] uppercase tracking-[0.1em] text-[var(--text-soft)]">
+                  {liveSummary.source}
+                </p>
+                <h2 id="live-summary-title" className="mt-3 text-2xl leading-tight">
+                  {liveSummary.title}
+                </h2>
+                {liveSummary.bullets.length > 0 ? (
+                  <ul className="mt-6 list-disc space-y-3 pl-5 text-sm leading-6 text-[var(--text-soft)]">
+                    {liveSummary.bullets.map((bullet, index) => (
+                      <li key={`${index}-${bullet}`}>{bullet}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="mt-5 text-sm leading-6 text-[var(--text-soft)]">
+                    Summary points will appear with the displayed composition.
+                  </p>
+                )}
+              </aside>
+            </div>
           </div>
         ) : null}
       </section>
 
       {showCommandDock ? (
-        <form onSubmit={handleLiveSubmit} className="fixed bottom-4 left-4 right-4 z-[35] mx-auto flex w-[min(900px,calc(100%-32px))] items-end gap-2 rounded-2xl border border-[var(--line-strong)] bg-[color-mix(in_srgb,var(--panel)_94%,transparent)] p-2 shadow-[0_24px_70px_var(--shadow)] backdrop-blur-[20px]">
+        <form onSubmit={handleLiveSubmit} className="fixed bottom-4 left-4 right-4 z-[35] mx-auto flex w-[min(900px,calc(100%-32px))] items-end gap-2 rounded-xl border border-[var(--line)] bg-[var(--panel)] p-2">
           <label htmlFor="workspace-input" className="sr-only">Teaching input or prepared visual command</label>
-          <Textarea id="workspace-input" value={displayValue} onChange={(event) => { setCapturedInput(event.target.value); setLiveTranscript(""); }} onKeyDown={handleInputKeyDown} placeholder="Teach live, or say: imagine show me…" maxLength={4000} rows={1} className="min-h-14 flex-1 resize-none rounded-xl border-0 bg-transparent px-5 py-[1.05rem] text-base leading-6 text-[var(--text)] shadow-none placeholder:text-[var(--text-soft)]" />
-          <Button type="submit" disabled={!displayValue.trim()} className="h-14 w-14 shrink-0 rounded-xl bg-[var(--signal)] px-0 text-[var(--signal-ink)] hover:bg-[var(--signal)] hover:opacity-90" aria-label="Submit teaching input">{isGenerating ? <Loader2 className="h-5 w-5 animate-spin" /> : <ArrowUp className="h-5 w-5" />}</Button>
-          <Button type="button" onClick={() => void startTranscription()} className={`h-14 w-14 shrink-0 rounded-xl px-0 ${speechStatus === "idle" ? "bg-[var(--canvas-text)] text-[var(--canvas-bg)]" : "bg-red-600 text-white"}`} aria-label={speechStatus === "idle" ? "Start microphone" : "Stop microphone"}>{speechStatus === "connecting" ? <Loader2 className="h-5 w-5 animate-spin" /> : speechStatus === "listening" ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}</Button>
+          <Textarea id="workspace-input" value={displayValue} onChange={(event) => { setCapturedInput(event.target.value); setLiveTranscript(""); }} onKeyDown={handleInputKeyDown} placeholder="Teach live, or say: imagine show me…" maxLength={4000} rows={1} className="min-h-14 flex-1 resize-none rounded-lg border-0 bg-transparent px-3 py-[1.05rem] text-base leading-6 text-[var(--text)] shadow-none placeholder:text-[var(--text-soft)] sm:px-5" />
+          <Button type="submit" disabled={!displayValue.trim()} className="h-14 w-12 shrink-0 rounded-lg bg-[var(--signal)] px-0 text-[var(--signal-ink)] hover:bg-[var(--signal)] hover:opacity-90 sm:w-14" aria-label="Submit teaching input">{isGenerating ? <Loader2 className="h-5 w-5 animate-spin" /> : <ArrowUp className="h-5 w-5" />}</Button>
+          <Button type="button" onClick={() => void startTranscription()} className={`h-14 w-12 shrink-0 rounded-lg px-0 sm:w-14 ${speechStatus === "idle" ? "bg-[var(--canvas-text)] text-[var(--canvas-bg)]" : "bg-red-600 text-white"}`} aria-label={speechStatus === "idle" ? "Start microphone" : "Stop microphone"}>{speechStatus === "connecting" ? <Loader2 className="h-5 w-5 animate-spin" /> : speechStatus === "listening" ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}</Button>
         </form>
       ) : null}
     </main>

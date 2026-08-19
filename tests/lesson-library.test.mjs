@@ -19,6 +19,7 @@ import {
   enqueueLiveTurn,
   isDuplicateFinalizedSpeech
 } from "../lib/live-session.ts";
+import { deriveCompositionSummary } from "../lib/composition-summary.ts";
 
 class MemoryStorage {
   values = new Map();
@@ -66,6 +67,52 @@ const visualBlock = {
   },
   visualJobId: null
 };
+
+test("composition summaries prefer items and use readable fallbacks", () => {
+  const blocks = [
+    {
+      ...visualBlock,
+      items: [" Glucose enters glycolysis. ", "ATP stores usable energy."]
+    },
+    {
+      ...visualBlock,
+      blockId: "notes-1",
+      title: "Cellular respiration",
+      body: " Oxygen supports the final stage. ",
+      items: []
+    },
+    {
+      ...visualBlock,
+      blockId: "heading-1",
+      title: " Energy transfer ",
+      body: "",
+      items: []
+    },
+    {
+      ...visualBlock,
+      blockId: "duplicate-1",
+      items: ["ATP stores usable energy."],
+      body: "",
+      title: ""
+    }
+  ];
+
+  assert.deepEqual(deriveCompositionSummary(blocks), [
+    "Glucose enters glycolysis.",
+    "ATP stores usable energy.",
+    "Oxygen supports the final stage.",
+    "Energy transfer"
+  ]);
+});
+
+test("composition summaries omit empty blocks", () => {
+  assert.deepEqual(
+    deriveCompositionSummary([
+      { ...visualBlock, title: " ", body: " ", items: [" "] }
+    ]),
+    []
+  );
+});
 
 function lesson(overrides = {}) {
   return {

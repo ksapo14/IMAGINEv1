@@ -173,6 +173,58 @@ select:focus-visible {
   display: block;
 }
 
+/* Educator dashboard ------------------------------------------------------ */
+
+.dashboard-root {
+  --page: #f9fafb;
+  --page-deep: #f1f5f9;
+  --panel: #ffffff;
+  --panel-strong: #f1f5f9;
+  --text: #0f172a;
+  --text-soft: #475569;
+  --line: #e2e8f0;
+  --line-strong: #e2e8f0;
+  --signal: #1d2a21;
+  --signal-ink: #ffffff;
+  --shadow: transparent;
+  --canvas-bg: #f9fafb;
+  --canvas-text: #0f172a;
+  --canvas-muted: #475569;
+  --canvas-surface: #f8fafc;
+  --canvas-soft: #f1f5f9;
+  --canvas-slate-bg: #ffffff;
+  --canvas-slate-border: #e2e8f0;
+  --canvas-sage-bg: #ffffff;
+  --canvas-sage-border: #e2e8f0;
+  --canvas-ember-bg: #ffffff;
+  --canvas-ember-border: #e2e8f0;
+  --canvas-indigo-bg: #ffffff;
+  --canvas-indigo-border: #e2e8f0;
+  --canvas-mono-bg: #ffffff;
+  --canvas-mono-border: #e2e8f0;
+  --display: Georgia, "Times New Roman", serif;
+  --body: Outfit, "Avenir Next", "Segoe UI", ui-sans-serif, system-ui,
+    sans-serif;
+  color-scheme: light;
+  font-family: var(--body);
+}
+
+.dashboard-root h1,
+.dashboard-root h2,
+.dashboard-serif {
+  font-family: var(--display);
+  font-weight: 500;
+  letter-spacing: -0.025em;
+}
+
+.dashboard-root .brand-logo-dark {
+  display: none;
+}
+
+.dashboard-root .brand-logo-light {
+  display: block;
+}
+
 /* Public marketing site ---------------------------------------------------- */
 
 .marketing-root {

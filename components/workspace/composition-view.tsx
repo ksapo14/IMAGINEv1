@@ -70,14 +70,14 @@ function VisualPanel({
   presentation: boolean;
 }) {
   const heightClass = presentation
-    ? "h-[min(72dvh,820px)] min-h-[520px]"
+    ? "h-[min(72dvh,820px)] min-h-[360px] sm:min-h-[520px]"
     : block.kind === "diagram" || block.visual?.kind === "diagram"
-      ? "h-[min(72dvh,760px)] min-h-[520px]"
+      ? "h-[min(72dvh,760px)] min-h-[360px] sm:min-h-[520px]"
       : block.size === "wide"
-        ? "h-[min(64dvh,680px)] min-h-[420px]"
+        ? "h-[min(64dvh,680px)] min-h-[340px] sm:min-h-[420px]"
         : block.size === "large"
-          ? "h-[min(60dvh,620px)] min-h-[380px]"
-          : "h-[min(50dvh,500px)] min-h-[300px]";
+          ? "h-[min(60dvh,620px)] min-h-[320px] sm:min-h-[380px]"
+          : "h-[min(50dvh,500px)] min-h-[280px] sm:min-h-[300px]";
 
   if (block.visualFailed) {
     return (
@@ -115,7 +115,7 @@ function VisualPanel({
         <img
           src={block.visual.dataUrl}
           alt={block.visual.alt}
-          className="max-h-full w-full object-contain transition-transform duration-700 ease-out group-hover:scale-105"
+          className="max-h-full w-full object-contain"
         />
       </div>
     );
@@ -125,15 +125,12 @@ function VisualPanel({
     <div
       role="status"
       aria-label={block.visualAlt || `Building ${block.title || "diagram"}`}
-      className={`${heightClass} relative overflow-hidden bg-[var(--canvas-surface)]`}
+      className={`${heightClass} grid place-items-center overflow-hidden bg-[var(--canvas-soft)]`}
     >
-      <div className="absolute inset-0 animate-pulse bg-[linear-gradient(110deg,transparent,rgba(255,255,255,0.16),transparent)]" />
-      <div className="grid h-full place-items-center text-sm font-medium text-[var(--canvas-muted)]">
-        <span className="flex items-center gap-2">
-          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-          Building prepared visual
-        </span>
-      </div>
+      <span className="flex items-center gap-2 text-sm font-medium text-[var(--canvas-muted)]">
+        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+        Building prepared visual
+      </span>
     </div>
   );
 }
@@ -163,7 +160,7 @@ export function CompositionCard({
 
   return (
     <article
-      className={`group ${presentation ? "lg:col-span-12" : getBlockSpanClass(block)} ${clippingClass} rounded-[1.4rem] border ${accentClasses[theme.palette]} text-[var(--canvas-text)] shadow-[0_20px_60px_var(--shadow)] ${className}`}
+      className={`${presentation ? "lg:col-span-12" : getBlockSpanClass(block)} ${clippingClass} rounded-xl border ${accentClasses[theme.palette]} text-[var(--canvas-text)] ${className}`}
     >
       {hasVisual ? (
         <VisualPanel block={block} theme={theme} presentation={presentation} />
@@ -171,7 +168,7 @@ export function CompositionCard({
 
       <div className={hasVisual ? "space-y-4 px-5 py-4 sm:px-6" : "space-y-5 px-6 py-6 sm:px-7 sm:py-7"}>
         {block.title ? (
-          <h2 className="text-balance text-xl font-semibold leading-tight sm:text-2xl">
+          <h2 className="text-balance font-[var(--display)] text-xl font-medium leading-tight tracking-[-0.02em] sm:text-2xl">
             {block.title}
           </h2>
         ) : null}
@@ -185,7 +182,7 @@ export function CompositionCard({
           <ol className="space-y-3 text-sm leading-6 text-[var(--canvas-muted)]">
             {block.items.map((item, index) => (
               <li key={`${block.blockId}-${index}-${item}`} className="flex gap-3">
-                <span className="mt-0.5 inline-flex h-7 min-w-7 items-center justify-center rounded-lg bg-[var(--canvas-soft)] text-xs font-semibold tabular-nums text-[var(--canvas-text)]">
+                <span className="mt-0.5 inline-flex h-7 min-w-7 items-center justify-center rounded-md border border-[var(--line)] bg-[var(--canvas-soft)] text-xs font-semibold tabular-nums text-[var(--canvas-text)]">
                   {index + 1}
                 </span>
                 <span>{item}</span>
@@ -197,7 +194,7 @@ export function CompositionCard({
             {block.items.map((item, index) => (
               <div
                 key={`${block.blockId}-${index}-${item}`}
-                className="rounded-2xl bg-[var(--canvas-soft)] px-4 py-3 text-sm leading-6"
+                className="rounded-lg border border-[var(--line)] bg-[var(--canvas-soft)] px-4 py-3 text-sm leading-6"
               >
                 {item}
               </div>
@@ -219,7 +216,7 @@ export function CompositionCard({
             {block.recallPhrases.map((phrase) => (
               <span
                 key={phrase}
-                className="rounded-full border border-[var(--line-strong)] px-3 py-1 font-[var(--mono)] text-[10px] uppercase tracking-[0.08em] text-[var(--canvas-muted)]"
+                className="rounded-md border border-[var(--line-strong)] px-3 py-1 font-[var(--mono)] text-[10px] uppercase tracking-[0.08em] text-[var(--canvas-muted)]"
               >
                 imagine show me {phrase}
               </span>
@@ -246,7 +243,7 @@ export function CompositionView({
         <p className="mb-3 font-[var(--mono)] text-[10px] uppercase tracking-[0.1em] text-[var(--canvas-muted)]">
           {eyebrow ?? result.layoutMode.replace(/([A-Z])/g, " $1").toLowerCase()}
         </p>
-        <h1 className="max-w-5xl text-balance font-['Satoshi',var(--body)] text-[clamp(2.4rem,5vw,4.75rem)] font-semibold leading-[0.98] tracking-[-0.04em] text-[var(--canvas-text)]">
+        <h1 className="max-w-5xl text-balance font-[var(--display)] text-[clamp(2.4rem,5vw,4.75rem)] font-medium leading-[0.98] tracking-[-0.035em] text-[var(--canvas-text)]">
           {result.title}
         </h1>
       </div>

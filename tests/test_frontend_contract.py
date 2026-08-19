@@ -96,6 +96,17 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn("generationInFlight.current", canvas_source)
         self.assertIn(r"^\s*imagine\b", live_session)
 
+    def test_live_canvas_keeps_a_semantic_summary_sidebar(self) -> None:
+        canvas_source = (ROOT / "app" / "canvas" / "page.tsx").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("<aside", canvas_source)
+        self.assertIn("data-live-summary", canvas_source)
+        self.assertIn('aria-labelledby="live-summary-title"', canvas_source)
+        self.assertIn('id="live-summary-title"', canvas_source)
+        self.assertIn("deriveCompositionSummary", canvas_source)
+
     def test_transcription_callbacks_are_scoped_to_one_session(self) -> None:
         canvas_source = (ROOT / "app" / "canvas" / "page.tsx").read_text(
             encoding="utf-8"
