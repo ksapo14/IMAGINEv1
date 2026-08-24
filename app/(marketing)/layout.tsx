@@ -11,18 +11,18 @@ export const metadata: Metadata = {
     template: "%s | Imagine"
   },
   description:
-    "Imagine helps educators prepare classroom diagrams, build live visual notes, and recall stored visuals by an exact spoken phrase.",
+    "Imagine interprets finalized teaching speech against saved lesson context and a cumulative live whiteboard.",
   openGraph: {
     title: "Imagine | Visual support that follows the lesson",
     description:
-      "Prepare classroom diagrams, build live visual notes, and recall stored visuals intentionally.",
+      "Save lesson context, teach naturally, and build a cumulative live whiteboard.",
     type: "website"
   },
   twitter: {
     card: "summary",
     title: "Imagine | Visual support that follows the lesson",
     description:
-      "Prepare classroom diagrams, build live visual notes, and recall stored visuals intentionally."
+      "Save lesson context, teach naturally, and build a cumulative live whiteboard."
   }
 };
 

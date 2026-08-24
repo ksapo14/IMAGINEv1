@@ -1,16 +1,16 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import {
-  MarketingDiagramPreview,
-  recallDiagram
+  cumulativeBoardScene,
+  MarketingScenePreview
 } from "@/components/marketing/diagram-previews";
-import { productWorkflow, visualForms } from "@/components/marketing/evidence";
+import { productWorkflow, sceneCapabilities } from "@/components/marketing/evidence";
 import { SectionHeading } from "@/components/marketing/visual-language";
 
 export const metadata: Metadata = {
   title: "Product",
   description:
-    "The verified Imagine workflow for prepared diagrams, live visual notes, and exact-phrase recall."
+    "The verified Imagine workflow for saved lesson context and a cumulative live StickScene whiteboard."
 };
 
 export default function ProductPage() {
@@ -19,48 +19,51 @@ export default function ProductPage() {
       <section className="marketing-shell marketing-page-hero">
         <div>
           <p className="marketing-eyebrow" data-hero>
-            Product
+            Imaginev1
           </p>
-          <h1 data-hero>One canvas for prepared and live teaching moments.</h1>
+          <h1 data-hero>One whiteboard that develops with the lesson.</h1>
         </div>
         <p className="marketing-page-hero-note" data-hero>
-          The current workspace combines a browser-local lesson library with a
-          live canvas. Prepared recall and live generation share the teaching
-          surface without becoming the same action.
+          Save lesson context in the browser before class. During class, each
+          finalized teaching turn is considered alongside that context and the
+          board that is already visible.
         </p>
       </section>
 
       <section className="marketing-shell marketing-section">
         <SectionHeading
           eyebrow="Verified workflow"
-          title="A deliberate path from preparation to recall."
+          title="A deliberate path from context to cumulative scenes."
         />
-        <div className="marketing-workflow">
+        <ol
+          className="marketing-workflow"
+          aria-label="Imaginev1 product workflow"
+          data-product-flow
+        >
           {productWorkflow.map((step) => (
-            <article key={step.index} data-reveal>
+            <li key={step.index} data-product-flow-step>
               <span className="marketing-index">{step.index}</span>
               <h2>{step.title}</h2>
               <p>{step.body}</p>
-            </article>
+            </li>
           ))}
-        </div>
+        </ol>
       </section>
 
       <section className="marketing-technical-band">
         <div className="marketing-shell marketing-technical-grid">
           <div data-reveal>
-            <p className="marketing-eyebrow">Exact recall</p>
-            <h2>Imagine, show me &lt;phrase&gt;</h2>
+            <p className="marketing-eyebrow">Cumulative board</p>
+            <h2>Create or update.</h2>
             <p>
-              A complete exact-match command reveals the corresponding stored
-              diagram without a generation request. Other inputs beginning with
-              the whole word “Imagine” are handled locally instead of falling
-              through to live generation.
+              The Visual Director makes one atomic decision for each processed
+              live turn. New scenes receive deterministic, non-overlapping
+              placement; related scenes update without moving.
             </p>
           </div>
-          <MarketingDiagramPreview
-            diagram={recallDiagram}
-            alt="Tree preview of a stored cellular energy diagram organized into inputs, process, and outputs."
+          <MarketingScenePreview
+            scene={cumulativeBoardScene}
+            alt="Stick-scene preview showing an earlier idea, an updated idea, and a new idea connected on one cumulative board."
             compact
             parallax
           />
@@ -69,25 +72,46 @@ export default function ProductPage() {
 
       <section className="marketing-shell marketing-section marketing-product-forms">
         <SectionHeading
-          eyebrow="Five visual forms"
-          title="The model supplies structure. Trusted components render it."
+          eyebrow="Five scene capabilities"
+          title="The director supplies typed data. Trusted components render it."
         />
         <ol className="marketing-form-ledger" data-reveal>
-          {visualForms.map((form, index) => (
-            <li key={form.name}>
+          {sceneCapabilities.map((capability, index) => (
+            <li key={capability.name}>
               <span>0{index + 1}</span>
-              <strong>{form.name}</strong>
-              <p>{form.use}</p>
+              <strong>{capability.name}</strong>
+              <p>{capability.use}</p>
             </li>
           ))}
         </ol>
         <aside className="marketing-storage-note" data-reveal>
           <span>Current storage</span>
           <p>
-            Prepared lesson records live in this browser’s local storage today.
-            Cloud storage is future work, not a current product capability.
+            Lesson context records live in this browser’s local storage today.
+            The cumulative live board is session state; cloud storage is not a
+            current product capability.
           </p>
         </aside>
+      </section>
+
+      <section
+        className="marketing-shell marketing-section marketing-demo"
+        aria-labelledby="product-demo-title"
+      >
+        <div data-reveal>
+          <p className="marketing-eyebrow">Demo</p>
+          <p className="marketing-demo-status">Coming Soon</p>
+        </div>
+        <div data-reveal>
+          <h2 id="product-demo-title">See Imaginev1 develop with a lesson.</h2>
+          <p>
+            The public demo is still being prepared. Teachers interested in beta
+            testing can contact the founding team directly.
+          </p>
+          <Link href="/contact" className="marketing-primary-link">
+            Contact the team <span aria-hidden="true">↗</span>
+          </Link>
+        </div>
       </section>
 
       <section className="marketing-shell marketing-closing" data-reveal>

@@ -1,6 +1,23 @@
 # Landing site changelog
 
-Date: 2026-08-08
+Updated: 2026-08-24 (original landing-site change: 2026-08-08)
+
+## Sitemap alignment
+
+- Primary header and footer navigation now follows the focused order Home,
+  Product, About, and Contact. Educators and Schools remain directly routable
+  but are no longer promoted through primary navigation or the public sitemap.
+- Home now presents the Imaginer name and mission, “Revolutionizing the way
+  people explain things,” while retaining the cumulative-whiteboard product
+  story and founder presentation visual.
+- Product identifies Imaginev1, presents the verified workflow as a semantic
+  ordered flowchart with a reduced-motion-safe scroll reveal, and labels the
+  public demo Coming Soon with a direct Contact path.
+- About now records three explicit core values and includes the founder
+  presentation showcase alongside the unchanged team roles and portraits.
+- Added `/contact` with a teacher beta-testing invitation and direct email links
+  for all three founders. The public sitemap now contains only `/`, `/product`,
+  `/about`, and `/contact` among marketing routes.
 
 ## Public and workspace separation
 
@@ -15,29 +32,29 @@ Date: 2026-08-08
   it out of the public sitemap. Robots and sitemap entries share a normalized
   public origin, so the sitemap reference is absolute and trailing slashes do
   not produce double slashes.
-- Public marketing modules do not import lesson-library, generation-stream,
-  live-session, or workspace components.
+- Public marketing pages do not link to the canvas or import lesson-library,
+  generation-stream, or live-session modules. Read-only marketing previews reuse
+  the trusted StickScene renderer through the marketing preview component.
 
 ## Page narratives
 
-- Home leads with “Keep teaching. Let the picture take shape.” beside a real
-  founder presentation photo. A renderer-backed horizontal mode accordion
-  introduces Prepare, Live, and intentional recall, while a subtle vocabulary
-  strip names the five trusted visual forms and their classroom uses.
-- Product documents the current three-to-five-diagram preparation flow,
-  finalized-speech live notes and visuals, exact local
-  `Imagine, show me <phrase>` recall, trusted renderers, and browser-local
-  storage.
+- Home leads with the Imaginer mission and “Keep teaching. Let the picture take
+  shape.” beside a real founder presentation photo. A renderer-backed mode
+  accordion introduces the current lesson-context and cumulative-board flow.
+- Product documents the current lesson-context, finalized-speech, and cumulative
+  live whiteboard flow, trusted scene rendering, browser-local storage, and the
+  Coming Soon demo path.
 - Educators frames the product around process, comparison, hierarchy,
   relationships, revisiting prepared visuals, and educator control. Benefits
   are stated as design intentions, not guaranteed outcomes.
-- Schools presents an invitation-only pilot framework covering prep effort,
-  usability, recall reliability, lesson continuity, and a school-selected
-  comprehension signal. It does not include a lead form or contact address.
-- About records the founders’ AP Biology motivation and identifies Vivaan
-  Grover as CEO, Jackson Bizell as CFO, and Krish Sapovadia as CTO alongside
-  their portraits. The browser-local classroom product is explicitly separated
-  from possible future lecture-hall, boardroom, and keynote uses.
+- Schools remains directly routable with its invitation-only pilot framework,
+  but is not promoted in primary navigation or the public sitemap.
+- About records the founders’ AP Biology motivation, core values, and showcase,
+  and identifies Vivaan Grover as CEO, Jackson Bizell as CFO, and Krish
+  Sapovadia as CTO alongside their portraits. The browser-local classroom
+  product is explicitly separated from possible future directions.
+- Contact invites teachers to beta test and provides direct email links to the
+  three founders.
 
 ## Evidence corrections
 
@@ -56,19 +73,19 @@ Date: 2026-08-08
 - Introduced a warm editorial/technical system with serif display type,
   asymmetric grids, varied flat surfaces, compact mono labels, and a reusable
   diagram motif.
-- Added compact previews rendered by the same trusted `DiagramRenderer` used by
-  the product. Marketing pages still do not import workspace, generation, or
-  session modules.
+- Added compact previews that reuse the current trusted `StickScene` renderer.
+  Marketing route files remain independent of workspace, generation, and
+  session state; the shared marketing preview component owns the renderer
+  import.
 - Added marketing-only Lenis smoothing with GSAP `ScrollTrigger` integration.
   It falls back to native scrolling for reduced-motion and coarse-pointer users,
   removes its ticker and listener on cleanup, and never calls global
   `ScrollTrigger.killAll()`.
-- Motion remains restrained: hero entrances, viewport reveals, one desktop-only
-  home product-story pin, one scrubbed copy treatment, and small fine-pointer
-  media parallax. Pinning and parallax are disabled at 900px and below and for
-  coarse pointers. A GSAP match-media lifecycle responds to reduced-motion
-  changes while the page is open: it reverts scoped triggers and pin spacing,
-  then forces final visible states without a global kill.
+- Motion remains restrained: hero entrances, viewport reveals, the ordered
+  product-flow reveal, one desktop-only home product-story pin, one scrubbed
+  copy treatment, and small fine-pointer media parallax. A GSAP match-media
+  lifecycle responds to reduced-motion changes while the page is open and
+  forces complete static content without a global kill.
 - Added a skip link, semantic page landmarks and heading structure, visible
   focus treatment, and a labeled mobile menu with `aria-expanded`,
   `aria-controls`, first-link focus, a Tab/Shift+Tab focus boundary, inert page
@@ -137,8 +154,8 @@ Completed verification:
   `dist/` directory was removed again after the proof completed.
 - `git diff --check`: passed.
 - Direct scans found one root `<html>` element, no marketing-to-canvas links or
-  workspace imports, no superseded runtime references, and none of the banned
-  evidence claims on public routes.
+  generation/session imports in route files, no superseded runtime references,
+  and none of the banned evidence claims on public routes.
 
 The configured `npm run lint` command did not run a linter: Next 16 interpreted
 `next lint` as a project-directory argument and returned

@@ -1,6 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
-import { visualForms } from "@/components/marketing/evidence";
+import { sceneCapabilities } from "@/components/marketing/evidence";
 import { ProductModeAccordion } from "@/components/marketing/product-mode-accordion";
 import {
   DiagramMotif,
@@ -15,11 +15,15 @@ export default function HomePage() {
           <p className="marketing-eyebrow" data-hero>
             Classroom visual workspace
           </p>
-          <h1 data-hero>Keep teaching. Let the picture take shape.</h1>
+          <h1 data-hero>Imaginer</h1>
+          <p className="marketing-mission" data-hero>
+            Revolutionizing the way people explain things
+          </p>
           <p className="marketing-hero-lede" data-hero>
-            Prepare the diagrams you know you will need. Build visual notes for
-            the moments you did not plan. Recall stored visuals with a deliberate
-            phrase.
+            <strong>Keep teaching. Let the picture take shape.</strong>{" "}
+            Save the lesson context before class. As you teach, finalized speech
+            becomes a cumulative whiteboard of simple scenes that can stay,
+            appear, or update in place.
           </p>
           <div className="marketing-actions" data-hero>
             <Link href="/product" className="marketing-primary-link">
@@ -49,22 +53,20 @@ export default function HomePage() {
 
       <section
         className="marketing-visual-marquee"
-        aria-label="Visual forms and classroom actions"
+        aria-label="Whiteboard decisions and classroom actions"
       >
         <p className="marketing-sr-only">
-          Flowcharts for processes. Trees for hierarchy. Venn diagrams for
-          comparison. Pie charts for parts of a whole. Mind maps for
-          relationships. Prepare, teach live, and recall intentionally.
+          Create a scene for a new idea. Update a related scene in place.
+          Connect concepts as the lesson grows.
         </p>
         <div className="marketing-visual-marquee-track" aria-hidden="true">
           {[0, 1].map((copy) => (
             <div key={copy}>
-              <span>Flowchart · process</span>
-              <span>Tree · hierarchy</span>
-              <span>Venn · comparison</span>
-              <span>Pie · parts of a whole</span>
-              <span>Mind map · relationships</span>
-              <span>Prepare · Live · Recall</span>
+              <span>Create · add an idea</span>
+              <span>Update · deepen a concept</span>
+              <span>Connect · show relationships</span>
+              <span>Place · avoid overlap</span>
+              <span>Context · Speech · Board</span>
             </div>
           ))}
         </div>
@@ -78,7 +80,7 @@ export default function HomePage() {
           <SectionHeading
             eyebrow="How it reads in the room"
             title="From spoken explanation to a useful visual."
-            body="These product previews illustrate the current prepared, live, and intentional-recall workflow. They are not a live classroom recording."
+            body="Illustrative product walkthrough — non-interactive. These previews show lesson context and cumulative live scenes, not a classroom recording."
           />
         </div>
         <div data-product-story-pin>
@@ -89,15 +91,15 @@ export default function HomePage() {
       <section className="marketing-pattern-band">
         <div className="marketing-shell marketing-pattern-grid">
           <SectionHeading
-            eyebrow="Trusted forms"
-            title="Classroom ideas need different shapes."
+            eyebrow="Board decisions"
+            title="Each turn changes only what the explanation needs."
           />
           <div className="marketing-pattern-list" data-reveal>
-            {visualForms.map((form, index) => (
-              <div key={form.name}>
+            {sceneCapabilities.map((capability, index) => (
+              <div key={capability.name}>
                 <span>0{index + 1}</span>
-                <strong>{form.name}</strong>
-                <p>{form.use}</p>
+                <strong>{capability.name}</strong>
+                <p>{capability.use}</p>
               </div>
             ))}
           </div>
@@ -107,7 +109,7 @@ export default function HomePage() {
       <section className="marketing-shell marketing-closing" data-reveal>
         <DiagramMotif />
         <p className="marketing-eyebrow">Continue exploring</p>
-        <h2>See what happens before class and while the lesson is live.</h2>
+        <h2>See how lesson context becomes a cumulative live whiteboard.</h2>
         <div className="marketing-actions">
           <Link href="/product" className="marketing-primary-link">
             Product workflow <span aria-hidden="true">↗</span>

@@ -2,10 +2,10 @@ import Image from "next/image";
 import Link from "next/link";
 
 const footerLinks = [
+  { href: "/", label: "Home" },
   { href: "/product", label: "Product" },
-  { href: "/educators", label: "Educators" },
-  { href: "/schools", label: "Schools" },
-  { href: "/about", label: "About" }
+  { href: "/about", label: "About" },
+  { href: "/contact", label: "Contact" }
 ];
 
 export function SiteFooter() {

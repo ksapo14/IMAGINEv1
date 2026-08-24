@@ -1,41 +1,40 @@
 export const productWorkflow = [
   {
     index: "01",
-    title: "Prepare 3–5 diagrams",
-    body: "Before class, lesson material is split into three to five stored diagrams using the trusted visual forms."
+    title: "Save lesson context",
+    body: "Before class, save the lesson title, subject, and source material in the browser-local library."
   },
   {
     index: "02",
-    title: "Teach with the live canvas",
-    body: "Finalized speech streams live notes and useful visuals while the educator continues the lesson."
+    title: "Interpret finalized speech",
+    body: "Each completed teaching turn is interpreted against the saved lesson and the current board."
   },
   {
     index: "03",
-    title: "Recall by exact phrase",
-    body: "“Imagine, show me <phrase>” reveals the matching stored diagram without starting a generation request."
+    title: "Build one cumulative board",
+    body: "The Visual Director creates or updates a trusted stick scene without overlapping existing board work."
   }
 ];
 
-export const visualForms = [
-  { name: "Flowchart", use: "Processes and ordered movement" },
-  { name: "Tree", use: "Hierarchy and branching structure" },
-  { name: "Venn diagram", use: "Comparison and shared qualities" },
-  { name: "Pie chart", use: "Parts of a whole" },
-  { name: "Mind map", use: "Relationships around one central idea" }
+export const sceneCapabilities = [
+  { name: "Create", use: "Place a new idea in the next available board region" },
+  { name: "Update", use: "Revise a related scene in its existing position" },
+  { name: "Connect", use: "Show relationships with bounded labels and arrows" },
+  { name: "Illustrate", use: "Optionally add one simple image when shapes are insufficient" }
 ];
 
 export const educatorJobs = [
   "Show a process as it unfolds",
   "Compare two ideas without leaving the explanation",
-  "Make hierarchy visible",
-  "Map relationships around a central concept",
-  "Revisit a planned visual at the exact teaching moment"
+  "Keep earlier ideas visible as the lesson develops",
+  "Update a concept in place when the explanation deepens",
+  "Skip a visual when the board already communicates the idea"
 ];
 
 export const pilotMeasures = [
-  "Preparation effort",
+  "Context-entry effort",
   "Educator usability",
-  "Prepared-recall reliability",
+  "Scene decision reliability",
   "Lesson continuity",
   "A school-selected comprehension signal"
 ];

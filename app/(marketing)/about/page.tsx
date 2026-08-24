@@ -35,6 +35,21 @@ const team = [
   }
 ];
 
+const coreValues = [
+  {
+    name: "Clarity",
+    description: "Make complex explanations easier to follow without interrupting the teacher."
+  },
+  {
+    name: "Teacher focus",
+    description: "Let educators keep their attention on the room while the visual develops alongside them."
+  },
+  {
+    name: "Honest progress",
+    description: "Describe what Imagine can do today separately from what the team may explore next."
+  }
+];
+
 export default function AboutPage() {
   return (
     <main id="main-content">
@@ -63,6 +78,29 @@ export default function AboutPage() {
           “What if the teacher could keep talking, and the visual could develop
           alongside the explanation?”
         </blockquote>
+        <figure className="about-showcase" data-reveal data-parallax-media>
+          <Image
+            src="/media/imagine-founders-showcase.jpg"
+            alt="The three Imagine founders presenting together in a lecture hall."
+            fill
+            sizes="(max-width: 720px) 100vw, 90vw"
+            style={{ objectPosition: "26.7% 38.5%" }}
+          />
+          <figcaption>Imagine presentation · classroom origin</figcaption>
+        </figure>
+      </section>
+
+      <section className="marketing-shell marketing-section marketing-values">
+        <SectionHeading eyebrow="Core values" title="Principles for building alongside teachers." />
+        <ol>
+          {coreValues.map((value, index) => (
+            <li key={value.name} data-reveal>
+              <span className="marketing-index">0{index + 1}</span>
+              <h2>{value.name}</h2>
+              <p>{value.description}</p>
+            </li>
+          ))}
+        </ol>
       </section>
 
       <section className="marketing-team-band">
@@ -97,9 +135,9 @@ export default function AboutPage() {
           <p className="marketing-eyebrow">Current product</p>
           <h2>A browser-local educator workspace.</h2>
           <p>
-            Today, Imagine prepares three to five diagrams, streams live notes and
-            visuals from finalized speech, and recalls stored diagrams by exact
-            phrase.
+            Today, Imagine saves lesson context before class and interprets
+            finalized speech against a cumulative live whiteboard. It creates or
+            updates trusted stick scenes as the lesson develops.
           </p>
         </div>
         <div className="direction-future" data-reveal>

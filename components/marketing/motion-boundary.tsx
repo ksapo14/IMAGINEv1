@@ -21,6 +21,9 @@ export function MarketingMotionBoundary({
       const parallaxNodes = gsap.utils.toArray<HTMLElement>(
         "[data-parallax-media]"
       );
+      const productFlowSteps = gsap.utils.toArray<HTMLElement>(
+        "[data-product-flow-step]"
+      );
       const motionMedia = gsap.matchMedia();
       motionMedia.add(
         {
@@ -50,10 +53,14 @@ export function MarketingMotionBoundary({
           const productStoryCopy = scope.current?.querySelector<HTMLElement>(
             "[data-product-story-copy]"
           );
+          const productFlow = scope.current?.querySelector<HTMLElement>(
+            "[data-product-flow]"
+          );
           const animatedNodes = [
             ...heroNodes,
             ...revealNodes,
             ...parallaxNodes,
+            ...productFlowSteps,
             productStoryPin,
             productStoryCopy
           ].filter((node): node is HTMLElement => Boolean(node));
@@ -100,6 +107,26 @@ export function MarketingMotionBoundary({
               }
             );
           });
+
+          if (productFlow && productFlowSteps.length > 0) {
+            gsap.fromTo(
+              productFlowSteps,
+              { opacity: 0, y: 34 },
+              {
+                opacity: 1,
+                y: 0,
+                duration: 0.72,
+                stagger: 0.14,
+                ease: "power3.out",
+                clearProps: "transform",
+                scrollTrigger: {
+                  trigger: productFlow,
+                  start: "top 82%",
+                  once: true
+                }
+              }
+            );
+          }
 
           if (desktop && finePointer) {
             if (productStory && productStoryPin) {

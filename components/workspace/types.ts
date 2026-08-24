@@ -1,89 +1,160 @@
-import type { BuildingBlockDiagramData } from "@/components/building-blocks";
-
+/** Shared transport and UI types for the cumulative live whiteboard. */
 export type SpeechStatus = "idle" | "connecting" | "listening";
+export type WhiteboardAction = "create" | "update";
+export type BoardStrategy = "integrate" | "reset";
+export type RecentTurnAction = WhiteboardAction | "hold";
+export type ContentMode = "visual" | "notes" | "diagram";
+export type HeadingMode = "show" | "inheritPrimary";
 
-export type LayoutMode =
-  | "textDominant"
-  | "visualDominant"
-  | "balanced"
-  | "sequence"
-  | "comparison";
-
-export type ThemePalette = "slate" | "sage" | "ember" | "indigo" | "mono";
-export type ThemeDensity = "compact" | "comfortable" | "spacious";
-export type ThemeMotion = "subtle" | "none";
-
-export type BlockKind =
-  | "heading"
-  | "notes"
-  | "callout"
-  | "diagram"
-  | "image"
-  | "comparison"
-  | "timeline";
-
-export type BlockSize = "compact" | "medium" | "large" | "wide";
-
-export type GeneratedVisual =
-  | {
-      kind: "diagram";
-      alt: string;
-      diagram: BuildingBlockDiagramData;
-    }
-  | {
-      kind: "generated";
-      dataUrl: string;
-      mimeType: string;
-      alt: string;
-    };
-
-export type CompositionTheme = {
-  palette: ThemePalette;
-  density: ThemeDensity;
-  motion: ThemeMotion;
+export type LessonContext = {
+  title: string;
+  subject: string;
+  source: string;
 };
 
-export type CompositionBlock = {
-  blockId: string;
-  kind: BlockKind;
+export type LessonContextRecord = LessonContext & {
+  schemaVersion: 2;
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type RecentTurn = {
+  turnSequence: number;
+  userInput: string;
+  action: RecentTurnAction;
+  conceptKey: string;
+  summary: string;
+};
+
+export type ConceptMemory = {
+  conceptKey: string;
   title: string;
-  body: string;
-  items: string[];
-  size: BlockSize;
-  recallPhrases: string[];
-  visual: GeneratedVisual | null;
+  summary: string;
+  sceneId: string;
+};
+
+export type BoardPlacement = {
+  page: number;
+  column: number;
+  row: number;
+  width: number;
+  height: number;
+};
+
+export type BoardSceneDigest = {
+  sceneId: string;
+  conceptKey: string;
+  title: string;
+  headingMode: HeadingMode;
+  contentModes: ContentMode[];
+  placement: BoardPlacement;
+};
+
+export type BoardDigest = {
+  version: number;
+  currentPage: number;
+  columns: 24;
+  rows: 14;
+  scenes: BoardSceneDigest[];
+};
+
+export type StickEntity = {
+  id: string;
+  type: "stickFigure" | "circle" | "rectangle";
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  label: string;
+  pose: "neutral" | "pointing" | "walking" | "holding" | "raisedArms";
+  facing: "left" | "right" | "front";
+};
+
+export type StickConnection = {
+  id: string;
+  fromId: string;
+  toId: string;
+  label: string;
+  direction: "forward" | "backward" | "both" | "none";
+};
+
+export type StickScene = {
+  version: 1;
+  columns: 12;
+  rows: 8;
+  entities: StickEntity[];
+  connections: StickConnection[];
+};
+
+export type GeneratedAsset = {
+  dataUrl: string;
+  mimeType: "image/jpeg" | "image/png" | "image/webp";
+  alt: string;
+};
+
+export type GenerateRequest = {
+  userInput: string;
+  mode: "live";
+  turnSequence: number;
+  lessonContext: LessonContext;
+  recentTurns: RecentTurn[];
+  concepts: ConceptMemory[];
+  board: BoardDigest;
+};
+
+export type WhiteboardDecision = {
+  boardVersion: number;
+  turnSequence: number;
+  boardStrategy: BoardStrategy;
+  action: WhiteboardAction;
+  conceptKey: string;
+  title: string;
+  headingMode: HeadingMode;
+  summaryBullets: string[];
+  summary: string;
+  contentModes: ContentMode[];
+  confidence: number;
+  sceneId: string;
+  targetSceneId: string | null;
+  requestedFootprint: "small" | "medium" | "wide" | "full";
+  placement: BoardPlacement;
+  stickScene: StickScene | null;
+  renderMode: "structured" | "generatedAsset";
+  generatedAsset: GeneratedAsset | null;
   visualJobId: string | null;
-  visualAlt: string;
-  visualFailed?: boolean;
-};
-
-export type GenerateResponse = {
-  title: string;
-  layoutMode: LayoutMode;
-  theme: CompositionTheme;
-  blocks: CompositionBlock[];
   warning: string | null;
 };
 
 export type VisualJobResponse = {
   status: "pending" | "complete" | "failed";
-  blockId: string;
-  visual: GeneratedVisual | null;
+  sceneId: string;
+  generatedAsset: GeneratedAsset | null;
   warning: string | null;
 };
 
-export type LessonStatus = "generating" | "ready" | "partial";
-
-export type LessonPack = {
-  schemaVersion: 1;
-  id: string;
+export type WhiteboardScene = {
+  sceneId: string;
+  conceptKey: string;
   title: string;
-  subject: string;
-  source: string;
-  createdAt: string;
-  updatedAt: string;
-  status: LessonStatus;
-  composition: GenerateResponse;
+  headingMode: HeadingMode;
+  summaryBullets: string[];
+  summary: string;
+  contentModes: ContentMode[];
+  placement: BoardPlacement;
+  stickScene: StickScene | null;
+  renderMode: "structured" | "generatedAsset";
+  generatedAsset: GeneratedAsset | null;
+  visualJobId: string | null;
+  visualFailed?: boolean;
+};
+
+export type WhiteboardState = {
+  version: number;
+  currentPage: number;
+  columns: 24;
+  rows: 14;
+  scenes: WhiteboardScene[];
 };
 
 export type DeepgramMessage = {
@@ -95,21 +166,13 @@ export type DeepgramMessage = {
   event?: string;
   transcript?: string;
   speech_final?: boolean;
-  channel?: {
-    alternatives?: Array<{
-      transcript?: string;
-    }>;
-  };
+  channel?: { alternatives?: Array<{ transcript?: string }> };
 };
 
 export type DeepgramStatusResponse = {
   configured: boolean;
-  apiKeyStatus:
-    | "not_checked"
-    | "missing"
-    | "valid"
-    | "invalid"
-    | "unreachable"
-    | "error";
+  apiKeyStatus: "not_checked" | "missing" | "valid" | "invalid" | "unreachable" | "error";
   apiKeyMessage: string;
 };
+
+export type GenerateResponse = WhiteboardDecision;

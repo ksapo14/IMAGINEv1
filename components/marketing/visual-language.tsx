@@ -15,18 +15,18 @@ export function DiagramMotif({ variant = "branch" }: { variant?: "branch" | "orb
 const stages = [
   {
     index: "01",
-    label: "Speech",
-    content: "Energy moves from glucose into a form the cell can use."
+    label: "Context",
+    content: "Cellular respiration transfers energy into ATP."
   },
   {
     index: "02",
-    label: "Live notes",
-    content: "Glucose → cellular respiration → ATP"
+    label: "Final speech",
+    content: "Energy moves from glucose into a form the cell can use."
   },
   {
     index: "03",
     label: "Visual",
-    content: "A process diagram takes shape beside the explanation."
+    content: "A trusted stick scene takes shape beside the explanation."
   }
 ];
 

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import {
-  educatorControlDiagram,
-  MarketingDiagramPreview
+  MarketingScenePreview,
+  updateScene
 } from "@/components/marketing/diagram-previews";
 import { educatorJobs } from "@/components/marketing/evidence";
 import { DiagramMotif, SectionHeading } from "@/components/marketing/visual-language";
@@ -9,14 +9,14 @@ import { DiagramMotif, SectionHeading } from "@/components/marketing/visual-lang
 export const metadata: Metadata = {
   title: "Educators",
   description:
-    "How Imagine is designed to support educator control across planned and live classroom visuals."
+    "How Imagine uses saved lesson context and finalized speech to support a cumulative classroom whiteboard."
 };
 
 const designedBenefits = [
-  "Designed to keep the educator in control of when a prepared diagram appears.",
-  "Designed to support a spoken explanation without requiring a slide change.",
-  "Designed to keep planned recall separate from live generation.",
-  "Designed to make the current visual state visible before the next turn."
+  "Designed to ground each decision in context the educator saved before class.",
+  "Designed to react only after a spoken teaching turn is finalized.",
+  "Designed to preserve useful earlier scenes while the explanation continues.",
+  "Designed to make the current board state visible before the next turn."
 ];
 
 export default function EducatorsPage() {
@@ -33,7 +33,7 @@ export default function EducatorsPage() {
           <p>
             Imagine is designed to support the explanation already happening in
             the room—not to choose the lesson, replace educator judgment, or
-            decide when a stored visual should appear.
+            decide what the class should learn.
           </p>
         </div>
       </section>
@@ -57,22 +57,22 @@ export default function EducatorsPage() {
         <div className="marketing-shell marketing-control-grid">
           <div data-reveal>
             <p className="marketing-eyebrow">Educator control</p>
-            <h2>Prepared visuals wait for a complete recall command.</h2>
+            <h2>The current explanation guides the next board decision.</h2>
             <p>
-              A saved diagram appears only after its exact phrase is called.
-              Ordinary teaching speech continues through the live notes and
-              visuals workflow.
+              Imagine waits for finalized speech, then interprets it with the
+              saved lesson context and current board. It creates a new scene or
+              updates a related scene in its original position.
             </p>
           </div>
           <div className="marketing-control-media" data-reveal>
             <div className="marketing-command-sample">
-              <span>stored phrase</span>
-              <strong>cellular energy pathway</strong>
-              <code>Imagine, show me cellular energy pathway</code>
+              <span>finalized teaching turn</span>
+              <strong>oxygen helps the cell release usable energy</strong>
+              <code>lesson context + current board</code>
             </div>
-            <MarketingDiagramPreview
-              diagram={educatorControlDiagram}
-              alt="Flowchart preview separating finalized teaching speech from an exact prepared-recall command."
+            <MarketingScenePreview
+              scene={updateScene}
+              alt="Stick-scene preview of an educator explaining how oxygen contributes to cellular respiration and ATP."
               compact
             />
           </div>

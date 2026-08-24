@@ -8,7 +8,7 @@ import uuid
 from collections import defaultdict, deque
 from collections.abc import AsyncIterator, Callable, Coroutine
 from threading import Lock
-from typing import Annotated, Literal
+from typing import Literal
 from urllib.parse import urlencode
 import urllib.error
 import urllib.request
@@ -17,7 +17,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.websockets import WebSocket, WebSocketDisconnect
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationInfo, model_validator
 import websockets
 from dotenv import load_dotenv
 
@@ -41,6 +41,7 @@ DEFAULT_ALLOWED_ORIGIN_REGEX = (
     r"172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+"
     r")(:\d+)?$"
 )
+from .services.whiteboard_grid import FOOTPRINTS, promote_footprint
 allowed_origin_regex = (
     os.getenv("CORS_ALLOW_ORIGIN_REGEX", "").strip()
     or DEFAULT_ALLOWED_ORIGIN_REGEX
@@ -70,7 +71,7 @@ gemini_pipeline = GeminiPipeline()
 class SlidingWindowRateLimiter:
     def __init__(
         self,
-        limit: int = 10,
+        limit: int = 50,
         window_seconds: float = 60.0,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -105,14 +106,14 @@ class SlidingWindowRateLimiter:
             return True
 
 
-generation_rate_limiter = SlidingWindowRateLimiter()
+generation_rate_limiter = SlidingWindowRateLimiter(limit=50)
 visual_status_rate_limiter = SlidingWindowRateLimiter(limit=480)
-transcription_status_rate_limiter = SlidingWindowRateLimiter(limit=4)
-transcription_connection_rate_limiter = SlidingWindowRateLimiter(limit=12)
+transcription_status_rate_limiter = SlidingWindowRateLimiter(limit=50)
+transcription_connection_rate_limiter = SlidingWindowRateLimiter(limit=50)
 visual_jobs: dict[str, dict[str, object]] = {}
-visual_batches: dict[str, dict[str, object]] = {}
 visual_jobs_lock = Lock()
 visual_tasks: set[asyncio.Task[None]] = set()
+image_job_semaphore = asyncio.Semaphore(2)
 transcription_sessions: defaultdict[str, int] = defaultdict(int)
 transcription_sessions_lock = Lock()
 
@@ -152,23 +153,21 @@ def sweep_visual_state_locked(now: float | None = None) -> None:
     current_time = time.monotonic() if now is None else now
     cutoff = current_time - VISUAL_JOB_TTL_SECONDS
 
-    for batch_id, batch in list(visual_batches.items()):
-        updated_at = batch.get("updatedAt")
-        if isinstance(updated_at, (int, float)) and updated_at <= cutoff:
-            pending_job_ids = batch.get("pendingJobIds")
-            if isinstance(pending_job_ids, set):
-                for pending_job_id in pending_job_ids:
-                    job = visual_jobs.get(pending_job_id)
-                    if job and job.get("status") == "pending":
-                        job.update(
-                            {
-                                "status": "failed",
-                                "visual": None,
-                                "warning": "The visual request expired.",
-                                "updatedAt": current_time,
-                            }
-                        )
-            visual_batches.pop(batch_id, None)
+    for job in visual_jobs.values():
+        updated_at = job.get("updatedAt")
+        if (
+            job.get("status") == "pending"
+            and isinstance(updated_at, (int, float))
+            and updated_at <= cutoff
+        ):
+            job.update(
+                {
+                    "status": "failed",
+                    "generatedAsset": None,
+                    "warning": "The optional image request expired.",
+                    "updatedAt": current_time,
+                }
+            )
 
     expired_job_ids = [
         job_id
@@ -209,323 +208,415 @@ def track_visual_task(coroutine: Coroutine[object, object, None]) -> None:
 class GenerateRequest(BaseModel):
     userInput: str = Field(..., min_length=1, max_length=4000)
     mode: Literal["live", "prepare"] = "live"
+    turnSequence: int = Field(default=0, ge=0)
+    lessonContext: "LessonContext" = Field(default_factory=lambda: LessonContext())
+    recentTurns: list["RecentTurn"] = Field(default_factory=list, max_length=6)
+    concepts: list["ConceptContext"] = Field(default_factory=list, max_length=24)
+    board: "BoardContext" = Field(default_factory=lambda: BoardContext())
+
+    @model_validator(mode="after")
+    def validate_recent_turn_budget(self) -> "GenerateRequest":
+        total = sum(
+            len(turn.userInput) + len(turn.conceptKey) + len(turn.summary)
+            for turn in self.recentTurns
+        )
+        if total > 2400:
+            raise ValueError("recentTurns may contain at most 2400 characters.")
+        return self
 
 
-class BlockComponent(BaseModel):
-    type: Literal["block"]
-    id: str
-    heading: str
-    description: str
+class LessonContext(BaseModel):
+    title: str = Field(default="", max_length=160)
+    subject: str = Field(default="", max_length=120)
+    source: str = Field(default="", max_length=3600)
 
 
-class RoundComponent(BaseModel):
-    type: Literal["round"]
-    id: str
-    heading: str
-    description: str
+class RecentTurn(BaseModel):
+    turnSequence: int = Field(default=0, ge=0)
+    userInput: str = Field(default="", max_length=2400)
+    action: Literal["hold", "create", "update"] = "hold"
+    conceptKey: str = Field(default="", max_length=80)
+    summary: str = Field(default="", max_length=320)
 
 
-class BlockLineComponent(BaseModel):
-    type: Literal["blockLine"]
-    id: str
-    blocks: list[BlockComponent]
+class ConceptContext(BaseModel):
+    conceptKey: str = Field(..., min_length=1, max_length=80)
+    title: str = Field(default="", max_length=120)
+    summary: str = Field(default="", max_length=320)
+    sceneId: str = Field(default="", max_length=80)
 
 
-class TreeNode(BaseModel):
-    id: str
-    heading: str
-    description: str
-    children: list["TreeNode"]
+class BoardPlacement(BaseModel):
+    page: int = Field(..., ge=1, le=48)
+    column: int = Field(..., ge=0, le=23)
+    row: int = Field(..., ge=0, le=13)
+    width: int = Field(..., ge=1, le=24)
+    height: int = Field(..., ge=1, le=14)
+
+    @model_validator(mode="after")
+    def validate_bounds(self) -> "BoardPlacement":
+        if self.column + self.width > 24 or self.row + self.height > 14:
+            raise ValueError("Scene placement must remain inside the board grid.")
+        if (self.width, self.height) not in FOOTPRINTS.values():
+            raise ValueError("Scene placement must use a presentation footprint.")
+        return self
 
 
-class VennRegion(BaseModel):
-    heading: str
-    items: list[str]
+class BoardSceneContext(BaseModel):
+    sceneId: str = Field(..., min_length=1, max_length=80)
+    conceptKey: str = Field(default="", max_length=80)
+    title: str = Field(default="", max_length=120)
+    headingMode: Literal["show", "inheritPrimary"] = "show"
+    contentModes: list[Literal["visual", "notes", "diagram"]] = Field(
+        min_length=1,
+        max_length=3,
+    )
+    placement: BoardPlacement
+
+    @model_validator(mode="after")
+    def validate_modes(self) -> "BoardSceneContext":
+        if len(set(self.contentModes)) != len(self.contentModes):
+            raise ValueError("contentModes must be unique and ordered.")
+        return self
 
 
-class PiePortion(BaseModel):
-    heading: str
-    proportion: float
+class BoardContext(BaseModel):
+    version: int = Field(default=0, ge=0)
+    currentPage: int = Field(default=1, ge=1, le=48)
+    columns: Literal[24] = 24
+    rows: Literal[14] = 14
+    scenes: list[BoardSceneContext] = Field(default_factory=list, max_length=48)
+
+    @model_validator(mode="after")
+    def validate_scene_reservations(self) -> "BoardContext":
+        scene_ids = [scene.sceneId for scene in self.scenes]
+        if len(set(scene_ids)) != len(scene_ids):
+            raise ValueError("Board scene IDs must be unique.")
+        for index, scene in enumerate(self.scenes):
+            for sibling in self.scenes[index + 1:]:
+                first = scene.placement
+                second = sibling.placement
+                if first.page != second.page:
+                    continue
+                separated = (
+                    first.column + first.width < second.column
+                    or second.column + second.width < first.column
+                    or first.row + first.height < second.row
+                    or second.row + second.height < first.row
+                )
+                if not separated:
+                    raise ValueError("Board scene placements must not overlap.")
+        return self
 
 
-class DiagramBase(BaseModel):
-    version: Literal[3]
-    title: str
-    description: str
+class StickEntity(BaseModel):
+    id: str = Field(..., min_length=1, max_length=40)
+    type: Literal["stickFigure", "circle", "rectangle"]
+    x: int = Field(..., ge=0, le=11)
+    y: int = Field(..., ge=0, le=7)
+    width: int = Field(..., ge=1, le=12)
+    height: int = Field(..., ge=1, le=8)
+    label: str = Field(default="", max_length=32)
+    pose: Literal["neutral", "pointing", "walking", "holding", "raisedArms"]
+    facing: Literal["left", "right", "front"]
+
+    @model_validator(mode="after")
+    def validate_geometry_and_identity(self) -> "StickEntity":
+        if not re.fullmatch(r"[a-zA-Z0-9_-]+", self.id):
+            raise ValueError("Stick entity IDs must be safe identifiers.")
+        if self.x + self.width > 12 or self.y + self.height > 8:
+            raise ValueError("Stick entities must remain inside the 12 by 8 grid.")
+        return self
 
 
-class FlowchartDiagram(DiagramBase):
-    type: Literal["flowchart"]
-    lines: list[BlockLineComponent]
+class StickConnection(BaseModel):
+    id: str = Field(..., min_length=1, max_length=40)
+    fromId: str = Field(..., min_length=1, max_length=40)
+    toId: str = Field(..., min_length=1, max_length=40)
+    label: str = Field(default="", max_length=28)
+    direction: Literal["forward", "backward", "both", "none"]
+
+    @model_validator(mode="after")
+    def validate_identity(self) -> "StickConnection":
+        for identifier in (self.id, self.fromId, self.toId):
+            if not re.fullmatch(r"[a-zA-Z0-9_-]+", identifier):
+                raise ValueError("Stick connection IDs must be safe identifiers.")
+        return self
 
 
-class TreeDiagram(DiagramBase):
-    type: Literal["tree"]
-    root: TreeNode
+class StickScene(BaseModel):
+    version: Literal[1]
+    columns: Literal[12]
+    rows: Literal[8]
+    entities: list[StickEntity] = Field(min_length=1, max_length=6)
+    connections: list[StickConnection] = Field(max_length=6)
+
+    @model_validator(mode="after")
+    def validate_scene_graph(self) -> "StickScene":
+        entity_ids = [entity.id for entity in self.entities]
+        if len(set(entity_ids)) != len(entity_ids):
+            raise ValueError("Stick entity IDs must be unique.")
+        for index, entity in enumerate(self.entities):
+            for sibling in self.entities[index + 1:]:
+                separated = (
+                    entity.x + entity.width <= sibling.x
+                    or sibling.x + sibling.width <= entity.x
+                    or entity.y + entity.height <= sibling.y
+                    or sibling.y + sibling.height <= entity.y
+                )
+                if not separated:
+                    raise ValueError("Stick entities must not overlap.")
+
+        connection_ids = [connection.id for connection in self.connections]
+        if len(set(connection_ids)) != len(connection_ids):
+            raise ValueError("Stick connection IDs must be unique.")
+        retained_ids = set(entity_ids)
+        for connection in self.connections:
+            if (
+                connection.fromId == connection.toId
+                or connection.fromId not in retained_ids
+                or connection.toId not in retained_ids
+            ):
+                raise ValueError("Stick connections must reference two retained entities.")
+        return self
 
 
-class VennDiagram(DiagramBase):
-    type: Literal["vennDiagram"]
-    left: VennRegion
-    right: VennRegion
-    similar: VennRegion
+class GeneratedAsset(BaseModel):
+    dataUrl: str = Field(min_length=1, max_length=20_000_100)
+    mimeType: Literal["image/jpeg", "image/png", "image/webp"]
+    alt: str = Field(min_length=1, max_length=320)
 
-
-class PieChartDiagram(DiagramBase):
-    type: Literal["pieChart"]
-    portions: list[PiePortion]
-
-
-class MindMapDiagram(DiagramBase):
-    type: Literal["mindMap"]
-    center: RoundComponent
-    surrounding: list[RoundComponent]
-
-
-StructuredDiagram = Annotated[
-    FlowchartDiagram
-    | TreeDiagram
-    | VennDiagram
-    | PieChartDiagram
-    | MindMapDiagram,
-    Field(discriminator="type"),
-]
-
-
-class GeneratedVisual(BaseModel):
-    kind: Literal["diagram", "generated"]
-    alt: str
-    diagram: StructuredDiagram | None = None
-    dataUrl: str | None = None
-    mimeType: str | None = None
-
-
-class CompositionTheme(BaseModel):
-    palette: Literal["slate", "sage", "ember", "indigo", "mono"]
-    density: Literal["compact", "comfortable", "spacious"]
-    motion: Literal["subtle", "none"]
-
-
-class CompositionBlock(BaseModel):
-    blockId: str
-    kind: Literal[
-        "heading",
-        "notes",
-        "callout",
-        "diagram",
-        "image",
-        "comparison",
-        "timeline",
-    ]
-    title: str
-    body: str
-    items: list[str]
-    size: Literal["compact", "medium", "large", "wide"]
-    visual: GeneratedVisual | None = None
-    visualJobId: str | None = None
-    visualAlt: str = ""
-    recallPhrases: list[str] = Field(default_factory=list, max_length=3)
+    @model_validator(mode="after")
+    def validate_data_url(self) -> "GeneratedAsset":
+        prefix = f"data:{self.mimeType};base64,"
+        payload = self.dataUrl[len(prefix):] if self.dataUrl.startswith(prefix) else ""
+        if (
+            not payload
+            or len(payload) % 4 != 0
+            or not re.fullmatch(r"[A-Za-z0-9+/]+={0,2}", payload)
+        ):
+            raise ValueError("Generated assets must use a bounded base64 data URL.")
+        if not self.alt.strip():
+            raise ValueError("Generated assets require descriptive alternative text.")
+        return self
 
 
 class GenerateResponse(BaseModel):
-    title: str
-    layoutMode: Literal[
-        "textDominant",
-        "visualDominant",
-        "balanced",
-        "sequence",
-        "comparison",
-    ]
-    theme: CompositionTheme
-    blocks: list[CompositionBlock]
-    warning: str | None
+    boardVersion: int = Field(ge=0)
+    turnSequence: int = Field(ge=0)
+    boardStrategy: Literal["integrate", "reset"]
+    action: Literal["create", "update"]
+    conceptKey: str = Field(max_length=80)
+    title: str = Field(max_length=100)
+    headingMode: Literal["show", "inheritPrimary"]
+    summaryBullets: list[str] = Field(max_length=4)
+    summary: str = Field(max_length=320)
+    contentModes: list[Literal["visual", "notes", "diagram"]] = Field(max_length=3)
+    confidence: float = Field(ge=0, le=1)
+    sceneId: str = Field(min_length=1, max_length=80)
+    targetSceneId: str | None = Field(max_length=80)
+    requestedFootprint: Literal["small", "medium", "wide", "full"]
+    placement: BoardPlacement
+    stickScene: StickScene | None
+    renderMode: Literal["structured", "generatedAsset"]
+    generatedAsset: GeneratedAsset | None = None
+    visualJobId: str | None = None
+    warning: str | None = Field(default=None, max_length=360)
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_internal_image_fields(
+        cls,
+        value: object,
+        info: ValidationInfo,
+    ) -> object:
+        """Inspect internal/extra image prompt fields before Pydantic drops them."""
+        if (
+            isinstance(value, dict)
+            and info.context
+            and info.context.get("allow_internal_image_request")
+        ):
+            image_request = value.get("_imageRequest")
+            needs_request = (
+                value.get("renderMode") == "generatedAsset"
+                and value.get("generatedAsset") is None
+                and value.get("visualJobId") is None
+            )
+            if needs_request:
+                if not isinstance(image_request, dict) or set(image_request) != {
+                    "imagePrompt",
+                    "visualAlt",
+                }:
+                    raise ValueError("Internal generated visuals require a complete image request.")
+                image_prompt = image_request.get("imagePrompt")
+                visual_alt = image_request.get("visualAlt")
+                if (
+                    not isinstance(image_prompt, str)
+                    or not image_prompt.strip()
+                    or image_prompt != image_prompt.strip()
+                    or len(image_prompt) > 800
+                    or not isinstance(visual_alt, str)
+                    or not visual_alt.strip()
+                    or visual_alt != visual_alt.strip()
+                    or len(visual_alt) > 320
+                ):
+                    raise ValueError("Internal image prompts and alt text must be trimmed and bounded.")
+            elif image_request is not None:
+                raise ValueError("Only pending generated visuals may include an internal image request.")
+        return value
+
+    @model_validator(mode="after")
+    def validate_action_contract(self, info: ValidationInfo) -> "GenerateResponse":
+        """Reject incomplete or contradictory decisions at the API boundary."""
+        if self.boardStrategy == "reset" and (
+            self.action != "create"
+            or self.targetSceneId is not None
+            or self.placement.page != 1
+            or self.headingMode != "show"
+        ):
+            raise ValueError("RESET must create one headed, untargeted scene on board page 1.")
+        if (
+            not re.fullmatch(r"[a-z0-9_-]+", self.conceptKey)
+            or not self.title.strip()
+            or not self.summary.strip()
+        ):
+            raise ValueError("CREATE and UPDATE require a title and summary metadata.")
+        if not self.contentModes or len(set(self.contentModes)) != len(self.contentModes):
+            raise ValueError("contentModes must be a unique non-empty ordered list.")
+        has_notes = "notes" in self.contentModes
+        if has_notes != bool(self.summaryBullets):
+            raise ValueError("summaryBullets are required exactly when notes mode is selected.")
+        if any(
+            not bullet.strip()
+            or bullet != bullet.strip()
+            or len(bullet) > 120
+            for bullet in self.summaryBullets
+        ):
+            raise ValueError("summaryBullets must contain 1 to 4 concise items.")
+        has_diagram = "diagram" in self.contentModes
+        has_structured_visual = (
+            "visual" in self.contentModes and self.renderMode == "structured"
+        )
+        if (has_diagram or has_structured_visual) != (self.stickScene is not None):
+            raise ValueError(
+                "stickScene is required for diagrams and structured visuals only."
+            )
+        if self.stickScene is not None and not self.stickScene.entities:
+            raise ValueError("Diagram mode requires a non-empty StickScene.")
+        if not re.fullmatch(r"[a-zA-Z0-9_-]+", self.sceneId):
+            raise ValueError("sceneId must be a safe bounded identifier.")
+        if self.action == "create" and self.targetSceneId is not None:
+            raise ValueError("CREATE cannot target an existing scene.")
+        if self.action == "update" and (
+            self.targetSceneId is None
+            or self.targetSceneId != self.sceneId
+            or not re.fullmatch(r"[a-zA-Z0-9_-]+", self.targetSceneId)
+        ):
+            raise ValueError("UPDATE must preserve and target the same scene identity.")
+        effective = promote_footprint(self.requestedFootprint, self.contentModes)
+        if effective != self.requestedFootprint or (
+            self.placement.width,
+            self.placement.height,
+        ) != FOOTPRINTS[effective]:
+            raise ValueError("The placement must match the effective content footprint.")
+        if "visual" not in self.contentModes and (
+            self.renderMode != "structured"
+            or self.generatedAsset is not None
+            or self.visualJobId is not None
+        ):
+            raise ValueError("Only visual mode may request or retain image work.")
+        if "visual" in self.contentModes and self.renderMode == "structured" and (
+            self.generatedAsset is not None or self.visualJobId is not None
+        ):
+            raise ValueError("Structured visual mode cannot retain image work.")
+        if {"visual", "diagram"}.issubset(set(self.contentModes)) and self.renderMode != "generatedAsset":
+            raise ValueError("Combined visual and diagram scenes require a generated visual asset.")
+        if self.visualJobId is not None and (
+            len(self.visualJobId) > 80
+            or not re.fullmatch(r"[a-zA-Z0-9_-]+", self.visualJobId)
+        ):
+            raise ValueError("visualJobId must be a safe bounded identifier.")
+        if self.renderMode == "generatedAsset":
+            has_asset = self.generatedAsset is not None
+            has_job = self.visualJobId is not None
+            allow_internal = bool(
+                info.context and info.context.get("allow_internal_image_request")
+            )
+            if has_asset and has_job:
+                raise ValueError("Generated visual responses cannot contain both an asset and a job.")
+            if not has_asset and not has_job and not allow_internal:
+                raise ValueError("Generated visual responses require one asset or visual job.")
+        return self
 
 
 class VisualJobResponse(BaseModel):
     status: Literal["pending", "complete", "failed"]
-    blockId: str
-    visual: GeneratedVisual | None = None
+    sceneId: str
+    generatedAsset: GeneratedAsset | None = None
     warning: str | None = None
 
 
 async def run_visual_job(
     job_id: str,
-    batch_id: str,
-    block_id: str,
-    user_input: str,
-    visual_strategy: str,
-    visual_prompt: str,
+    scene_id: str,
+    image_prompt: str,
     visual_alt: str,
-    mode: Literal["live", "prepare"] = "live",
 ) -> None:
-    failure_reason: str | None = None
+    """Run bounded image work without allowing failure to undo a scene decision."""
     try:
-        visual = await gemini_pipeline.generate_visual(
-            visual_strategy,
-            visual_prompt,
-            visual_alt,
-        )
-    except GeminiProviderError:
-        logger.exception("The AI provider failed visual job %s.", job_id)
-        visual = None
-        failure_reason = "The AI provider could not complete the visual request."
+        async with image_job_semaphore:
+            asset = await gemini_pipeline.generate_visual(
+                "image",
+                image_prompt,
+                visual_alt,
+            )
     except Exception:
-        logger.exception("Unexpected failure in visual job %s.", job_id)
-        visual = None
-        failure_reason = "An unexpected visual-generation error occurred."
+        logger.exception("The AI provider failed visual job %s.", job_id)
+        asset = None
 
     warning = None
-    if visual is None:
-        warning = "The canvas is ready, but a visual could not be generated."
-        if failure_reason:
-            warning = f"{warning} {failure_reason}"
-
-    cache_payload: tuple[str, dict[str, object]] | None = None
+    if asset is None:
+        warning = "The structured scene is ready, but its optional image could not be generated."
     now = time.monotonic()
     with visual_jobs_lock:
         visual_jobs[job_id] = {
-            "status": "complete" if visual is not None else "failed",
-            "blockId": block_id,
-            "visual": visual,
+            "status": "complete" if asset is not None else "failed",
+            "sceneId": scene_id,
+            "generatedAsset": asset,
             "warning": warning,
             "updatedAt": now,
         }
-        batch = visual_batches.get(batch_id)
-        if batch:
-            result = batch.get("result")
-            pending_job_ids = batch.get("pendingJobIds")
-            batch["updatedAt"] = now
-            if visual is None:
-                batch["failed"] = True
-            if isinstance(result, dict):
-                blocks = result.get("blocks")
-                if isinstance(blocks, list):
-                    for block in blocks:
-                        if (
-                            isinstance(block, dict)
-                            and block.get("blockId") == block_id
-                        ):
-                            if visual is not None:
-                                block["visual"] = visual
-                            else:
-                                block["visualFailed"] = True
-                            block["visualJobId"] = None
-                            break
-                if warning:
-                    result["warning"] = warning
-            if isinstance(pending_job_ids, set):
-                pending_job_ids.discard(job_id)
-                if not pending_job_ids and isinstance(result, dict):
-                    if not batch.get("failed"):
-                        cache_payload = (user_input, result)
-                    visual_batches.pop(batch_id, None)
-
         sweep_visual_state_locked(now)
 
-    if cache_payload is not None:
-        await asyncio.to_thread(
-            gemini_pipeline.cache_result,
-            cache_payload[0],
-            cache_payload[1],
-            mode,
-        )
 
+async def schedule_visual_generation(result: dict[str, object]) -> None:
+    """Reserve the job after board placement exists and before work is started."""
+    image_request = result.pop("_imageRequest", None)
+    if (
+        not isinstance(image_request, dict)
+        or not isinstance(result.get("placement"), dict)
+        or "visual" not in result.get("contentModes", [])
+    ):
+        return
+    image_prompt = image_request.get("imagePrompt")
+    visual_alt = image_request.get("visualAlt")
+    scene_id = result.get("sceneId")
+    if not all(isinstance(value, str) and value for value in (image_prompt, visual_alt, scene_id)):
+        return
 
-async def schedule_visual_generation(
-    user_input: str,
-    result: dict[str, object],
-    mode: Literal["live", "prepare"] = "live",
-) -> None:
-    """Attach visual job IDs and start the same background work for every route."""
-    visual_requests = result.pop("_visualRequests", [])
-    pending_job_ids: set[str] = set()
-    visual_task_arguments: list[tuple[str, str, str, str, str]] = []
-    batch_id = uuid.uuid4().hex
+    job_id = uuid.uuid4().hex
     now = time.monotonic()
-
-    if isinstance(visual_requests, list):
-        for visual_request in visual_requests:
-            if not isinstance(visual_request, dict):
-                continue
-            block_id = visual_request.get("blockId")
-            visual_strategy = visual_request.get("visualStrategy")
-            visual_prompt = visual_request.get("visualPrompt")
-            visual_alt = visual_request.get("visualAlt")
-            if (
-                not isinstance(block_id, str)
-                or visual_strategy not in {"diagram", "image"}
-                or not isinstance(visual_prompt, str)
-                or not isinstance(visual_alt, str)
-            ):
-                continue
-
-            job_id = uuid.uuid4().hex
-            pending_job_ids.add(job_id)
-            visual_task_arguments.append(
-                (
-                    job_id,
-                    block_id,
-                    str(visual_strategy),
-                    visual_prompt,
-                    visual_alt,
-                )
-            )
-            blocks = result.get("blocks")
-            if isinstance(blocks, list):
-                for block in blocks:
-                    if (
-                        isinstance(block, dict)
-                        and block.get("blockId") == block_id
-                    ):
-                        block["visualJobId"] = job_id
-                        break
-
-    if pending_job_ids:
-        with visual_jobs_lock:
-            sweep_visual_state_locked(now)
-            for job_id, block_id, _, _, _ in visual_task_arguments:
-                visual_jobs[job_id] = {
-                    "status": "pending",
-                    "blockId": block_id,
-                    "visual": None,
-                    "warning": None,
-                    "updatedAt": now,
-                }
-            visual_batches[batch_id] = {
-                "userInput": user_input,
-                "mode": mode,
-                "result": result,
-                "pendingJobIds": pending_job_ids,
-                "failed": False,
-                "updatedAt": now,
-            }
-
-        for (
-            job_id,
-            block_id,
-            visual_strategy,
-            visual_prompt,
-            visual_alt,
-        ) in visual_task_arguments:
-            track_visual_task(
-                run_visual_job(
-                    job_id,
-                    batch_id,
-                    block_id,
-                    user_input,
-                    visual_strategy,
-                    visual_prompt,
-                    visual_alt,
-                    mode,
-                )
-            )
-    else:
-        await asyncio.to_thread(
-            gemini_pipeline.cache_result,
-            user_input,
-            result,
-            mode,
-        )
+    with visual_jobs_lock:
+        sweep_visual_state_locked(now)
+        visual_jobs[job_id] = {
+            "status": "pending",
+            "sceneId": scene_id,
+            "generatedAsset": None,
+            "warning": None,
+            "updatedAt": now,
+        }
+    result["visualJobId"] = job_id
+    track_visual_task(run_visual_job(job_id, scene_id, image_prompt, visual_alt))
 
 
 def get_deepgram_api_key() -> str:
@@ -610,7 +701,7 @@ async def generate_content(
     payload: GenerateRequest,
     request: Request,
 ) -> GenerateResponse:
-    """Generate a composed note canvas and schedule useful visuals."""
+    """Direct one teaching turn and schedule its optional image fallback."""
     user_input = payload.userInput.strip()
     if not user_input:
         raise HTTPException(status_code=422, detail="Input cannot be empty.")
@@ -623,7 +714,11 @@ async def generate_content(
         )
 
     try:
-        result = await gemini_pipeline.generate(user_input, payload.mode)
+        result = await gemini_pipeline.generate(
+            user_input,
+            payload.mode,
+            payload.model_dump(exclude={"userInput", "mode"}, mode="json"),
+        )
     except GeminiConfigurationError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
     except GeminiProviderError as error:
@@ -639,7 +734,11 @@ async def generate_content(
             detail="The generation request failed unexpectedly.",
         ) from error
 
-    await schedule_visual_generation(user_input, result, payload.mode)
+    GenerateResponse.model_validate(
+        result,
+        context={"allow_internal_image_request": True},
+    )
+    await schedule_visual_generation(result)
     return GenerateResponse(**result)
 
 
@@ -650,16 +749,21 @@ def encode_generation_event(event: dict[str, object]) -> str:
 async def stream_generation_events(
     user_input: str,
     mode: Literal["live", "prepare"] = "live",
+    context: dict[str, object] | None = None,
 ) -> AsyncIterator[str]:
     try:
-        async for event in gemini_pipeline.generate_stream(user_input, mode):
+        async for event in gemini_pipeline.generate_stream(user_input, mode, context):
             if event.get("type") == "result":
                 raw_result = event.get("result")
                 if not isinstance(raw_result, dict):
                     raise GeminiProviderError(
                         "The AI provider returned an unexpected response."
                     )
-                await schedule_visual_generation(user_input, raw_result, mode)
+                GenerateResponse.model_validate(
+                    raw_result,
+                    context={"allow_internal_image_request": True},
+                )
+                await schedule_visual_generation(raw_result)
                 response = GenerateResponse(**raw_result)
                 yield encode_generation_event(
                     {
@@ -709,7 +813,7 @@ async def generate_content_stream(
     payload: GenerateRequest,
     request: Request,
 ) -> StreamingResponse:
-    """Stream Gemini text deltas before returning the composed canvas."""
+    """Return the atomic whiteboard decision through the NDJSON endpoint."""
     user_input = payload.userInput.strip()
     if not user_input:
         raise HTTPException(status_code=422, detail="Input cannot be empty.")
@@ -722,7 +826,11 @@ async def generate_content_stream(
         )
 
     return StreamingResponse(
-        stream_generation_events(user_input, payload.mode),
+        stream_generation_events(
+            user_input,
+            payload.mode,
+            payload.model_dump(exclude={"userInput", "mode"}, mode="json"),
+        ),
         media_type="application/x-ndjson",
         headers={"Cache-Control": "no-cache"},
     )

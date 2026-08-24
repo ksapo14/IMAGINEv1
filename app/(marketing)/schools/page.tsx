@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import {
-  MarketingDiagramPreview,
-  pilotDiagram
+  MarketingScenePreview,
+  pilotReviewScene
 } from "@/components/marketing/diagram-previews";
 import { pilotMeasures } from "@/components/marketing/evidence";
 import { SectionHeading } from "@/components/marketing/visual-language";
@@ -52,14 +52,14 @@ export default function SchoolsPage() {
             <h2>Keep the comprehension signal local to the pilot.</h2>
             <p>
               The participating school selects the comprehension signal it
-              considers appropriate. Prep effort, usability, recall reliability,
-              and lesson continuity are reviewed alongside it rather than used as
-              a substitute for it.
+              considers appropriate. Context-entry effort, usability, scene
+              decision reliability, and lesson continuity are reviewed alongside
+              it rather than used as a substitute for it.
             </p>
           </div>
-          <MarketingDiagramPreview
-            diagram={pilotDiagram}
-            alt="Mind map preview connecting a school pilot review to preparation effort, usability, recall, continuity, and a local signal."
+          <MarketingScenePreview
+            scene={pilotReviewScene}
+            alt="Stick-scene preview connecting educator experience and school-selected evidence to a pilot review."
             compact
           />
         </div>

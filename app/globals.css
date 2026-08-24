@@ -409,6 +409,15 @@ select:focus-visible {
   line-height: 1.65;
 }
 
+.marketing-mission {
+  max-width: 620px;
+  margin: 30px 0 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(1.45rem, 2.6vw, 2.65rem);
+  letter-spacing: -0.035em;
+  line-height: 1.08;
+}
+
 .marketing-actions {
   display: flex;
   flex-wrap: wrap;
@@ -805,18 +814,40 @@ select:focus-visible {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   margin-top: clamp(72px, 9vw, 120px);
+  margin-bottom: 0;
+  padding: 0;
+  list-style: none;
   border-top: 1px solid var(--marketing-line-strong);
 }
 
-.marketing-workflow article {
+.marketing-workflow li {
+  position: relative;
   min-height: 370px;
   border-right: 1px solid var(--marketing-line);
   border-bottom: 1px solid var(--marketing-line);
   padding: 26px;
 }
 
-.marketing-workflow article:last-child {
+.marketing-workflow li:last-child {
   border-right: 0;
+}
+
+.marketing-workflow li:not(:last-child)::after {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  right: -15px;
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid var(--marketing-line-strong);
+  border-radius: 50%;
+  background: var(--marketing-paper);
+  color: var(--marketing-muted);
+  content: "→";
+  font-family: var(--mono);
+  font-size: 0.72rem;
 }
 
 .marketing-workflow h2 {
@@ -899,6 +930,41 @@ select:focus-visible {
   margin: 0;
   color: var(--marketing-muted);
   line-height: 1.65;
+}
+
+.marketing-demo {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.55fr) minmax(0, 1.45fr);
+  gap: clamp(48px, 10vw, 150px);
+  border-block: 1px solid var(--marketing-line-strong);
+}
+
+.marketing-demo-status {
+  margin: 26px 0 0;
+  color: var(--marketing-ink);
+  font-family: var(--mono);
+  font-size: clamp(1.3rem, 2.5vw, 2.3rem);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.marketing-demo h2,
+.marketing-contact h2 {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(2.8rem, 5.2vw, 5.8rem);
+  font-weight: 400;
+  letter-spacing: -0.058em;
+  line-height: 1;
+}
+
+.marketing-demo > div:last-child > p,
+.marketing-contact header > p:last-child {
+  max-width: 680px;
+  margin: 28px 0 0;
+  color: var(--marketing-muted);
+  line-height: 1.7;
 }
 
 .educator-jobs ol,
@@ -1010,6 +1076,90 @@ select:focus-visible {
   font-size: clamp(2.4rem, 5vw, 5.3rem);
   letter-spacing: -0.055em;
   line-height: 1.02;
+}
+
+.about-showcase {
+  position: relative;
+  min-height: clamp(430px, 62vw, 760px);
+  margin: clamp(80px, 10vw, 130px) 0 0;
+  overflow: hidden;
+  border: 1px solid var(--marketing-line-strong);
+  background: var(--marketing-paper-deep);
+}
+
+.about-showcase img {
+  object-fit: cover;
+}
+
+.marketing-values ol {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: clamp(72px, 9vw, 120px) 0 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--marketing-line-strong);
+}
+
+.marketing-values li {
+  min-height: 310px;
+  border-right: 1px solid var(--marketing-line);
+  border-bottom: 1px solid var(--marketing-line);
+  padding: 26px;
+}
+
+.marketing-values li:last-child {
+  border-right: 0;
+}
+
+.marketing-values h2 {
+  margin: 84px 0 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(1.8rem, 3vw, 3rem);
+  font-weight: 400;
+  letter-spacing: -0.046em;
+  line-height: 1;
+}
+
+.marketing-values li p {
+  margin: 16px 0 0;
+  color: var(--marketing-muted);
+  line-height: 1.7;
+}
+
+.marketing-contact {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(360px, 1.1fr);
+  gap: clamp(60px, 10vw, 160px);
+}
+
+.marketing-contact address {
+  display: grid;
+  align-self: start;
+  border-top: 1px solid var(--marketing-line-strong);
+  font-style: normal;
+}
+
+.marketing-contact address a {
+  display: grid;
+  gap: 9px;
+  border-bottom: 1px solid var(--marketing-line);
+  padding: 24px 0;
+}
+
+.marketing-contact address span {
+  color: var(--marketing-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.marketing-contact address strong {
+  overflow-wrap: anywhere;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(1.3rem, 2.6vw, 2.5rem);
+  font-weight: 400;
+  letter-spacing: -0.035em;
 }
 
 .marketing-team-band {
@@ -1228,7 +1378,9 @@ select:focus-visible {
   .marketing-mode-section,
   .marketing-pattern-grid,
   .marketing-technical-grid,
-  .marketing-control-grid {
+  .marketing-control-grid,
+  .marketing-demo,
+  .marketing-contact {
     grid-template-columns: 1fr;
   }
 
@@ -1344,13 +1496,15 @@ select:focus-visible {
 
   .marketing-workflow,
   .marketing-form-ledger,
+  .marketing-values ol,
   .schools-measures ol,
   .direction-section {
     grid-template-columns: 1fr;
   }
 
-  .marketing-workflow article,
+  .marketing-workflow li,
   .marketing-form-ledger li,
+  .marketing-values li,
   .marketing-form-ledger li:nth-child(3),
   .marketing-form-ledger li:last-child,
   .schools-measures li,
@@ -1359,12 +1513,25 @@ select:focus-visible {
     border-right: 0;
   }
 
+  .marketing-workflow li:not(:last-child)::after {
+    top: auto;
+    right: auto;
+    bottom: -15px;
+    left: 26px;
+    content: "↓";
+  }
+
   .marketing-workflow h2 {
     margin-top: 56px;
   }
 
   .marketing-form-ledger li {
     min-height: 220px;
+  }
+
+  .marketing-values li {
+    min-height: auto;
+    padding-bottom: 56px;
   }
 
   .marketing-storage-note {
@@ -1452,7 +1619,8 @@ select:focus-visible {
   object-fit: cover;
 }
 
-.marketing-hero-photo figcaption {
+.marketing-hero-photo figcaption,
+.about-showcase figcaption {
   position: absolute;
   z-index: 1;
   right: 18px;
@@ -1716,7 +1884,7 @@ select:focus-visible {
     transition: transform 180ms ease;
   }
 
-  .marketing-workflow article,
+  .marketing-workflow li,
   .marketing-pattern-list > div,
   .marketing-form-ledger li,
   .schools-measures li,
@@ -1724,7 +1892,7 @@ select:focus-visible {
     transition: background-color 220ms ease, transform 220ms ease;
   }
 
-  .marketing-workflow article:hover,
+  .marketing-workflow li:hover,
   .marketing-pattern-list > div:hover,
   .marketing-form-ledger li:hover,
   .schools-measures li:hover,
@@ -1831,6 +1999,7 @@ select:focus-visible {
   .marketing-root [data-stage],
   .marketing-root [data-reveal],
   .marketing-root [data-parallax-media],
+  .marketing-root [data-product-flow-step],
   .marketing-root [data-product-story-copy] {
     opacity: 1 !important;
     transform: none !important;

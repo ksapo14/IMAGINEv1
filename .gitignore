@@ -4,6 +4,7 @@ out/
 dist/
 build/
 .vinext/
+.vercel/
 .wrangler/
 outputs/
 work/
@@ -11,7 +12,8 @@ __pycache__/
 .venv/
 *.pyc
 .env
-.env.local
+.env.*
+!.env.example
 *.log
 *.tsbuildinfo
 .cache/

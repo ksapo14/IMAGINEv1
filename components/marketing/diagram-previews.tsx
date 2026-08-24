@@ -1,201 +1,92 @@
-import { DiagramRenderer } from "@/components/building-blocks";
-import type { BuildingBlockDiagramData } from "@/components/building-blocks";
+import { StickScene } from "@/components/workspace/stick-scene";
+import type { StickScene as StickSceneData } from "@/components/workspace/types";
 
-export const prepareDiagram: BuildingBlockDiagramData = {
-  version: 3,
-  type: "flowchart",
-  title: "Cellular energy sequence",
-  description: "A prepared process visual for the lesson.",
-  lines: [
-    {
-      type: "blockLine",
-      id: "prepared-energy-line",
-      blocks: [
-        {
-          type: "block",
-          id: "prepared-glucose",
-          heading: "Glucose",
-          description: "Stored chemical energy"
-        },
-        {
-          type: "block",
-          id: "prepared-respiration",
-          heading: "Cellular respiration",
-          description: "Energy is transferred"
-        },
-        {
-          type: "block",
-          id: "prepared-atp",
-          heading: "ATP",
-          description: "Usable cellular energy"
-        }
-      ]
-    }
+/** Static examples share the same bounded scene vocabulary as the live board. */
+export const lessonContextScene: StickSceneData = {
+  version: 1,
+  columns: 12,
+  rows: 8,
+  entities: [
+    { id: "lesson", type: "rectangle", x: 0.8, y: 2, width: 3, height: 2, label: "Lesson context", pose: "neutral", facing: "front" },
+    { id: "speech", type: "stickFigure", x: 4.7, y: 1.4, width: 2, height: 3.4, label: "Final speech", pose: "pointing", facing: "right" },
+    { id: "board", type: "rectangle", x: 8.2, y: 2, width: 3, height: 2, label: "Live board", pose: "neutral", facing: "front" }
+  ],
+  connections: [
+    { id: "lesson-speech", fromId: "lesson", toId: "speech", label: "guides", direction: "forward" },
+    { id: "speech-board", fromId: "speech", toId: "board", label: "directs", direction: "forward" }
   ]
 };
 
-export const liveDiagram: BuildingBlockDiagramData = {
-  version: 3,
-  type: "mindMap",
-  title: "Live explanation map",
-  description: "Finalized speech organized around the current idea.",
-  center: {
-    type: "round",
-    id: "live-center",
-    heading: "Cellular respiration",
-    description: "The idea being explained"
-  },
-  surrounding: [
-    {
-      type: "round",
-      id: "live-input",
-      heading: "Inputs",
-      description: "Glucose and oxygen"
-    },
-    {
-      type: "round",
-      id: "live-location",
-      heading: "Location",
-      description: "Across the cell"
-    },
-    {
-      type: "round",
-      id: "live-output",
-      heading: "Output",
-      description: "ATP for cellular work"
-    }
+export const createScene: StickSceneData = {
+  version: 1,
+  columns: 12,
+  rows: 8,
+  entities: [
+    { id: "glucose", type: "circle", x: 0.7, y: 2.2, width: 2, height: 2, label: "Glucose", pose: "neutral", facing: "front" },
+    { id: "cell", type: "stickFigure", x: 4.8, y: 1.2, width: 2, height: 3.8, label: "Cell", pose: "holding", facing: "front" },
+    { id: "atp", type: "rectangle", x: 9, y: 2.2, width: 2, height: 2, label: "ATP", pose: "neutral", facing: "front" }
+  ],
+  connections: [
+    { id: "glucose-cell", fromId: "glucose", toId: "cell", label: "energy", direction: "forward" },
+    { id: "cell-atp", fromId: "cell", toId: "atp", label: "releases", direction: "forward" }
   ]
 };
 
-export const recallDiagram: BuildingBlockDiagramData = {
-  version: 3,
-  type: "tree",
-  title: "Stored lesson visual",
-  description: "Recalled locally by its exact prepared phrase.",
-  root: {
-    id: "recall-root",
-    heading: "Cellular energy",
-    description: "Prepared diagram",
-    children: [
-      {
-        id: "recall-input",
-        heading: "Inputs",
-        description: "Glucose and oxygen",
-        children: []
-      },
-      {
-        id: "recall-process",
-        heading: "Process",
-        description: "Respiration stages",
-        children: []
-      },
-      {
-        id: "recall-output",
-        heading: "Outputs",
-        description: "ATP, water, carbon dioxide",
-        children: []
-      }
-    ]
-  }
-};
-
-export const educatorControlDiagram: BuildingBlockDiagramData = {
-  version: 3,
-  type: "flowchart",
-  title: "Educator-controlled canvas",
-  description: "Ordinary speech and exact recall remain distinct actions.",
-  lines: [
-    {
-      type: "blockLine",
-      id: "educator-live-line",
-      blocks: [
-        {
-          type: "block",
-          id: "educator-speech",
-          heading: "Finalized speech",
-          description: "The explanation continues"
-        },
-        {
-          type: "block",
-          id: "educator-live",
-          heading: "Live canvas",
-          description: "Notes and useful visuals"
-        }
-      ]
-    },
-    {
-      type: "blockLine",
-      id: "educator-recall-line",
-      blocks: [
-        {
-          type: "block",
-          id: "educator-command",
-          heading: "Exact Imagine command",
-          description: "The educator chooses the moment"
-        },
-        {
-          type: "block",
-          id: "educator-stored",
-          heading: "Stored diagram",
-          description: "Revealed without generation"
-        }
-      ]
-    }
+export const updateScene: StickSceneData = {
+  version: 1,
+  columns: 12,
+  rows: 8,
+  entities: [
+    { id: "teacher", type: "stickFigure", x: 0.8, y: 1.1, width: 2, height: 4, label: "Educator", pose: "pointing", facing: "right" },
+    { id: "respiration", type: "rectangle", x: 4, y: 1.7, width: 3.2, height: 2.4, label: "Respiration", pose: "neutral", facing: "front" },
+    { id: "oxygen", type: "circle", x: 9, y: 0.6, width: 1.7, height: 1.7, label: "Oxygen", pose: "neutral", facing: "front" },
+    { id: "atp", type: "circle", x: 9, y: 4, width: 1.7, height: 1.7, label: "ATP", pose: "neutral", facing: "front" }
+  ],
+  connections: [
+    { id: "teacher-process", fromId: "teacher", toId: "respiration", label: "explains", direction: "forward" },
+    { id: "oxygen-process", fromId: "oxygen", toId: "respiration", label: "input", direction: "backward" },
+    { id: "process-atp", fromId: "respiration", toId: "atp", label: "output", direction: "forward" }
   ]
 };
 
-export const pilotDiagram: BuildingBlockDiagramData = {
-  version: 3,
-  type: "mindMap",
-  title: "Pilot review",
-  description: "The measures considered together during a school pilot.",
-  center: {
-    type: "round",
-    id: "pilot-center",
-    heading: "Pilot review",
-    description: "School context"
-  },
-  surrounding: [
-    {
-      type: "round",
-      id: "pilot-prep",
-      heading: "Prep effort",
-      description: "Before the lesson"
-    },
-    {
-      type: "round",
-      id: "pilot-usability",
-      heading: "Usability",
-      description: "Educator experience"
-    },
-    {
-      type: "round",
-      id: "pilot-recall",
-      heading: "Recall",
-      description: "Prepared phrase reliability"
-    },
-    {
-      type: "round",
-      id: "pilot-continuity",
-      heading: "Continuity",
-      description: "Lesson flow"
-    },
-    {
-      type: "round",
-      id: "pilot-signal",
-      heading: "Local signal",
-      description: "Selected by the school"
-    }
+export const cumulativeBoardScene: StickSceneData = {
+  version: 1,
+  columns: 12,
+  rows: 8,
+  entities: [
+    { id: "first", type: "rectangle", x: 0.7, y: 1, width: 3, height: 2, label: "Earlier idea", pose: "neutral", facing: "front" },
+    { id: "second", type: "rectangle", x: 4.5, y: 3.8, width: 3, height: 2, label: "Updated idea", pose: "neutral", facing: "front" },
+    { id: "third", type: "rectangle", x: 8.3, y: 1, width: 3, height: 2, label: "New idea", pose: "neutral", facing: "front" }
+  ],
+  connections: [
+    { id: "first-second", fromId: "first", toId: "second", label: "connects", direction: "forward" },
+    { id: "second-third", fromId: "second", toId: "third", label: "extends", direction: "forward" }
   ]
 };
 
-export function MarketingDiagramPreview({
-  diagram,
+export const pilotReviewScene: StickSceneData = {
+  version: 1,
+  columns: 12,
+  rows: 8,
+  entities: [
+    { id: "educator", type: "stickFigure", x: 0.7, y: 1.4, width: 2, height: 3.6, label: "Educator", pose: "neutral", facing: "right" },
+    { id: "review", type: "rectangle", x: 4.4, y: 2, width: 3.2, height: 2, label: "Pilot review", pose: "neutral", facing: "front" },
+    { id: "school", type: "stickFigure", x: 9.2, y: 1.4, width: 2, height: 3.6, label: "School", pose: "neutral", facing: "left" }
+  ],
+  connections: [
+    { id: "educator-review", fromId: "educator", toId: "review", label: "experience", direction: "forward" },
+    { id: "school-review", fromId: "school", toId: "review", label: "evidence", direction: "forward" }
+  ]
+};
+
+/** Render an illustrative, non-live preview without model-authored markup. */
+export function MarketingScenePreview({
+  scene,
   alt,
   compact = false,
   parallax = false
 }: {
-  diagram: BuildingBlockDiagramData;
+  scene: StickSceneData;
   alt: string;
   compact?: boolean;
   parallax?: boolean;
@@ -206,7 +97,7 @@ export function MarketingDiagramPreview({
       data-parallax-media={parallax ? "" : undefined}
     >
       <div className="marketing-diagram-preview-canvas">
-        <DiagramRenderer diagram={diagram} alt={alt} motion="none" />
+        <StickScene scene={scene} label={alt} />
       </div>
     </div>
   );

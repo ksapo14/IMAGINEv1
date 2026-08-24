@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import {
   FormEvent,
   KeyboardEvent,
@@ -9,83 +10,60 @@ import {
   useRef,
   useState
 } from "react";
-import Image from "next/image";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
-import {
-  ArrowUp,
-  BookOpen,
-  Command,
-  Library,
-  Loader2,
-  Mic,
-  MicOff,
-  Plus,
-  Sparkles,
-  Trash2
-} from "lucide-react";
+import { ArrowLeft, ArrowUp, BookOpen, ChevronLeft, ChevronRight, Library, Loader2, Mic, MicOff, Plus, Sparkles, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  CompositionCard,
-  CompositionView,
-  paletteClasses
-} from "@/components/workspace/composition-view";
+import { LiveWhiteboard, type SceneAnimationRequest } from "@/components/workspace/live-whiteboard";
 import type {
-  CompositionBlock,
   DeepgramMessage,
   DeepgramStatusResponse,
-  GenerateResponse,
-  LessonPack,
+  GenerateRequest,
+  LessonContextRecord,
+  RecentTurn,
   SpeechStatus,
-  VisualJobResponse
+  VisualJobResponse,
+  WhiteboardState
 } from "@/components/workspace/types";
+import { FRONTEND_ONLY_NOTICE, isFrontendOnlyDeployment } from "@/lib/deployment-mode";
+import { API_BASE_URL, streamGeneration } from "@/lib/generation-stream";
+import { loadLessonLibrary, removeLesson, saveLessonLibrary, upsertLesson } from "@/lib/lesson-library";
 import {
-  findPreparedVisual,
-  getDuplicateRecallPhrases,
-  getPreparedVisuals,
-  loadLessonLibrary,
-  normalizeRecallPhrase,
-  parseRecallCommand,
-  removeLesson,
-  saveLessonLibrary,
-  upsertLesson,
-  withBlockRecallPhrases
-} from "@/lib/lesson-library";
-import {
-  API_BASE_URL,
-  extractReadableDraft,
-  streamGeneration,
-  type GenerationMode
-} from "@/lib/generation-stream";
-import {
-  beginsWithImagineCommand,
+  consumeWakeCommand,
   dequeueLiveTurn,
   enqueueLiveTurn,
+  IDLE_WAKE_COMMAND_STATE,
   isDuplicateFinalizedSpeech,
   type FinalizedSpeechTurn,
-  type QueuedLiveTurn
+  type QueuedLiveTurn,
+  type WakeCommandState
 } from "@/lib/live-session";
-import { deriveCompositionSummary } from "@/lib/composition-summary";
 
-type DashboardTab = "prepare" | "library" | "live";
+import { appendRecentTurn, applyBoardDecision, cancelRemovedVisualJobs, cancelSupersededVisualJob, EMPTY_WHITEBOARD, getBoardDigest, getConceptMemory, patchGeneratedAsset, sceneOwnsVisualJob, settlePendingVisualJobs } from "@/lib/whiteboard-session";
+import {
+  createEmptyWhiteboardSession,
+  loadWhiteboardSessionStore,
+  saveWhiteboardSessionStore,
+  type DashboardTab,
+  type WhiteboardSession
+} from "@/lib/whiteboard-session-storage";
 
-type PreparedLessonMeta = {
-  id: string;
-  title: string;
-  subject: string;
-  source: string;
-  createdAt: string;
-};
+/** Local menu glyph avoids depending on a cloud-only Lucide source-map file. */
+function MoreMenuIcon() {
+  return (
+    <svg aria-hidden="true" className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
+      <circle cx="12" cy="5" r="1.75" />
+      <circle cx="12" cy="12" r="1.75" />
+      <circle cx="12" cy="19" r="1.75" />
+    </svg>
+  );
+}
 
-const tabs: Array<{
-  id: DashboardTab;
-  label: string;
-  icon: typeof Sparkles;
-}> = [
-  { id: "prepare", label: "Prepare", icon: Sparkles },
-  { id: "library", label: "Library", icon: Library },
-  { id: "live", label: "Live canvas", icon: BookOpen }
+const tabs = [
+  { id: "prepare" as const, label: "Lesson context", icon: Sparkles },
+  { id: "library" as const, label: "Library", icon: Library },
+  { id: "live" as const, label: "Live whiteboard", icon: BookOpen }
 ];
 
 function getTranscriptionWsUrl() {
@@ -105,356 +83,221 @@ function getTranscriptionStatusUrl() {
 }
 
 function getPreferredAudioMimeType() {
-  if (typeof MediaRecorder === "undefined") {
-    return "";
-  }
-  return (
-    ["audio/webm;codecs=opus", "audio/webm"].find((mimeType) =>
-      MediaRecorder.isTypeSupported(mimeType)
-    ) ?? ""
-  );
+  if (typeof MediaRecorder === "undefined") return "";
+  return ["audio/webm;codecs=opus", "audio/webm"].find((type) => MediaRecorder.isTypeSupported(type)) ?? "";
 }
 
 function getDeepgramFailureMessage(message: DeepgramMessage) {
-  return (
-    message.message ??
-    message.description ??
-    message.code ??
-    "Speech transcription failed."
-  );
+  return message.message ?? message.description ?? message.code ?? "Speech transcription failed.";
 }
 
 async function fetchDeepgramStatus() {
-  const response = await fetch(getTranscriptionStatusUrl(), {
-    cache: "no-store",
-    signal: AbortSignal.timeout(8000)
-  });
-  if (!response.ok) {
-    throw new Error("The local backend could not check transcription status.");
-  }
+  if (isFrontendOnlyDeployment()) throw new Error(FRONTEND_ONLY_NOTICE);
+  const response = await fetch(getTranscriptionStatusUrl(), { cache: "no-store", signal: AbortSignal.timeout(8000) });
+  if (!response.ok) throw new Error("The local backend could not check transcription status.");
   return (await response.json()) as DeepgramStatusResponse;
 }
 
-async function fetchVisualJob(jobId: string, signal?: AbortSignal) {
-  const response = await fetch(`${API_BASE_URL}/api/visual/${jobId}`, {
-    cache: "no-store",
-    signal
-  });
-  if (!response.ok) {
-    throw new Error("The visual request could not be completed.");
-  }
+async function fetchVisualJob(jobId: string, signal: AbortSignal) {
+  if (isFrontendOnlyDeployment()) throw new Error(FRONTEND_ONLY_NOTICE);
+  const response = await fetch(`${API_BASE_URL}/api/visual/${jobId}`, { cache: "no-store", signal });
+  if (!response.ok) throw new Error("The optional image request could not be completed.");
   return (await response.json()) as VisualJobResponse;
 }
 
 function createLessonId() {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
   return `lesson-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-function lessonStatus(result: GenerateResponse) {
-  if (result.blocks.some((block) => Boolean(block.visualJobId))) {
-    return "generating" as const;
-  }
-  if (
-    result.blocks.some(
-      (block) =>
-        (block.kind === "diagram" || block.kind === "image") && !block.visual
-    )
-  ) {
-    return "partial" as const;
-  }
-  return "ready" as const;
-}
-
-function withVisualJobResult(
-  composition: GenerateResponse,
-  job: VisualJobResponse
-): GenerateResponse {
-  return {
-    ...composition,
-    blocks: composition.blocks.map((block) =>
-      block.blockId === job.blockId
-        ? {
-            ...block,
-            visual: job.visual,
-            visualJobId: null,
-            visualFailed: job.status === "failed"
-          }
-        : block
-    ),
-    warning: job.warning ?? composition.warning
-  };
-}
-
-function withFailedVisualJob(
-  composition: GenerateResponse,
-  jobId: string
-): GenerateResponse {
-  return {
-    ...composition,
-    blocks: composition.blocks.map((block) =>
-      block.visualJobId === jobId
-        ? { ...block, visualJobId: null, visualFailed: true }
-        : block
-    )
-  };
-}
-
-function getLessonPrompt(meta: PreparedLessonMeta) {
-  return [
-    `Lesson title: ${meta.title}`,
-    meta.subject ? `Subject or course: ${meta.subject}.` : "",
-    "Lesson material:",
-    meta.source
-  ]
-    .filter(Boolean)
-    .join("\n\n");
-}
-
-function StatusBanner({
-  error,
-  warning,
-  notice
-}: {
-  error: string;
-  warning: string;
-  notice: string;
-}) {
+function StatusBanner({ error, warning, notice }: { error: string; warning: string; notice: string }) {
   const message = error || warning || notice;
-  if (!message) {
-    return null;
-  }
+  if (!message) return null;
   const tone = error
-    ? "border-red-300 bg-red-50 text-red-800"
+    ? "bg-red-50/90 text-red-800"
     : warning
-      ? "border-amber-300 bg-amber-50 text-amber-900"
-      : "border-[var(--line)] bg-[var(--panel)] text-[var(--text)]";
-  return (
-    <div
-      role={error ? "alert" : "status"}
-      className={`fixed left-1/2 top-[82px] z-50 w-[min(calc(100%-32px),620px)] -translate-x-1/2 rounded-lg border px-5 py-3 text-center text-sm ${tone}`}
-    >
-      {message}
-    </div>
-  );
-}
-
-function StreamingDraft({ text }: { text: string }) {
-  return (
-    <section
-      aria-live="polite"
-      className="dashboard-reveal min-h-[420px] overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--panel)] p-7 sm:p-10"
-    >
-      <div className="mb-12 flex items-center justify-between">
-        <span className="font-[var(--mono)] text-[10px] uppercase tracking-[0.12em] text-[var(--text-soft)]">
-          Live completion
-        </span>
-        <span className="inline-flex items-center gap-2 text-xs text-[var(--text-soft)]">
-          <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--signal)]" />
-          Writing now
-        </span>
-      </div>
-      <p className="max-w-4xl font-[var(--display)] text-[clamp(2rem,5vw,4.5rem)] font-medium leading-[1.02] tracking-[-0.035em] text-[var(--text)]">
-        {text || "Listening for the first idea…"}
-        <span className="ml-1 inline-block h-[0.9em] w-[3px] animate-pulse bg-[var(--signal)] align-[-0.08em]" />
-      </p>
-    </section>
-  );
-}
-
-function EmptyCanvas({ onPrepare }: { onPrepare: () => void }) {
-  return (
-    <section className="dashboard-reveal mx-auto grid min-h-[55dvh] w-full place-items-center rounded-xl border border-dashed border-[var(--line)] bg-[var(--panel)] text-center">
-      <div>
-        <BookOpen className="mx-auto h-8 w-8 text-[var(--signal)]" />
-        <h1 className="mt-5 text-3xl font-semibold">Live canvas ready</h1>
-        <button
-          type="button"
-          onClick={onPrepare}
-          className="mt-6 text-sm font-semibold text-[var(--canvas-text)] underline decoration-[var(--signal)] decoration-2 underline-offset-8"
-        >
-          Prepare diagrams
-        </button>
-      </div>
-    </section>
-  );
+      ? "bg-amber-50/90 text-amber-900"
+      : "bg-white/85 text-neutral-900";
+  return <div role={error ? "alert" : "status"} className={`fixed left-1/2 top-[76px] z-50 w-[min(calc(100%-32px),620px)] -translate-x-1/2 rounded-2xl px-5 py-3 text-center text-sm shadow-[0_10px_35px_rgba(80,70,50,0.12)] backdrop-blur-xl ${tone}`}>{message}</div>;
 }
 
 export default function CanvasPage() {
+  const frontendOnly = isFrontendOnlyDeployment();
   const [activeTab, setActiveTab] = useState<DashboardTab>("prepare");
-  const [lessons, setLessons] = useState<LessonPack[]>([]);
-  const [libraryReady, setLibraryReady] = useState(false);
+  const [lessons, setLessons] = useState<LessonContextRecord[]>([]);
+  const [workspaceReady, setWorkspaceReady] = useState(false);
   const [selectedLessonId, setSelectedLessonId] = useState("");
-  const [preparedLessonId, setPreparedLessonId] = useState("");
   const [lessonTitle, setLessonTitle] = useState("");
   const [lessonSubject, setLessonSubject] = useState("");
   const [lessonSource, setLessonSource] = useState("");
+  const [board, setBoard] = useState<WhiteboardState>(EMPTY_WHITEBOARD);
+  const [recentTurns, setRecentTurns] = useState<RecentTurn[]>([]);
+  const [turnSequenceValue, setTurnSequenceValue] = useState(0);
+  const [sessionRevision, setSessionRevision] = useState(0);
   const [capturedInput, setCapturedInput] = useState("");
   const [liveTranscript, setLiveTranscript] = useState("");
-  const [streamDraft, setStreamDraft] = useState("");
   const [error, setError] = useState("");
+  const [warning, setWarning] = useState("");
   const [notice, setNotice] = useState("");
-  const [generationWarning, setGenerationWarning] = useState("");
-  const [storageNotice, setStorageNotice] = useState("");
+  const [noticeRevision, setNoticeRevision] = useState(0);
+  const [sceneAnimation, setSceneAnimation] = useState<SceneAnimationRequest | null>(null);
+  const [libraryStorageNotice, setLibraryStorageNotice] = useState("");
+  const [sessionStorageNotice, setSessionStorageNotice] = useState("");
   const [speechNotice, setSpeechNotice] = useState("");
   const [speechStatus, setSpeechStatus] = useState<SpeechStatus>("idle");
-  const [result, setResult] = useState<GenerateResponse | null>(null);
-  const [presentedBlock, setPresentedBlock] = useState<CompositionBlock | null>(null);
+  const [wakePhase, setWakePhase] = useState<WakeCommandState["phase"]>("idle");
   const [isGenerating, setIsGenerating] = useState(false);
 
   const shellRef = useRef<HTMLElement | null>(null);
+  const boardRef = useRef(board);
+  const recentTurnsRef = useRef(recentTurns);
+  const sessionCache = useRef<Map<string, WhiteboardSession>>(new Map());
   const mediaRecorder = useRef<MediaRecorder | null>(null);
   const microphoneStream = useRef<MediaStream | null>(null);
   const transcriptionSocket = useRef<WebSocket | null>(null);
   const transcriptionSessionId = useRef(0);
+  const boardSessionId = useRef(0);
   const generationInFlight = useRef(false);
   const generationAbortController = useRef<AbortController | null>(null);
   const generationRequestId = useRef(0);
-  const resultOwner = useRef<{ requestId: number; lessonId: string | null } | null>(
-    null
-  );
-  const lessonRequestIds = useRef<Map<string, number>>(new Map());
-  const rawStreamDraft = useRef("");
-  const activeVisualJobs = useRef<Set<string>>(new Set());
   const visualJobControllers = useRef<Map<string, AbortController>>(new Map());
-  const pendingLesson = useRef<PreparedLessonMeta | null>(null);
-  const dispatchTurnRef = useRef<
-    ((input: string, sequence?: number) => void) | null
-  >(null);
+  const dispatchTurnRef = useRef<((input: string, sequence?: number) => void) | null>(null);
   const ordinaryTurnQueue = useRef<QueuedLiveTurn[]>([]);
   const turnSequence = useRef(0);
-  const presentedTurnSequence = useRef(0);
   const lastFinalizedSpeech = useRef<FinalizedSpeechTurn | null>(null);
+  const wakeCommandState = useRef<WakeCommandState>(IDLE_WAKE_COMMAND_STATE);
+  const wakeExpiryTimer = useRef<number | null>(null);
+  const sceneAnimationSequence = useRef(0);
 
   const selectedLesson = useMemo(
     () => lessons.find((lesson) => lesson.id === selectedLessonId) ?? null,
     [lessons, selectedLessonId]
   );
-  const preparedLesson = useMemo(
-    () => lessons.find((lesson) => lesson.id === preparedLessonId) ?? null,
-    [lessons, preparedLessonId]
-  );
-  const liveSummary = useMemo(() => {
-    if (presentedBlock && selectedLesson) {
-      return {
-        source: "Presented visual",
-        title: presentedBlock.title || selectedLesson.title || "Prepared visual",
-        bullets: deriveCompositionSummary([presentedBlock])
-      };
-    }
-    if (result) {
-      return {
-        source: "Live result",
-        title: result.title || "Live composition",
-        bullets: deriveCompositionSummary(result.blocks)
-      };
-    }
-    if (selectedLesson) {
-      return {
-        source: "Armed lesson",
-        title: selectedLesson.title,
-        bullets: deriveCompositionSummary(selectedLesson.composition.blocks)
-      };
-    }
-    return {
-      source: "Canvas summary",
-      title: "Nothing displayed yet",
-      bullets: []
-    };
-  }, [presentedBlock, result, selectedLesson]);
 
-  useEffect(() => {
-    const loaded = loadLessonLibrary(window.localStorage);
-    setLessons(loaded);
-    setSelectedLessonId(loaded[0]?.id ?? "");
-    setLibraryReady(true);
+  /** A revision restarts dismissal even when two consecutive notices have identical copy. */
+  const showNotice = useCallback((message: string) => {
+    setNotice(message);
+    setNoticeRevision((current) => current + 1);
+  }, []);
+
+  const commitBoard = useCallback((next: WhiteboardState) => {
+    boardRef.current = next;
+    setBoard(next);
+  }, []);
+
+  const commitRecentTurns = useCallback((next: RecentTurn[]) => {
+    recentTurnsRef.current = next;
+    setRecentTurns(next);
+  }, []);
+
+  const commitTurnSequence = useCallback((next: number) => {
+    turnSequence.current = next;
+    setTurnSequenceValue(next);
   }, []);
 
   useEffect(() => {
-    if (!libraryReady) {
-      return;
-    }
-    const write = saveLessonLibrary(window.localStorage, lessons);
-    setStorageNotice(write.ok ? "" : write.message);
-  }, [lessons, libraryReady]);
+    const loaded = loadLessonLibrary(window.localStorage);
+    const restored = loadWhiteboardSessionStore(window.localStorage, loaded.map((lesson) => lesson.id));
+    const restoredSessions = new Map(restored.value.sessions.map((session) => [session.lessonId, session]));
+    const selectedLessonId = restored.value.selectedLessonId;
+    const selectedSession = restoredSessions.get(selectedLessonId) ?? createEmptyWhiteboardSession(selectedLessonId);
+    restoredSessions.set(selectedLessonId, selectedSession);
+    sessionCache.current = restoredSessions;
+    setLessons(loaded);
+    setSelectedLessonId(selectedLessonId);
+    setActiveTab(restored.value.activeTab);
+    commitBoard(selectedSession.board);
+    commitRecentTurns(selectedSession.recentTurns);
+    commitTurnSequence(selectedSession.turnSequence);
+    setSessionStorageNotice(restored.ok ? "" : restored.message);
+    setWorkspaceReady(true);
+  }, [commitBoard, commitRecentTurns, commitTurnSequence]);
 
   useEffect(() => {
-    const meta = pendingLesson.current;
-    const owner = resultOwner.current;
-    if (!meta || !result || owner?.lessonId !== meta.id) {
-      return;
-    }
-    const now = new Date().toISOString();
-    const snapshot: LessonPack = {
-      schemaVersion: 1,
-      ...meta,
-      updatedAt: now,
-      status: lessonStatus(result),
-      composition: result
-    };
-    setLessons((current) => upsertLesson(current, snapshot));
-    setSelectedLessonId((current) => current || snapshot.id);
-    if (snapshot.status !== "generating") {
-      pendingLesson.current = null;
-    }
-  }, [result]);
+    if (!workspaceReady) return;
+    const result = saveLessonLibrary(window.localStorage, lessons);
+    setLibraryStorageNotice(result.ok ? "" : result.message);
+  }, [lessons, workspaceReady]);
 
-  useGSAP(
-    () => {
-      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-        return;
-      }
-      gsap.fromTo(
-        ".dashboard-reveal",
-        { opacity: 0, y: 24 },
-        { opacity: 1, y: 0, duration: 0.65, stagger: 0.07, ease: "power3.out" }
-      );
+  useEffect(() => {
+    if (!workspaceReady) return;
+    sessionCache.current.set(selectedLessonId, {
+      lessonId: selectedLessonId,
+      board: boardRef.current,
+      recentTurns: recentTurnsRef.current,
+      turnSequence: turnSequenceValue,
+      updatedAt: new Date().toISOString()
+    });
+    const result = saveWhiteboardSessionStore(window.localStorage, {
+      activeTab,
+      selectedLessonId,
+      sessions: [...sessionCache.current.values()]
+    });
+    setSessionStorageNotice(result.ok ? "" : result.message);
+  }, [activeTab, board, recentTurns, selectedLessonId, sessionRevision, turnSequenceValue, workspaceReady]);
 
-    },
-    { scope: shellRef, dependencies: [activeTab, lessons.length] }
-  );
+  /** Success, queue, and restore feedback is temporary; errors and live speech use separate state. */
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => {
+      setNotice((current) => current === notice ? "" : current);
+    }, 3500);
+    return () => window.clearTimeout(timer);
+  }, [notice, noticeRevision]);
+
+  useGSAP(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    gsap.fromTo(".dashboard-reveal", { opacity: 0, y: 18 }, { opacity: 1, y: 0, duration: 0.5, stagger: 0.05, ease: "power3.out" });
+  }, { scope: shellRef, dependencies: [activeTab] });
+
+  const setWakeCommandState = useCallback((next: WakeCommandState) => {
+    wakeCommandState.current = next;
+    setWakePhase(next.phase);
+    if (wakeExpiryTimer.current !== null) window.clearTimeout(wakeExpiryTimer.current);
+    wakeExpiryTimer.current = null;
+    if (next.phase === "idle") return;
+    wakeExpiryTimer.current = window.setTimeout(() => {
+      if (wakeCommandState.current.expiresAt !== next.expiresAt) return;
+      wakeCommandState.current = IDLE_WAKE_COMMAND_STATE;
+      setWakePhase("idle");
+      wakeExpiryTimer.current = null;
+    }, Math.max(0, next.expiresAt - Date.now()));
+  }, []);
+
+  /** Clear both wake activation and duplicate suppression at every speech boundary. */
+  const resetSpeechCommandState = useCallback(() => {
+    lastFinalizedSpeech.current = null;
+    setWakeCommandState(IDLE_WAKE_COMMAND_STATE);
+    setLiveTranscript("");
+  }, [setWakeCommandState]);
 
   const dispatchFinalizedTranscript = useCallback((transcript: string) => {
     const cleanTranscript = transcript.trim();
-    if (!cleanTranscript) {
-      return;
-    }
+    if (!cleanTranscript) return;
     const now = Date.now();
-    if (
-      isDuplicateFinalizedSpeech(
-        lastFinalizedSpeech.current,
-        cleanTranscript,
-        now
-      )
-    ) {
+    if (isDuplicateFinalizedSpeech(lastFinalizedSpeech.current, cleanTranscript, now)) {
       setLiveTranscript("");
       return;
     }
     lastFinalizedSpeech.current = { transcript: cleanTranscript, at: now };
-    setCapturedInput("");
+    const result = consumeWakeCommand(wakeCommandState.current, cleanTranscript, now);
+    setWakeCommandState(result.state);
     setLiveTranscript("");
-    dispatchTurnRef.current?.(cleanTranscript);
-  }, []);
+    if (result.command) dispatchTurnRef.current?.(result.command);
+  }, [setWakeCommandState]);
 
   const cleanupTranscription = useCallback((sendStop: boolean) => {
     const recorder = mediaRecorder.current;
-    if (recorder && recorder.state !== "inactive") {
-      recorder.stop();
-    }
+    if (recorder && recorder.state !== "inactive") recorder.stop();
     mediaRecorder.current = null;
     microphoneStream.current?.getTracks().forEach((track) => track.stop());
     microphoneStream.current = null;
-
     const socket = transcriptionSocket.current;
     if (socket) {
       if (sendStop && socket.readyState === WebSocket.OPEN) {
         socket.send("__stop__");
         socket.close(1000, "Microphone stopped");
-      } else if (socket.readyState !== WebSocket.CLOSED) {
-        socket.close();
-      }
+      } else if (socket.readyState !== WebSocket.CLOSED) socket.close();
     }
     transcriptionSocket.current = null;
   }, []);
@@ -462,32 +305,28 @@ export default function CanvasPage() {
   const stopTranscription = useCallback(() => {
     transcriptionSessionId.current += 1;
     cleanupTranscription(true);
-    setLiveTranscript("");
+    resetSpeechCommandState();
     setSpeechStatus("idle");
     setSpeechNotice("");
-  }, [cleanupTranscription]);
+  }, [cleanupTranscription, resetSpeechCommandState]);
 
-  const failTranscription = useCallback(
-    (message: string, sessionId: number) => {
-      if (transcriptionSessionId.current !== sessionId) {
-        return;
-      }
-      transcriptionSessionId.current += 1;
-      cleanupTranscription(false);
-      setLiveTranscript("");
-      setSpeechStatus("idle");
-      setSpeechNotice("");
-      setError(message);
-    },
-    [cleanupTranscription]
-  );
+  const failTranscription = useCallback((message: string, sessionId: number) => {
+    if (transcriptionSessionId.current !== sessionId) return;
+    transcriptionSessionId.current += 1;
+    cleanupTranscription(false);
+    resetSpeechCommandState();
+    setSpeechStatus("idle");
+    setSpeechNotice("");
+    setError(message);
+  }, [cleanupTranscription, resetSpeechCommandState]);
 
   const startTranscription = useCallback(async () => {
+    if (frontendOnly) return;
     if (speechStatus !== "idle") {
       stopTranscription();
       return;
     }
-
+    resetSpeechCommandState();
     setError("");
     setNotice("");
     setSpeechNotice("Checking microphone transcription…");
@@ -500,71 +339,37 @@ export default function CanvasPage() {
     let sessionSocket: WebSocket | null = null;
     let sessionRecorder: MediaRecorder | null = null;
     const releaseSessionResources = () => {
-      const recorder = sessionRecorder as MediaRecorder | null;
-      const stream = sessionStream as MediaStream | null;
-      const socket = sessionSocket as WebSocket | null;
-      if (recorder && recorder.state !== "inactive") {
-        recorder.stop();
-      }
-      stream?.getTracks().forEach((track) => track.stop());
-      if (socket && socket.readyState !== WebSocket.CLOSED) {
-        socket.close();
-      }
+      if (sessionRecorder && sessionRecorder.state !== "inactive") sessionRecorder.stop();
+      sessionStream?.getTracks().forEach((track) => track.stop());
+      if (sessionSocket && sessionSocket.readyState !== WebSocket.CLOSED) sessionSocket.close();
     };
 
     try {
       const status = await fetchDeepgramStatus();
-      if (!ownsSession()) {
-        return;
-      }
-      if (!status.configured || status.apiKeyStatus === "missing") {
-        throw new Error("DEEPGRAM_API_KEY is not configured in .env.");
-      }
-      if (status.apiKeyStatus !== "valid") {
-        throw new Error(status.apiKeyMessage);
-      }
-      if (!navigator.mediaDevices?.getUserMedia) {
-        throw new Error("Microphone capture is not supported in this browser.");
-      }
-
+      if (!ownsSession()) return;
+      if (!status.configured || status.apiKeyStatus === "missing") throw new Error("DEEPGRAM_API_KEY is not configured in .env.");
+      if (status.apiKeyStatus !== "valid") throw new Error(status.apiKeyMessage);
+      if (!navigator.mediaDevices?.getUserMedia) throw new Error("Microphone capture is not supported in this browser.");
       setSpeechNotice("Requesting microphone access…");
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          autoGainControl: true,
-          echoCancellation: true,
-          noiseSuppression: true
-        }
-      });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { autoGainControl: true, echoCancellation: true, noiseSuppression: true } });
       sessionStream = stream;
       if (!ownsSession()) {
         stream.getTracks().forEach((track) => track.stop());
         return;
       }
       microphoneStream.current = stream;
-
       const socket = new WebSocket(getTranscriptionWsUrl());
       sessionSocket = socket;
       transcriptionSocket.current = socket;
       const connectionTimeout = window.setTimeout(() => {
-        if (!ownsSession()) {
-          return;
-        }
-        if (!sessionConnected && socket.readyState !== WebSocket.CLOSED) {
-          failTranscription(
-            "Transcription did not connect within 6 seconds.",
-            sessionId
-          );
-        }
+        if (!ownsSession()) return;
+        if (!sessionConnected && socket.readyState !== WebSocket.CLOSED) failTranscription("Transcription did not connect within 6 seconds.", sessionId);
       }, 6000);
 
       const startRecorder = () => {
-        if (!ownsSession() || sessionRecorder) {
-          return;
-        }
+        if (!ownsSession() || sessionRecorder) return;
         const mimeType = getPreferredAudioMimeType();
-        const recorder = mimeType
-          ? new MediaRecorder(stream, { mimeType })
-          : new MediaRecorder(stream);
+        const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
         sessionRecorder = recorder;
         if (!ownsSession()) {
           stream.getTracks().forEach((track) => track.stop());
@@ -572,47 +377,25 @@ export default function CanvasPage() {
         }
         mediaRecorder.current = recorder;
         recorder.ondataavailable = (event) => {
-          if (
-            !ownsSession() ||
-            event.data.size === 0 ||
-            socket.readyState !== WebSocket.OPEN
-          ) {
-            return;
-          }
+          if (!ownsSession() || event.data.size === 0 || socket.readyState !== WebSocket.OPEN) return;
           void event.data.arrayBuffer().then((buffer) => {
-            if (
-              ownsSession() &&
-              sessionSocket === socket &&
-              socket.readyState === WebSocket.OPEN
-            ) {
-              socket.send(buffer);
-            }
+            if (ownsSession() && sessionSocket === socket && socket.readyState === WebSocket.OPEN) socket.send(buffer);
           });
         };
-        if (!ownsSession()) {
-          return;
-        }
+        if (!ownsSession()) return;
         recorder.start(250);
         setSpeechStatus("listening");
         setSpeechNotice("");
       };
 
       socket.onopen = () => {
-        if (!ownsSession()) {
-          return;
-        }
+        if (!ownsSession()) return;
         setSpeechNotice("Connecting transcription…");
       };
       socket.onmessage = (event) => {
-        if (!ownsSession()) {
-          return;
-        }
+        if (!ownsSession()) return;
         let data: DeepgramMessage;
-        try {
-          data = JSON.parse(event.data as string) as DeepgramMessage;
-        } catch {
-          return;
-        }
+        try { data = JSON.parse(event.data as string) as DeepgramMessage; } catch { return; }
         if (data.type === "Error") {
           window.clearTimeout(connectionTimeout);
           failTranscription(getDeepgramFailureMessage(data), sessionId);
@@ -623,283 +406,243 @@ export default function CanvasPage() {
             sessionConnected = true;
             window.clearTimeout(connectionTimeout);
             startRecorder();
-          } else if (data.status === "connecting_to_deepgram") {
-            setSpeechNotice("Connecting transcription…");
-          }
+          } else if (data.status === "connecting_to_deepgram") setSpeechNotice("Connecting transcription…");
           return;
         }
         if (data.type === "TurnInfo") {
           const transcript = data.transcript?.trim() ?? "";
           setLiveTranscript(transcript);
-          if (data.event === "EndOfTurn") {
-            dispatchFinalizedTranscript(transcript);
-          }
+          if (data.event === "EndOfTurn") dispatchFinalizedTranscript(transcript);
           return;
         }
         const transcript = data.channel?.alternatives?.[0]?.transcript?.trim() ?? "";
         if (data.type === "Results" && transcript) {
           setLiveTranscript(transcript);
-          if (data.speech_final) {
-            dispatchFinalizedTranscript(transcript);
-          }
+          if (data.speech_final) dispatchFinalizedTranscript(transcript);
         }
       };
       socket.onerror = () => {
-        if (!ownsSession()) {
-          return;
-        }
+        if (!ownsSession()) return;
         window.clearTimeout(connectionTimeout);
-        failTranscription(
-          "Transcription websocket connection failed.",
-          sessionId
-        );
+        failTranscription("Transcription websocket connection failed.", sessionId);
       };
       socket.onclose = () => {
-        if (!ownsSession()) {
-          return;
-        }
+        if (!ownsSession()) return;
         window.clearTimeout(connectionTimeout);
-        failTranscription(
-          sessionConnected
-            ? "Transcription websocket closed unexpectedly."
-            : "Transcription websocket closed before connecting.",
-          sessionId
-        );
+        failTranscription(sessionConnected ? "Transcription websocket closed unexpectedly." : "Transcription websocket closed before connecting.", sessionId);
       };
     } catch (speechError) {
       if (!ownsSession()) {
         releaseSessionResources();
         return;
       }
-      failTranscription(
-        speechError instanceof Error
-          ? speechError.message
-          : "Microphone streaming failed.",
-        sessionId
-      );
+      failTranscription(speechError instanceof Error ? speechError.message : "Microphone streaming failed.", sessionId);
     }
-  }, [dispatchFinalizedTranscript, failTranscription, speechStatus, stopTranscription]);
+  }, [dispatchFinalizedTranscript, failTranscription, frontendOnly, resetSpeechCommandState, speechStatus, stopTranscription]);
 
   useEffect(() => () => stopTranscription(), [stopTranscription]);
-  useEffect(() => {
-    const controllers = visualJobControllers.current;
-    const jobs = activeVisualJobs.current;
-    return () => {
-      generationAbortController.current?.abort();
-      jobs.clear();
-      controllers.forEach((controller) => controller.abort());
-      controllers.clear();
-    };
+  useEffect(() => () => {
+    generationAbortController.current?.abort();
+    visualJobControllers.current.forEach((controller) => controller.abort());
+    visualJobControllers.current.clear();
   }, []);
 
-  const displayValue = liveTranscript
-    ? capturedInput.trim()
-      ? `${capturedInput.trimEnd()} ${liveTranscript}`
-      : liveTranscript
-    : capturedInput;
-
-  const patchVisualBlock = useCallback((
-    job: VisualJobResponse,
-    requestId: number,
-    lessonId: string | null
-  ) => {
-    setResult((current) =>
-      current && resultOwner.current?.requestId === requestId
-        ? withVisualJobResult(current, job)
-        : current
+  const pollVisualJob = useCallback(async (jobId: string, sceneId: string, sessionId: number) => {
+    if (frontendOnly) return;
+    const controller = new AbortController();
+    visualJobControllers.current.set(jobId, controller);
+    const ownsVisualJob = () => (
+      !controller.signal.aborted
+      && boardSessionId.current === sessionId
+      && visualJobControllers.current.get(jobId) === controller
+      && sceneOwnsVisualJob(boardRef.current, sceneId, jobId)
     );
-    if (lessonId) {
-      setLessons((current) =>
-        current.map((lesson) => {
-          if (lesson.id !== lessonId) {
-            return lesson;
-          }
-          const composition = withVisualJobResult(lesson.composition, job);
-          const status = lessonStatus(composition);
-          if (status !== "generating" && pendingLesson.current?.id === lessonId) {
-            pendingLesson.current = null;
-          }
-          return {
-            ...lesson,
-            composition,
-            status,
-            updatedAt: new Date().toISOString()
-          };
-        })
-      );
-    }
-  }, []);
-
-  const markVisualJobFailed = useCallback((
-    jobId: string,
-    requestId: number,
-    lessonId: string | null
-  ) => {
-    setResult((current) =>
-      current && resultOwner.current?.requestId === requestId
-        ? withFailedVisualJob(current, jobId)
-        : current
-    );
-    if (lessonId) {
-      setLessons((current) =>
-        current.map((lesson) => {
-          if (lesson.id !== lessonId) {
-            return lesson;
-          }
-          const composition = withFailedVisualJob(lesson.composition, jobId);
-          if (pendingLesson.current?.id === lessonId) {
-            pendingLesson.current = null;
-          }
-          return {
-            ...lesson,
-            composition,
-            status: "partial",
-            updatedAt: new Date().toISOString()
-          };
-        })
-      );
-    }
-  }, []);
-
-  const pollVisualJob = useCallback(
-    async (jobId: string, requestId: number, lessonId: string | null) => {
-      activeVisualJobs.current.add(jobId);
-      const controller = new AbortController();
-      visualJobControllers.current.set(jobId, controller);
-      try {
-        for (let attempt = 0; attempt < 100; attempt += 1) {
-          await new Promise((resolve) => window.setTimeout(resolve, 1000));
-          if (!activeVisualJobs.current.has(jobId)) {
-            return;
-          }
-          const job = await fetchVisualJob(jobId, controller.signal);
-          if (job.status === "pending") {
-            continue;
-          }
-          activeVisualJobs.current.delete(jobId);
-          patchVisualBlock(job, requestId, lessonId);
-          if (job.warning && resultOwner.current?.requestId === requestId) {
-            setGenerationWarning(job.warning);
-          }
-          return;
-        }
-        activeVisualJobs.current.delete(jobId);
-        markVisualJobFailed(jobId, requestId, lessonId);
-        if (resultOwner.current?.requestId === requestId) {
-          setGenerationWarning("A visual could not be completed in time.");
-        }
-      } catch (visualError) {
-        if (!controller.signal.aborted) {
-          activeVisualJobs.current.delete(jobId);
-          markVisualJobFailed(jobId, requestId, lessonId);
-          if (resultOwner.current?.requestId === requestId) {
-            setGenerationWarning(
-              visualError instanceof Error
-                ? visualError.message
-                : "The visual request could not be completed."
-            );
-          }
-        }
-      } finally {
-        visualJobControllers.current.delete(jobId);
-      }
-    },
-    [markVisualJobFailed, patchVisualBlock]
-  );
-
-  const runGeneration = useCallback(
-    async (
-      submittedInput: string,
-      mode: GenerationMode,
-      liveTurnSequence = 0
-    ) => {
-      if (!submittedInput.trim() || generationInFlight.current) {
+    try {
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        if (!ownsVisualJob()) return;
+        await new Promise((resolve) => window.setTimeout(resolve, 1000));
+        if (!ownsVisualJob()) return;
+        const job = await fetchVisualJob(jobId, controller.signal);
+        if (!ownsVisualJob()) return;
+        if (job.status === "pending") continue;
+        if (job.sceneId !== sceneId) return;
+        commitBoard(patchGeneratedAsset(boardRef.current, sceneId, job.generatedAsset, job.status === "failed"));
+        if (job.warning) setWarning(job.warning);
         return;
       }
-      const requestId = generationRequestId.current + 1;
-      generationRequestId.current = requestId;
-      const lessonId = mode === "prepare" ? pendingLesson.current?.id ?? null : null;
-      resultOwner.current = { requestId, lessonId };
-      if (lessonId) {
-        lessonRequestIds.current.set(lessonId, requestId);
+      if (ownsVisualJob()) {
+        commitBoard(patchGeneratedAsset(boardRef.current, sceneId, null, true));
+        setWarning("The structured scene is ready, but its optional image timed out.");
       }
-      generationInFlight.current = true;
-      generationAbortController.current?.abort();
-      const controller = new AbortController();
-      generationAbortController.current = controller;
-      rawStreamDraft.current = "";
-      setStreamDraft("");
-      setError("");
-      setNotice("");
-      setGenerationWarning("");
-      setResult(null);
-      if (
-        mode === "live" &&
-        liveTurnSequence > presentedTurnSequence.current
-      ) {
-        setPresentedBlock(null);
+    } catch (jobError) {
+      if (ownsVisualJob()) {
+        commitBoard(patchGeneratedAsset(boardRef.current, sceneId, null, true));
+        setWarning(jobError instanceof Error ? jobError.message : "The optional image could not be completed.");
       }
-      setIsGenerating(true);
+    } finally {
+      if (visualJobControllers.current.get(jobId) === controller) visualJobControllers.current.delete(jobId);
+    }
+  }, [commitBoard, frontendOnly]);
 
-      try {
-        const generated = await streamGeneration(
-          submittedInput,
-          {
-            onDelta: (delta) => {
-              if (
-                mode !== "live" ||
-                generationRequestId.current !== requestId
-              ) {
-                return;
-              }
-              rawStreamDraft.current += delta;
-              setStreamDraft(extractReadableDraft(rawStreamDraft.current));
-            }
-          },
-          controller.signal,
-          mode
-        );
-        if (generationRequestId.current !== requestId) {
-          return;
-        }
-        setResult(generated);
-        setGenerationWarning(generated.warning ?? "");
-        generated.blocks.forEach((block) => {
-          if (block.visualJobId) {
-            void pollVisualJob(block.visualJobId, requestId, lessonId);
-          }
-        });
-      } catch (requestError) {
-        if (!controller.signal.aborted) {
-          setError(
-            requestError instanceof Error
-              ? requestError.message
-              : "The generation request could not be completed."
-          );
-          if (mode === "prepare") {
-            pendingLesson.current = null;
-          }
-        }
-      } finally {
-        if (generationRequestId.current === requestId) {
-          generationInFlight.current = false;
-          setIsGenerating(false);
-          generationAbortController.current = null;
-          if (mode === "live") {
-            const nextTurn = dequeueLiveTurn(ordinaryTurnQueue.current);
-            if (nextTurn) {
-              window.queueMicrotask(() =>
-                dispatchTurnRef.current?.(nextTurn.input, nextTurn.sequence)
-              );
-            }
-          }
+  const runGeneration = useCallback(async (turn: QueuedLiveTurn) => {
+    if (frontendOnly || !turn.input.trim() || generationInFlight.current) return;
+    const sessionId = boardSessionId.current;
+    const requestId = generationRequestId.current + 1;
+    generationRequestId.current = requestId;
+    const controller = new AbortController();
+    generationAbortController.current?.abort();
+    generationAbortController.current = controller;
+    generationInFlight.current = true;
+    setIsGenerating(true);
+    setError("");
+    setWarning("");
+    setNotice("");
+
+    const context = lessons.find((lesson) => lesson.id === selectedLessonId);
+    const request: GenerateRequest = {
+      userInput: turn.input.slice(0, 4000),
+      mode: "live",
+      turnSequence: turn.sequence,
+      lessonContext: context
+        ? { title: context.title, subject: context.subject, source: context.source }
+        : { title: "", subject: "", source: "" },
+      recentTurns: recentTurnsRef.current,
+      concepts: getConceptMemory(boardRef.current),
+      board: getBoardDigest(boardRef.current)
+    };
+
+    try {
+      const decision = await streamGeneration(request, {}, controller.signal);
+      if (controller.signal.aborted || boardSessionId.current !== sessionId || generationRequestId.current !== requestId || decision.turnSequence !== turn.sequence) return;
+      const nextBoard = applyBoardDecision(boardRef.current, decision);
+      if (!nextBoard) {
+        setWarning("A stale board decision was ignored. Please try that thought again.");
+        return;
+      }
+      commitRecentTurns(appendRecentTurn(recentTurnsRef.current, decision, turn.input));
+      const committedSceneId = decision.targetSceneId ?? decision.sceneId;
+      const previousScene = boardRef.current.scenes.find((scene) => scene.sceneId === committedSceneId);
+      const acceptedScene = nextBoard.scenes.find((scene) => scene.sceneId === committedSceneId);
+      const changedBlocks: SceneAnimationRequest["blocks"] = [];
+      if (acceptedScene?.headingMode === "show" && (
+        !previousScene
+        || previousScene.headingMode !== "show"
+        || previousScene.title !== acceptedScene.title
+      )) changedBlocks.push("heading");
+      if (acceptedScene?.contentModes.includes("notes") && (
+        !previousScene
+        || !previousScene.contentModes.includes("notes")
+        || previousScene.summaryBullets.join("\n") !== acceptedScene.summaryBullets.join("\n")
+      )) changedBlocks.push("notes");
+      cancelRemovedVisualJobs(boardRef.current, nextBoard, visualJobControllers.current);
+      cancelSupersededVisualJob(boardRef.current, nextBoard, committedSceneId, visualJobControllers.current);
+      commitBoard(nextBoard);
+      if (changedBlocks.length) {
+        sceneAnimationSequence.current += 1;
+        setSceneAnimation({ sceneId: committedSceneId, revision: sceneAnimationSequence.current, blocks: changedBlocks });
+      } else {
+        setSceneAnimation(null);
+      }
+      showNotice(`${decision.boardStrategy === "reset" ? "Started a new board with" : decision.action === "create" ? "Added" : "Updated"} ${decision.title}.`);
+      if (decision.visualJobId) void pollVisualJob(decision.visualJobId, committedSceneId, sessionId);
+      if (decision.warning) setWarning(decision.warning);
+    } catch (requestError) {
+      if (!controller.signal.aborted && boardSessionId.current === sessionId) {
+        setError(requestError instanceof Error ? requestError.message : "The generation request could not be completed.");
+      }
+    } finally {
+      if (boardSessionId.current === sessionId && generationRequestId.current === requestId) {
+        generationInFlight.current = false;
+        generationAbortController.current = null;
+        setIsGenerating(false);
+        if (!frontendOnly) {
+          const next = dequeueLiveTurn(ordinaryTurnQueue.current);
+          if (next) window.queueMicrotask(() => dispatchTurnRef.current?.(next.input, next.sequence));
         }
       }
-    },
-    [pollVisualJob]
-  );
+    }
+  }, [commitBoard, commitRecentTurns, frontendOnly, lessons, pollVisualJob, selectedLessonId, showNotice]);
 
-  async function handlePrepareSubmit(event: FormEvent<HTMLFormElement>) {
+  const dispatchTeachingTurn = useCallback((rawInput: string, existingSequence?: number) => {
+    if (frontendOnly) return;
+    const input = rawInput.trim();
+    if (!input) return;
+    const sequence = existingSequence ?? turnSequence.current + 1;
+    commitTurnSequence(Math.max(turnSequence.current, sequence));
+    setLiveTranscript("");
+    setError("");
+    const turn = { input, sequence };
+    if (generationInFlight.current) {
+      enqueueLiveTurn(ordinaryTurnQueue.current, turn);
+      showNotice(`Queued live speech (${ordinaryTurnQueue.current.length} waiting).`);
+      return;
+    }
+    void runGeneration(turn);
+  }, [commitTurnSequence, frontendOnly, runGeneration, showNotice]);
+
+  useEffect(() => { dispatchTurnRef.current = dispatchTeachingTurn; }, [dispatchTeachingTurn]);
+
+  /** End work that belongs to the outgoing lesson without touching its durable state. */
+  const cancelLiveTransients = useCallback(() => {
+    boardSessionId.current += 1;
+    generationRequestId.current += 1;
+    generationAbortController.current?.abort();
+    generationAbortController.current = null;
+    visualJobControllers.current.forEach((controller) => controller.abort());
+    visualJobControllers.current.clear();
+    generationInFlight.current = false;
+    ordinaryTurnQueue.current = [];
+    stopTranscription();
+    setCapturedInput("");
+    setLiveTranscript("");
+    setIsGenerating(false);
+    setError("");
+    setWarning("");
+    setSceneAnimation(null);
+  }, [stopTranscription]);
+
+  /** Store an outgoing lesson only after cancelled optional images become safe fallbacks. */
+  const snapshotCurrentSession = useCallback(() => {
+    const settledBoard = settlePendingVisualJobs(boardRef.current);
+    if (settledBoard !== boardRef.current) commitBoard(settledBoard);
+    sessionCache.current.set(selectedLessonId, {
+      lessonId: selectedLessonId,
+      board: settledBoard,
+      recentTurns: recentTurnsRef.current,
+      turnSequence: turnSequence.current,
+      updatedAt: new Date().toISOString()
+    });
+  }, [commitBoard, selectedLessonId]);
+
+  /** Snapshot the mounted board, then restore the selected lesson as one transaction. */
+  const activateLesson = useCallback((lessonId: string, snapshotOutgoing = true) => {
+    if (snapshotOutgoing) snapshotCurrentSession();
+    cancelLiveTransients();
+    const session = sessionCache.current.get(lessonId) ?? createEmptyWhiteboardSession(lessonId);
+    sessionCache.current.set(lessonId, session);
+    commitBoard(session.board);
+    commitRecentTurns(session.recentTurns);
+    commitTurnSequence(session.turnSequence);
+    setSelectedLessonId(lessonId);
+    showNotice(lessonId ? "Lesson whiteboard restored." : "No-context whiteboard restored.");
+    setActiveTab("live");
+  }, [cancelLiveTransients, commitBoard, commitRecentTurns, commitTurnSequence, showNotice, snapshotCurrentSession]);
+
+  /** Fresh board is the only educator action that erases a session. */
+  const startFreshWhiteboard = useCallback((lessonId = selectedLessonId) => {
+    if (lessonId !== selectedLessonId) snapshotCurrentSession();
+    cancelLiveTransients();
+    const blank = createEmptyWhiteboardSession(lessonId);
+    sessionCache.current.set(lessonId, blank);
+    commitBoard(blank.board);
+    commitRecentTurns([]);
+    commitTurnSequence(0);
+    setSelectedLessonId(lessonId);
+    showNotice(lessonId ? "Lesson context armed on a fresh whiteboard." : "Fresh whiteboard ready.");
+    setActiveTab("live");
+  }, [cancelLiveTransients, commitBoard, commitRecentTurns, commitTurnSequence, selectedLessonId, showNotice, snapshotCurrentSession]);
+
+  function saveLessonContext(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const title = lessonTitle.trim();
     const source = lessonSource.trim();
@@ -907,347 +650,164 @@ export default function CanvasPage() {
       setError("Add a lesson title and the material you plan to teach.");
       return;
     }
-    const createdAt = new Date().toISOString();
-    const meta: PreparedLessonMeta = {
+    const now = new Date().toISOString();
+    const lesson: LessonContextRecord = {
+      schemaVersion: 2,
       id: createLessonId(),
-      title,
-      subject: lessonSubject.trim(),
-      source,
-      createdAt
+      title: title.slice(0, 160),
+      subject: lessonSubject.trim().slice(0, 120),
+      source: source.slice(0, 3600),
+      createdAt: now,
+      updatedAt: now
     };
-    pendingLesson.current = meta;
-    setPreparedLessonId(meta.id);
-    await runGeneration(getLessonPrompt(meta), "prepare");
+    setLessons((current) => upsertLesson(current, lesson));
+    sessionCache.current.set(lesson.id, createEmptyWhiteboardSession(lesson.id));
+    activateLesson(lesson.id);
   }
 
-  const dispatchTeachingTurn = useCallback((
-    rawInput: string,
-    existingSequence?: number
-  ) => {
-    const submittedInput = rawInput.trim();
-    if (!submittedInput) {
-      return;
-    }
-    const sequence = existingSequence ?? turnSequence.current + 1;
-    turnSequence.current = Math.max(turnSequence.current, sequence);
-    setCapturedInput("");
-    setLiveTranscript("");
-    setError("");
-    setNotice("");
-
-    const phrase = parseRecallCommand(submittedInput);
-    if (phrase) {
-      if (!selectedLesson) {
-        setNotice("No prepared lesson is armed. Nothing was generated.");
-        return;
-      }
-      const block = findPreparedVisual(selectedLesson, phrase);
-      if (!block) {
-        setNotice(`No prepared visual matches “${phrase}”. Nothing was generated.`);
-        return;
-      }
-      presentedTurnSequence.current = sequence;
-      setPresentedBlock(block);
-      setNotice(`Showing “${block.title || phrase}” from ${selectedLesson.title}.`);
-      return;
-    }
-
-    if (beginsWithImagineCommand(submittedInput)) {
-      setNotice(
-        "Use the complete command: imagine show me <recall phrase>. Nothing was generated."
-      );
-      return;
-    }
-
-    pendingLesson.current = null;
-    const turn = { input: submittedInput, sequence };
-    if (generationInFlight.current) {
-      enqueueLiveTurn(ordinaryTurnQueue.current, turn);
-      setNotice(`Queued live turn ${ordinaryTurnQueue.current.length}.`);
-      return;
-    }
-    void runGeneration(submittedInput, "live", sequence);
-  }, [runGeneration, selectedLesson]);
-
-  useEffect(() => {
-    dispatchTurnRef.current = dispatchTeachingTurn;
-  }, [dispatchTeachingTurn]);
-
-  function handleLiveSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    dispatchTeachingTurn(displayValue);
-  }
-
-  function handleInputKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) {
-      return;
-    }
-    event.preventDefault();
-    event.currentTarget.form?.requestSubmit();
+  function deleteLesson(lessonId: string) {
+    const next = removeLesson(lessons, lessonId);
+    setLessons(next);
+    sessionCache.current.delete(lessonId);
+    if (selectedLessonId === lessonId) activateLesson(next[0]?.id ?? "", false);
+    else setSessionRevision((current) => current + 1);
   }
 
   function selectTab(tab: DashboardTab) {
-    if (isGenerating && tab !== activeTab) {
-      setNotice("Live completion is still writing. Wait for the lesson draft to finish before switching views.");
-      return;
-    }
     if (tab !== "live") {
       stopTranscription();
       setCapturedInput("");
       setLiveTranscript("");
+      setSceneAnimation(null);
     }
     setActiveTab(tab);
-    resultOwner.current = null;
     setError("");
     setNotice("");
-    if (tab === "live") {
-      pendingLesson.current = null;
-      setResult(null);
-    } else if (tab === "prepare" && preparedLesson) {
-      const requestId = lessonRequestIds.current.get(preparedLesson.id) ?? -1;
-      resultOwner.current = { requestId, lessonId: preparedLesson.id };
-      setResult(preparedLesson.composition);
-    }
   }
 
-  function openLesson(lesson: LessonPack, destination: "library" | "live") {
-    const requestId = lessonRequestIds.current.get(lesson.id) ?? -1;
-    resultOwner.current = { requestId, lessonId: lesson.id };
-    setSelectedLessonId(lesson.id);
-    setPreparedLessonId(lesson.id);
-    setResult(destination === "library" ? lesson.composition : null);
-    setPresentedBlock(null);
-    setActiveTab(destination);
+  function handleLiveSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (frontendOnly) return;
+    const typedCommand = capturedInput.trim();
+    if (!typedCommand) return;
+    setCapturedInput("");
+    dispatchTeachingTurn(typedCommand);
   }
 
-  function deleteLesson(lessonId: string) {
-    setLessons((current) => removeLesson(current, lessonId));
-    if (selectedLessonId === lessonId) {
-      const replacement = lessons.find((lesson) => lesson.id !== lessonId);
-      setSelectedLessonId(replacement?.id ?? "");
-    }
-    if (preparedLessonId === lessonId) {
-      setPreparedLessonId("");
-    }
+  function handleInputKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+    event.preventDefault();
+    event.currentTarget.form?.requestSubmit();
   }
 
-  function updateRecallPhrases(
-    lesson: LessonPack,
-    blockId: string,
-    value: string
-  ) {
-    const phrases = value.split(",").map((phrase) => phrase.trim()).filter(Boolean);
-    const updated = withBlockRecallPhrases(lesson, blockId, phrases);
-    const duplicates = getDuplicateRecallPhrases(updated.composition.blocks);
-    if (duplicates.length > 0) {
-      setError(`Recall phrases must be unique. Duplicate: ${duplicates[0]}.`);
-      return;
-    }
-    setError("");
-    setLessons((current) => upsertLesson(current, updated));
-    if (result && lesson.id === preparedLessonId) {
-      setResult(updated.composition);
-    }
-  }
+  const speechStateLabel = speechStatus === "idle"
+    ? "Microphone off"
+    : speechStatus === "connecting"
+      ? "Connecting microphone"
+      : wakePhase === "armed"
+        ? "Armed — say one command"
+        : wakePhase === "heardHey"
+          ? "Wake phrase started — say Imagine"
+          : "Listening for “Hey Imagine”";
+  const pageCount = Math.max(1, ...board.scenes.map((scene) => scene.placement.page));
+  const currentPage = Math.min(board.currentPage, pageCount);
 
-  const activePalette = presentedBlock && selectedLesson
-    ? selectedLesson.composition.theme.palette
-    : result?.theme.palette;
-  const pageTone = activePalette
-    ? paletteClasses[activePalette]
-    : "bg-[var(--canvas-bg)] text-[var(--canvas-text)] transition-colors duration-300";
-  const showCommandDock = activeTab === "live";
+  if (activeTab === "live") {
+    return (
+      <main ref={shellRef} className="flex h-[100dvh] min-h-[100dvh] w-full flex-col overflow-hidden bg-[#fffdf7] text-neutral-950">
+        <a href="#live-board" className="fixed left-3 top-3 z-[100] -translate-y-[calc(100%+28px)] rounded-md bg-[var(--signal)] px-4 py-3 font-semibold text-[var(--signal-ink)] transition-transform focus-visible:translate-y-0">Skip to whiteboard</a>
+        <header className="fixed inset-x-2 top-[max(0.5rem,env(safe-area-inset-top))] z-40 flex items-center gap-2 rounded-2xl bg-white/65 px-2 py-1.5 shadow-[0_8px_32px_rgba(92,78,49,0.08)] backdrop-blur-xl sm:inset-x-4 sm:px-3">
+          <button type="button" onClick={() => selectTab("library")} aria-label="Exit live whiteboard and return to library" className="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl px-2 text-sm font-semibold transition-colors hover:bg-white/70 active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal)] sm:px-3"><ArrowLeft className="h-4 w-4" /><span className="hidden sm:inline">Exit</span></button>
+          <h1 className="min-w-0 flex-1 truncate px-1 text-base font-semibold sm:text-lg">{selectedLesson?.title ?? "Live whiteboard"}</h1>
+          {pageCount > 1 ? (
+            <nav aria-label="Whiteboard pages" className="flex shrink-0 items-center gap-1">
+              <button type="button" aria-label="Previous whiteboard page" disabled={currentPage <= 1} onClick={() => commitBoard({ ...boardRef.current, currentPage: currentPage - 1 })} className="grid h-9 w-9 place-items-center rounded-xl hover:bg-white/70 disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal)]"><ChevronLeft className="h-4 w-4" /></button>
+              <span className="min-w-12 text-center font-[var(--mono)] text-xs tabular-nums">{currentPage}/{pageCount}</span>
+              <button type="button" aria-label="Next whiteboard page" disabled={currentPage >= pageCount} onClick={() => commitBoard({ ...boardRef.current, currentPage: currentPage + 1 })} className="grid h-9 w-9 place-items-center rounded-xl hover:bg-white/70 disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal)]"><ChevronRight className="h-4 w-4" /></button>
+            </nav>
+          ) : null}
+          <details className="group relative shrink-0">
+            <summary aria-label="Open live whiteboard options" className="grid h-10 w-10 cursor-pointer list-none place-items-center rounded-xl hover:bg-white/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal)]"><MoreMenuIcon /></summary>
+            <div className="absolute right-0 top-12 z-50 w-[min(19rem,calc(100vw-1rem))] rounded-2xl bg-white/90 p-3 shadow-[0_18px_55px_rgba(70,60,40,0.16)] backdrop-blur-xl">
+              <label className="text-xs font-semibold text-neutral-600">Lesson whiteboard<select value={selectedLessonId} onChange={(event) => activateLesson(event.target.value)} className="mt-2 h-11 w-full rounded-md border border-neutral-200 bg-white px-3 text-sm text-neutral-900"><option value="">No lesson context</option>{lessons.map((lesson) => <option key={lesson.id} value={lesson.id}>{lesson.title}</option>)}</select></label>
+              <button type="button" onClick={() => startFreshWhiteboard(selectedLessonId)} className="mt-3 h-10 w-full rounded-md border border-neutral-200 text-sm font-semibold hover:bg-neutral-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal)]">Start fresh board</button>
+              <button type="button" onClick={() => selectTab("library")} className="mt-1 h-10 w-full rounded-md text-sm font-semibold hover:bg-neutral-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal)]">Open lesson library</button>
+            </div>
+          </details>
+        </header>
+
+        <StatusBanner error={error} warning={warning || sessionStorageNotice || libraryStorageNotice} notice={notice || speechNotice} />
+        {frontendOnly ? <div id="frontend-only-notice" role="status" aria-live="polite" className="fixed left-1/2 top-[132px] z-30 w-[min(calc(100%-32px),720px)] -translate-x-1/2 rounded-xl border border-amber-200 bg-amber-50/95 px-4 py-2 text-center text-sm font-medium text-amber-950 shadow-sm">{FRONTEND_ONLY_NOTICE}</div> : null}
+        <section id="live-board" className="min-h-0 flex-1">
+          <LiveWhiteboard board={board} animationRequest={sceneAnimation} />
+        </section>
+
+        <form onSubmit={handleLiveSubmit} aria-describedby={frontendOnly ? "frontend-only-notice" : undefined} className="fixed bottom-[max(0.5rem,env(safe-area-inset-bottom))] left-2 right-2 z-40 mx-auto flex w-[min(820px,calc(100%-1rem))] items-end gap-1.5 rounded-2xl bg-white/75 p-1.5 shadow-[0_18px_60px_rgba(70,60,40,0.16)] backdrop-blur-xl sm:gap-2 sm:p-2">
+          <div className="min-w-0 flex-1">
+            {(speechStatus !== "idle" || wakePhase !== "idle" || liveTranscript || isGenerating) ? <div id="speech-command-status" role="status" aria-live="polite" className="flex h-6 min-w-0 items-center gap-2 truncate px-3 text-xs text-neutral-600"><span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${wakePhase === "armed" ? "bg-emerald-500" : speechStatus === "listening" ? "bg-amber-500" : "bg-neutral-400"}`} /><span className="truncate">{isGenerating ? "Preparing board update…" : liveTranscript ? `Heard: ${liveTranscript}` : speechStateLabel}</span></div> : null}
+            <label htmlFor="workspace-input" className="sr-only">Typed teaching command</label>
+            <Textarea id="workspace-input" aria-describedby={frontendOnly ? "frontend-only-notice" : "speech-command-status"} disabled={frontendOnly} value={capturedInput} onChange={(event) => setCapturedInput(event.target.value)} onKeyDown={handleInputKeyDown} placeholder={frontendOnly ? "Live generation is unavailable on this deployment." : "Teach the next idea…"} maxLength={4000} rows={1} className="min-h-12 w-full resize-none rounded-lg border-0 bg-transparent px-3 py-3 text-base text-black caret-black shadow-none placeholder:text-neutral-600 focus-visible:ring-2 focus-visible:ring-[var(--signal)] disabled:cursor-not-allowed disabled:opacity-70" />
+          </div>
+          <Button type="submit" disabled={frontendOnly || !capturedInput.trim()} aria-label="Submit typed teaching command" className="h-12 w-11 shrink-0 rounded-lg bg-[var(--signal)] px-0 text-[var(--signal-ink)] hover:bg-[var(--signal)] active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50 sm:w-12">{isGenerating ? <Loader2 className="h-5 w-5 animate-spin motion-reduce:animate-none" /> : <ArrowUp className="h-5 w-5" />}</Button>
+          <Button type="button" disabled={frontendOnly} onClick={() => void startTranscription()} aria-label={frontendOnly ? "Microphone unavailable on this frontend-only deployment" : speechStatus === "idle" ? "Start microphone" : "Stop microphone"} className={`h-12 w-11 shrink-0 rounded-lg px-0 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50 sm:w-12 ${speechStatus === "idle" ? "bg-[var(--canvas-text)] text-[var(--canvas-bg)]" : "bg-red-600 text-white"}`}>{speechStatus === "connecting" ? <Loader2 className="h-5 w-5 animate-spin motion-reduce:animate-none" /> : speechStatus === "listening" ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}</Button>
+        </form>
+      </main>
+    );
+  }
 
   return (
-    <main
-      ref={shellRef}
-      className="dashboard-root min-h-dvh w-full max-w-full overflow-x-hidden bg-[var(--page)] text-[var(--text)]"
-    >
-      <a
-        href="#workspace"
-        className="fixed left-3 top-3 z-[100] -translate-y-[calc(100%+28px)] rounded-md bg-[var(--signal)] px-4 py-3 font-semibold text-[var(--signal-ink)] transition-transform focus-visible:translate-y-0"
-      >
-        Skip to workspace
-      </a>
-
+    <main ref={shellRef} className="dashboard-root min-h-dvh w-full max-w-full overflow-x-hidden bg-[var(--page)] text-[var(--text)]">
+      <a href="#workspace" className="fixed left-3 top-3 z-[100] -translate-y-[calc(100%+28px)] rounded-md bg-[var(--signal)] px-4 py-3 font-semibold text-[var(--signal-ink)] transition-transform focus-visible:translate-y-0">Skip to workspace</a>
       <header className="fixed inset-x-0 top-0 z-40 border-b border-[var(--line)] bg-[var(--panel)]">
         <div className="mx-auto flex h-[68px] max-w-[1680px] items-center gap-5 px-4 sm:px-6">
-          <div
-            className="inline-flex shrink-0 items-center gap-3 font-[820]"
-            aria-label="Imagine educator workspace"
-          >
+          <div className="inline-flex shrink-0 items-center gap-3 font-[820]" aria-label="Imagine educator workspace">
             <span className="relative h-[30px] w-[30px]" aria-hidden="true">
-              <Image
-                src="/brand/imagineer-shortform.png"
-                alt=""
-                width={30}
-                height={30}
-                className="brand-logo-dark absolute inset-0 rounded-[7px]"
-              />
-              <Image
-                src="/brand/imagineer-shortform-light.png"
-                alt=""
-                width={30}
-                height={30}
-                className="brand-logo-light absolute inset-0 rounded-[7px]"
-              />
+              <Image src="/brand/imagineer-shortform.png" alt="" width={30} height={30} className="brand-logo-dark absolute inset-0 rounded-[7px]" />
+              <Image src="/brand/imagineer-shortform-light.png" alt="" width={30} height={30} className="brand-logo-light absolute inset-0 rounded-[7px]" />
             </span>
             <span className="hidden sm:inline">IMAGINE V1</span>
           </div>
-
           <nav className="mx-auto flex max-w-full items-center gap-1 overflow-x-auto rounded-lg border border-[var(--line)] bg-[var(--page-deep)] p-1" aria-label="Workspace views">
-            {tabs.map(({ id, label, icon: Icon }) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => selectTab(id)}
-                aria-current={activeTab === id ? "page" : undefined}
-                className={`inline-flex h-9 shrink-0 items-center gap-2 rounded-md px-3 text-xs font-semibold transition-colors sm:px-4 ${
-                  activeTab === id
-                    ? "bg-[var(--signal)] text-[var(--signal-ink)]"
-                    : "text-[var(--text-soft)] hover:bg-[var(--panel-strong)] hover:text-[var(--text)]"
-                }`}
-              >
-                <Icon className="h-3.5 w-3.5" aria-hidden="true" />
-                <span>{label}</span>
-              </button>
-            ))}
+            {tabs.map(({ id, label, icon: Icon }) => <button key={id} type="button" onClick={() => selectTab(id)} aria-current={activeTab === id ? "page" : undefined} className={`inline-flex h-9 shrink-0 items-center gap-2 rounded-md px-3 text-sm font-semibold ${activeTab === id ? "bg-[var(--signal)] text-[var(--signal-ink)]" : "text-[var(--text-soft)] hover:bg-[var(--panel-strong)]"}`}><Icon className="h-4 w-4" aria-hidden="true" />{label}</button>)}
           </nav>
         </div>
       </header>
 
-      <StatusBanner
-        error={error}
-        warning={generationWarning || storageNotice}
-        notice={notice || speechNotice}
-      />
-
-      <section
-        id="workspace"
-        className={`relative min-h-dvh px-[max(16px,3.5vw)] pb-40 pt-[104px] sm:pb-32 ${pageTone}`}
-      >
+      <StatusBanner error={error} warning={warning || sessionStorageNotice || libraryStorageNotice} notice={notice || speechNotice} />
+      <section id="workspace" className="min-h-dvh bg-[var(--canvas-bg)] px-[max(16px,3.5vw)] pb-40 pt-[104px] text-[var(--canvas-text)] sm:pb-32">
         {activeTab === "prepare" ? (
-          <div className="mx-auto grid max-w-[1540px] gap-5 lg:grid-cols-12">
-            <form onSubmit={handlePrepareSubmit} className="dashboard-reveal h-max rounded-xl border border-[var(--line)] bg-[var(--panel)] p-6 lg:sticky lg:top-24 lg:col-span-4 lg:p-8">
-              <p className="font-[var(--mono)] text-[10px] uppercase tracking-[0.12em] text-[var(--text-soft)]">Prepare before class</p>
-              <h1 className="mt-5 text-balance text-4xl leading-none">Prepare diagrams</h1>
-              <div className="mt-9 space-y-5">
-                <label className="block text-sm font-semibold">Lesson title<input value={lessonTitle} onChange={(event) => setLessonTitle(event.target.value)} maxLength={120} placeholder="Cellular respiration" className="mt-2 h-12 w-full rounded-lg border border-[var(--line)] bg-[var(--page)] px-4 text-[var(--text)] outline-none focus:border-[var(--signal)]" /></label>
-                <label className="block text-sm font-semibold">Subject <span className="font-normal text-[var(--text-soft)]">optional</span><input value={lessonSubject} onChange={(event) => setLessonSubject(event.target.value)} maxLength={80} placeholder="Biology · Grade 10" className="mt-2 h-12 w-full rounded-lg border border-[var(--line)] bg-[var(--page)] px-4 text-[var(--text)] outline-none focus:border-[var(--signal)]" /></label>
-                <label className="block text-sm font-semibold">Lesson material<Textarea value={lessonSource} onChange={(event) => setLessonSource(event.target.value)} maxLength={3600} rows={12} placeholder="Paste the outline, transcript, or teaching notes you plan to cover…" className="mt-2 min-h-64 resize-y rounded-lg border-[var(--line)] bg-[var(--page)] px-4 py-4 text-[var(--text)]" /></label>
+          <div className="dashboard-reveal mx-auto grid max-w-[1300px] gap-5 lg:grid-cols-[minmax(0,520px)_1fr]">
+            <form onSubmit={saveLessonContext} className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-6 lg:p-8">
+              <p className="font-[var(--mono)] text-xs uppercase tracking-[0.12em] text-[var(--text-soft)]">Context only — no generation</p>
+              <h1 className="mt-5 text-4xl leading-none">Prepare lesson context</h1>
+              <p className="mt-4 text-sm leading-6 text-[var(--text-soft)]">Give the live Visual Director the lesson boundaries it should remember.</p>
+              <div className="mt-8 space-y-5">
+                <label className="block text-sm font-semibold">Lesson title<input value={lessonTitle} onChange={(event) => setLessonTitle(event.target.value)} maxLength={160} className="mt-2 h-12 w-full rounded-lg border border-[var(--line)] bg-[var(--page)] px-4 outline-none focus:border-[var(--signal)]" /></label>
+                <label className="block text-sm font-semibold">Subject <span className="font-normal text-[var(--text-soft)]">optional</span><input value={lessonSubject} onChange={(event) => setLessonSubject(event.target.value)} maxLength={120} className="mt-2 h-12 w-full rounded-lg border border-[var(--line)] bg-[var(--page)] px-4 outline-none focus:border-[var(--signal)]" /></label>
+                <label className="block text-sm font-semibold">Lesson material<Textarea value={lessonSource} onChange={(event) => setLessonSource(event.target.value)} maxLength={3600} rows={12} className="mt-2 min-h-64 resize-y rounded-lg border-[var(--line)] bg-[var(--page)] px-4 py-4" /></label>
               </div>
-              <Button type="submit" disabled={isGenerating || !lessonTitle.trim() || !lessonSource.trim()} className="mt-6 h-12 w-full rounded-lg bg-[var(--signal)] text-[var(--signal-ink)] hover:bg-[var(--signal)] hover:opacity-90">
-                {isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-                Generate 3–5 diagrams
-              </Button>
-              <p className="mt-4 text-xs leading-5 text-[var(--text-soft)]">Saved in this browser after each diagram completes.</p>
+              <Button type="submit" disabled={!lessonTitle.trim() || !lessonSource.trim()} className="mt-6 h-12 w-full rounded-lg bg-[var(--signal)] text-[var(--signal-ink)] hover:bg-[var(--signal)] hover:opacity-90"><ArrowUp className="mr-2 h-4 w-4" />Save, arm, and enter Live</Button>
             </form>
-
-            <div className="min-w-0 lg:col-span-8">
-              {isGenerating ? <div role="status" className="dashboard-reveal grid min-h-[560px] place-items-center rounded-xl border border-[var(--line)] bg-[var(--panel)]"><div className="text-center"><Loader2 className="mx-auto h-8 w-8 animate-spin text-[var(--signal)]" /><p className="mt-4 text-sm font-semibold">Planning 3–5 diagrams</p></div></div> : result ? <CompositionView result={result} eyebrow="Prepared diagrams" showRecallPhrases /> : <div className="dashboard-reveal grid min-h-[560px] place-items-center rounded-xl border border-dashed border-[var(--line)] bg-[var(--panel)] px-8 text-center"><div><Sparkles className="mx-auto h-8 w-8 text-[var(--signal)]" /><h2 className="mt-6 text-3xl">No diagram pack selected</h2></div></div>}
-
-              {preparedLesson ? (
-                <section className="dashboard-reveal mt-8 rounded-xl border border-[var(--line)] bg-[var(--panel)] p-6">
-                  <div className="flex flex-wrap items-end justify-between gap-4">
-                    <div><p className="font-[var(--mono)] text-[10px] uppercase tracking-[0.12em] text-[var(--text-soft)]">Recall phrases</p><h2 className="mt-2 text-2xl font-semibold">Spoken aliases</h2></div>
-                    <button type="button" onClick={() => openLesson(preparedLesson, "live")} className="rounded-lg bg-[var(--signal)] px-5 py-3 text-sm font-semibold text-[var(--signal-ink)]">Arm in Live Canvas</button>
-                  </div>
-                  <div className="mt-6 grid gap-4 md:grid-cols-2">
-                    {getPreparedVisuals(preparedLesson).map((block) => (
-                      <label key={block.blockId} className="rounded-lg border border-[var(--line)] bg-[var(--page)] p-4 text-sm font-semibold">{block.title || "Prepared visual"}<input value={block.recallPhrases.join(", ")} onChange={(event) => updateRecallPhrases(preparedLesson, block.blockId, event.target.value)} placeholder="energy cycle, atp flow" className="mt-3 h-11 w-full rounded-md border border-[var(--line)] bg-[var(--panel)] px-3 font-normal text-[var(--text)] outline-none focus:border-[var(--signal)]" /><span className="mt-2 block text-xs font-normal text-[var(--text-soft)]">Up to three comma-separated phrases.</span></label>
-                    ))}
-                  </div>
-                </section>
-              ) : null}
+            <div className="grid min-h-[560px] place-items-center rounded-xl border border-dashed border-[var(--line)] bg-[var(--panel)] p-8 text-center">
+              <div><BookOpen className="mx-auto h-9 w-9 text-[var(--signal)]" /><h2 className="mt-5 text-3xl">Context guides each live turn.</h2><p className="mx-auto mt-4 max-w-md text-sm leading-6 text-[var(--text-soft)]">The board still begins blank. Visuals accumulate only as teaching happens.</p></div>
             </div>
           </div>
         ) : null}
 
         {activeTab === "library" ? (
-          <div className="mx-auto max-w-[1540px]">
-            <div className="dashboard-reveal flex flex-wrap items-end justify-between gap-6">
-              <div><p className="font-[var(--mono)] text-[10px] uppercase tracking-[0.12em] text-[var(--canvas-muted)]">Prepared locally</p><h1 className="mt-4 text-4xl">Lesson library</h1></div>
-              <Button onClick={() => selectTab("prepare")} className="h-12 rounded-lg bg-[var(--signal)] px-6 text-[var(--signal-ink)] hover:bg-[var(--signal)]"><Plus className="mr-2 h-4 w-4" />New lesson</Button>
-            </div>
-            {lessons.length > 0 ? (
-              <div className="mt-16 grid grid-flow-dense gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {lessons.map((lesson) => (
-                  <article key={lesson.id} className="dashboard-reveal flex min-h-[330px] flex-col overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--panel)] p-6">
-                    <div className="flex items-center justify-between"><span className="rounded-md border border-[var(--line)] bg-[var(--page)] px-3 py-1 font-[var(--mono)] text-[9px] uppercase tracking-[0.1em] text-[var(--text-soft)]">{lesson.status}</span><button type="button" onClick={() => deleteLesson(lesson.id)} aria-label={`Delete ${lesson.title}`} className="grid h-9 w-9 place-items-center rounded-md border border-transparent text-[var(--text-soft)] hover:border-red-200 hover:bg-red-50 hover:text-red-700"><Trash2 className="h-4 w-4" /></button></div>
-                    <div className="mt-auto pt-16"><p className="text-sm text-[var(--text-soft)]">{lesson.subject || "General lesson"}</p><h2 className="mt-3 text-balance text-3xl leading-none">{lesson.title}</h2><p className="mt-4 text-xs leading-5 text-[var(--text-soft)]">{getPreparedVisuals(lesson).length} visuals · Updated {new Date(lesson.updatedAt).toLocaleDateString()}</p></div>
-                    <div className="mt-7 grid grid-cols-2 gap-2"><button type="button" onClick={() => openLesson(lesson, "library")} className="rounded-lg border border-[var(--line)] px-4 py-3 text-sm font-semibold hover:bg-[var(--panel-strong)]">Preview</button><button type="button" onClick={() => openLesson(lesson, "live")} className="rounded-lg bg-[var(--signal)] px-4 py-3 text-sm font-semibold text-[var(--signal-ink)]">Arm in live</button></div>
-                  </article>
-                ))}
-              </div>
-            ) : (
-              <div className="dashboard-reveal mt-16 grid min-h-[420px] place-items-center rounded-xl border border-dashed border-[var(--line)] bg-[var(--panel)] text-center"><div><Library className="mx-auto h-8 w-8 text-[var(--signal)]" /><h2 className="mt-5 text-3xl">No prepared lessons yet.</h2></div></div>
-            )}
-            {result && preparedLesson ? <div className="mt-20"><CompositionView result={preparedLesson.composition} eyebrow={`${preparedLesson.title} preview`} showRecallPhrases /></div> : null}
+          <div className="dashboard-reveal mx-auto max-w-[1300px]">
+            <div className="flex flex-wrap items-end justify-between gap-5"><div><p className="font-[var(--mono)] text-xs uppercase tracking-[0.12em] text-[var(--text-soft)]">Stored in this browser</p><h1 className="mt-4 text-4xl">Lesson contexts</h1></div><Button onClick={() => selectTab("prepare")} className="h-12 rounded-lg bg-[var(--signal)] px-6 text-[var(--signal-ink)] hover:bg-[var(--signal)]"><Plus className="mr-2 h-4 w-4" />New context</Button></div>
+            {lessons.length ? <div className="mt-12 grid gap-4 md:grid-cols-2 xl:grid-cols-3">{lessons.map((lesson) => (
+              <article key={lesson.id} className="flex min-h-72 flex-col rounded-xl border border-[var(--line)] bg-[var(--panel)] p-6">
+                <div className="flex justify-between"><span className="font-[var(--mono)] text-xs uppercase tracking-wider text-[var(--text-soft)]">Context</span><button type="button" onClick={() => deleteLesson(lesson.id)} aria-label={`Delete ${lesson.title}`} className="grid h-9 w-9 place-items-center rounded-md text-[var(--text-soft)] hover:bg-red-50 hover:text-red-700"><Trash2 className="h-4 w-4" /></button></div>
+                <div className="mt-auto pt-10"><p className="text-sm text-[var(--text-soft)]">{lesson.subject || "General lesson"}</p><h2 className="mt-3 text-3xl leading-none">{lesson.title}</h2><p className="mt-4 line-clamp-3 text-sm leading-6 text-[var(--text-soft)]">{lesson.source}</p></div>
+                <button type="button" onClick={() => activateLesson(lesson.id)} className="mt-6 rounded-lg bg-[var(--signal)] px-4 py-3 text-sm font-semibold text-[var(--signal-ink)]">Open saved whiteboard</button>
+              </article>
+            ))}</div> : <div className="mt-12 grid min-h-96 place-items-center rounded-xl border border-dashed border-[var(--line)] bg-[var(--panel)] text-center"><div><Library className="mx-auto h-8 w-8 text-[var(--signal)]" /><h2 className="mt-5 text-3xl">No lesson contexts yet.</h2></div></div>}
           </div>
         ) : null}
 
-        {activeTab === "live" ? (
-          <div className="mx-auto max-w-[1680px]">
-            <div className="dashboard-reveal mb-5 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4 sm:p-5">
-              <div className="flex items-center gap-3"><Command className="h-4 w-4 text-[var(--signal)]" /><div><p className="font-[var(--mono)] text-[9px] uppercase tracking-[0.12em] text-[var(--text-soft)]">Armed lesson</p><p className="mt-1 font-semibold">{selectedLesson?.title ?? "None"}</p></div></div>
-              <select value={selectedLessonId} onChange={(event) => { setSelectedLessonId(event.target.value); setPresentedBlock(null); }} className="h-11 w-full rounded-lg border border-[var(--line)] bg-[var(--page)] px-4 text-sm text-[var(--text)] outline-none focus:border-[var(--signal)] sm:w-auto sm:min-w-64">
-                <option value="">No prepared lesson</option>
-                {lessons.map((lesson) => <option key={lesson.id} value={lesson.id}>{lesson.title}</option>)}
-              </select>
-            </div>
-
-            <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_300px] xl:items-start">
-              <div className="min-w-0">
-                <div className="grid min-h-[calc(100dvh-330px)] items-center">
-                  {presentedBlock && selectedLesson ? <div className="dashboard-reveal"><CompositionCard block={presentedBlock} theme={selectedLesson.composition.theme} presentation showRecallPhrases /></div> : isGenerating ? <StreamingDraft text={streamDraft} /> : result ? <CompositionView result={result} eyebrow="Live canvas" /> : <EmptyCanvas onPrepare={() => selectTab("prepare")} />}
-                </div>
-
-                {selectedLesson ? (
-                  <div className="mt-5 flex flex-wrap gap-2 pb-20">
-                    {getPreparedVisuals(selectedLesson).flatMap((block) => block.recallPhrases).map((phrase) => (
-                      <button key={phrase} type="button" onClick={() => dispatchTeachingTurn(`imagine show me ${phrase}`)} className="rounded-md border border-[var(--line)] bg-[var(--panel)] px-4 py-2 font-[var(--mono)] text-[10px] uppercase tracking-[0.08em] text-[var(--canvas-muted)] hover:border-[var(--signal)] hover:text-[var(--canvas-text)]">imagine show me {phrase}</button>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-
-              <aside
-                data-live-summary
-                aria-labelledby="live-summary-title"
-                aria-live="polite"
-                className="dashboard-reveal self-start rounded-xl border border-[var(--line)] bg-[var(--panel)] p-5 xl:sticky xl:top-24"
-              >
-                <p className="font-[var(--mono)] text-[10px] uppercase tracking-[0.1em] text-[var(--text-soft)]">
-                  {liveSummary.source}
-                </p>
-                <h2 id="live-summary-title" className="mt-3 text-2xl leading-tight">
-                  {liveSummary.title}
-                </h2>
-                {liveSummary.bullets.length > 0 ? (
-                  <ul className="mt-6 list-disc space-y-3 pl-5 text-sm leading-6 text-[var(--text-soft)]">
-                    {liveSummary.bullets.map((bullet, index) => (
-                      <li key={`${index}-${bullet}`}>{bullet}</li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="mt-5 text-sm leading-6 text-[var(--text-soft)]">
-                    Summary points will appear with the displayed composition.
-                  </p>
-                )}
-              </aside>
-            </div>
-          </div>
-        ) : null}
       </section>
-
-      {showCommandDock ? (
-        <form onSubmit={handleLiveSubmit} className="fixed bottom-4 left-4 right-4 z-[35] mx-auto flex w-[min(900px,calc(100%-32px))] items-end gap-2 rounded-xl border border-[var(--line)] bg-[var(--panel)] p-2">
-          <label htmlFor="workspace-input" className="sr-only">Teaching input or prepared visual command</label>
-          <Textarea id="workspace-input" value={displayValue} onChange={(event) => { setCapturedInput(event.target.value); setLiveTranscript(""); }} onKeyDown={handleInputKeyDown} placeholder="Teach live, or say: imagine show me…" maxLength={4000} rows={1} className="min-h-14 flex-1 resize-none rounded-lg border-0 bg-transparent px-3 py-[1.05rem] text-base leading-6 text-[var(--text)] shadow-none placeholder:text-[var(--text-soft)] sm:px-5" />
-          <Button type="submit" disabled={!displayValue.trim()} className="h-14 w-12 shrink-0 rounded-lg bg-[var(--signal)] px-0 text-[var(--signal-ink)] hover:bg-[var(--signal)] hover:opacity-90 sm:w-14" aria-label="Submit teaching input">{isGenerating ? <Loader2 className="h-5 w-5 animate-spin" /> : <ArrowUp className="h-5 w-5" />}</Button>
-          <Button type="button" onClick={() => void startTranscription()} className={`h-14 w-12 shrink-0 rounded-lg px-0 sm:w-14 ${speechStatus === "idle" ? "bg-[var(--canvas-text)] text-[var(--canvas-bg)]" : "bg-red-600 text-white"}`} aria-label={speechStatus === "idle" ? "Start microphone" : "Stop microphone"}>{speechStatus === "connecting" ? <Loader2 className="h-5 w-5 animate-spin" /> : speechStatus === "listening" ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}</Button>
-        </form>
-      ) : null}
     </main>
   );
 }

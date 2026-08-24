@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "engines": {
-    "node": ">=22.13.0"
+    "node": "22.x"
   },
   "scripts": {
     "dev": "powershell -ExecutionPolicy Bypass -File scripts/dev.ps1",
@@ -11,6 +11,7 @@
     "dev:sites": "vinext dev",
     "dev:backend": "backend\\.venv\\Scripts\\python -m uvicorn backend.main:app --reload --port 8010 --env-file .env",
     "build": "vinext build",
+    "build:vercel": "node scripts/vercel-build.mjs",
     "build:docker": "next build",
     "start": "next start",
     "start:sites": "vinext start",

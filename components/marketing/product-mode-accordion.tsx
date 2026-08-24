@@ -2,36 +2,36 @@
 
 import { KeyboardEvent, useEffect, useRef, useState } from "react";
 import {
-  liveDiagram,
-  MarketingDiagramPreview,
-  prepareDiagram,
-  recallDiagram
+  createScene,
+  cumulativeBoardScene,
+  lessonContextScene,
+  MarketingScenePreview
 } from "@/components/marketing/diagram-previews";
 
 const modes = [
   {
-    id: "prepare",
+    id: "context",
     index: "01",
-    title: "Prepare",
-    body: "Turn lesson material into a small sequence of diagrams before class.",
-    diagram: prepareDiagram,
-    alt: "Flowchart preview showing glucose moving through cellular respiration to ATP."
+    title: "Context",
+    body: "Save the lesson context before class so live turns stay grounded.",
+    scene: lessonContextScene,
+    alt: "Stick-scene preview connecting saved lesson context and finalized speech to the live board."
   },
   {
     id: "live",
     index: "02",
     title: "Live",
-    body: "Let finalized speech build notes and visuals as the explanation moves.",
-    diagram: liveDiagram,
-    alt: "Mind map preview connecting cellular respiration to its inputs, location, and output."
+    body: "Let finalized speech create a useful scene when the explanation calls for one.",
+    scene: createScene,
+    alt: "Stick-scene preview showing cellular energy moving from glucose through a cell to ATP."
   },
   {
-    id: "recall",
+    id: "cumulative",
     index: "03",
-    title: "Intentional recall",
-    body: "Use an exact spoken phrase to reveal a diagram that was already prepared.",
-    diagram: recallDiagram,
-    alt: "Tree preview organizing a stored cellular energy diagram into inputs, process, and outputs."
+    title: "Cumulative",
+    body: "Keep earlier scenes while related ideas are updated and new ones are placed.",
+    scene: cumulativeBoardScene,
+    alt: "Stick-scene preview connecting an earlier idea, an updated idea, and a new idea."
   }
 ] as const;
 
@@ -113,8 +113,8 @@ export function ProductModeAccordion() {
               <p className="marketing-eyebrow">{mode.title}</p>
               <h3>{mode.body}</h3>
             </div>
-            <MarketingDiagramPreview
-              diagram={mode.diagram}
+            <MarketingScenePreview
+              scene={mode.scene}
               alt={mode.alt}
               parallax={index === 0}
             />

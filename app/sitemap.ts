@@ -1,7 +1,7 @@
 import type { MetadataRoute } from "next";
 import { getSiteOrigin } from "@/lib/site-origin";
 
-const publicRoutes = ["", "/product", "/educators", "/schools", "/about"];
+const publicRoutes = ["", "/product", "/about", "/contact"];
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const origin = getSiteOrigin();

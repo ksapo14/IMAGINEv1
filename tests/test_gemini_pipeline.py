@@ -3,1314 +3,1084 @@ import io
 import json
 import unittest
 import urllib.error
-import urllib.request
-import uuid
-from pathlib import Path
-from typing import Any
 from unittest.mock import patch
 
 from backend.services.gemini_pipeline import (
-    CACHE_SCHEMA_VERSION,
-    DIAGRAM_THINKING_BUDGET,
+    DEFAULT_IMAGE_MODEL,
+    DEFAULT_TEXT_MODEL,
     GeminiConfigurationError,
     GeminiPipeline,
     GeminiProviderError,
-    _cache_key,
     _default_json_transport,
-    _default_stream_transport,
-    _infer_diagram_type,
-    _normalize_diagram,
+)
+from backend.services.whiteboard_intent import classify_whiteboard_intent
+from backend.services.visual_director_prompt import (
+    VISUAL_DIRECTOR_RESPONSE_SCHEMA,
+    VISUAL_DIRECTOR_SYSTEM_INSTRUCTION,
 )
 
 
-def text_response(
-    *,
-    strategy: str = "none",
-    visual_prompt: str = "",
-    visual_alt: str = "",
-) -> dict[str, Any]:
-    structured = {
-        "title": "How cells make energy",
-        "bullets": [
-            "Mitochondria convert stored chemical energy into ATP.",
-            "ATP supplies usable energy for cellular work.",
-        ],
-        "visualStrategy": strategy,
-        "visualPrompt": visual_prompt,
-        "visualAlt": visual_alt,
-    }
+TEST_KEY = "server-secret"
+TEST_MODEL = "gemini-test"
+
+
+def director_decision(action: str = "create") -> dict[str, object]:
     return {
-        "candidates": [
-            {
-                "content": {
-                    "parts": [{"text": json.dumps(structured)}],
-                }
-            }
-        ]
-    }
-
-
-def planner_response(
-    *,
-    layout_mode: str = "textDominant",
-    palette: str = "sage",
-    blocks: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    structured = {
-        "title": "Cell energy map",
-        "layoutMode": layout_mode,
-        "theme": {
-            "palette": palette,
-            "density": "comfortable",
-            "motion": "subtle",
-        },
-        "blocks": blocks
-        if blocks is not None
-        else [
-            {
-                "kind": "notes",
-                "title": "Core idea",
-                "body": "",
-                "items": [
-                    "Mitochondria convert stored chemical energy into ATP.",
-                    "ATP supplies usable energy for cellular work.",
-                ],
-                "size": "medium",
-                "visualKind": "none",
-                "visualPrompt": "",
-                "visualAlt": "",
-                "recallPhrases": [],
-            }
-        ],
-    }
-    return {
-        "candidates": [
-            {
-                "content": {
-                    "parts": [{"text": json.dumps(structured)}],
-                }
-            }
-        ]
-    }
-
-
-def diagram_block() -> dict[str, Any]:
-    return {
-        "kind": "diagram",
-        "title": "ATP production flow",
-        "body": "",
-        "items": [],
-        "size": "large",
-        "visualKind": "diagram",
-        "visualPrompt": "Show glucose becoming ATP through cellular respiration.",
-        "visualAlt": "Flowchart showing glucose becoming ATP.",
-        "recallPhrases": [],
-    }
-
-
-def image_block() -> dict[str, Any]:
-    return {
-        "kind": "image",
-        "title": "ATP illustration",
-        "body": "",
-        "items": [],
-        "size": "large",
-        "visualKind": "image",
-        "visualPrompt": "A clean illustration of ATP production.",
-        "visualAlt": "Illustration showing ATP production.",
-        "recallPhrases": [],
-    }
-
-
-def diagram_response(
-    *,
-    diagram_type: str = "flowchart",
-    node_count: int = 5,
-) -> dict[str, Any]:
-    blocks = [
-        {
-            "type": "block",
-            "id": f"b{index + 1}",
-            "heading": f"Car stage {index + 1}",
-            "description": f"What happens during stage {index + 1}.",
-        }
-        for index in range(node_count)
-    ]
-    diagram = {
-        "version": 3,
-        "type": diagram_type,
-        "title": "How a car creates motion",
-        "description": "Energy moves through connected vehicle systems.",
-    }
-    if diagram_type == "flowchart":
-        diagram["lines"] = [
-            {"type": "blockLine", "id": "main-line", "blocks": blocks}
-        ]
-    elif diagram_type == "tree":
-        diagram["root"] = {
-            "id": "root",
-            "heading": "Vehicle",
-            "description": "The complete system.",
-            "children": [
+        "boardStrategy": "integrate",
+        "action": action,
+        "conceptKey": "water-cycle",
+        "title": "Water cycle",
+        "headingMode": "show",
+        "summaryBullets": ["Water evaporates.", "Vapor returns as rain."],
+        "summary": "Water rises as vapor and returns as rain.",
+        "contentModes": ["visual", "notes", "diagram"],
+        "confidence": 0.91,
+        "targetSceneId": "",
+        "requestedFootprint": "full",
+        "sceneLayout": "cycle",
+        "renderMode": "generatedAsset",
+        "imagePrompt": "A water cycle outline with water and a cloud.",
+        "scene": {
+            "entities": [
                 {
-                    "id": "power",
-                    "heading": "Power",
-                    "description": "Creates motion.",
-                    "children": [],
+                    "id": "water", "type": "circle", "x": 0, "y": 0,
+                    "width": 2, "height": 2, "label": "Water",
+                    "pose": "neutral", "facing": "front",
                 },
                 {
-                    "id": "control",
-                    "heading": "Control",
-                    "description": "Directs motion.",
-                    "children": [],
+                    "id": "cloud", "type": "rectangle", "x": 4, "y": 0,
+                    "width": 3, "height": 2, "label": "Cloud",
+                    "pose": "neutral", "facing": "front",
                 },
             ],
-        }
-    elif diagram_type == "vennDiagram":
-        diagram.update(
-            {
-                "left": {"heading": "Electric", "items": ["Battery"]},
-                "right": {"heading": "Gas", "items": ["Fuel tank"]},
-                "similar": {"heading": "Both", "items": ["Wheels"]},
-            }
-        )
-    elif diagram_type == "pieChart":
-        diagram["portions"] = [
-            {"heading": "Motion", "proportion": 70},
-            {"heading": "Heat", "proportion": 30},
-        ]
-    else:
-        diagram.update(
-            {
-                "center": {
-                    "type": "round",
-                    "id": "vehicle",
-                    "heading": "Vehicle",
-                    "description": "The central system.",
-                },
-                "surrounding": [
-                    {
-                        "type": "round",
-                        "id": "power",
-                        "heading": "Power",
-                        "description": "Creates motion.",
-                    },
-                    {
-                        "type": "round",
-                        "id": "control",
-                        "heading": "Control",
-                        "description": "Directs motion.",
-                    },
-                ],
-            }
-        )
-    return {
-        "candidates": [
-            {
-                "content": {
-                    "parts": [
-                        {
-                            "text": json.dumps(
-                                diagram
-                            )
-                        }
-                    ],
+            "connections": [
+                {
+                    "id": "rise", "fromId": "water", "toId": "cloud",
+                    "label": "evaporates", "direction": "forward",
                 }
-            }
-        ]
-    }
-
-
-def prepare_planner_response(block_count: int = 3) -> dict[str, Any]:
-    diagram_types = [
-        "flowchart",
-        "tree",
-        "vennDiagram",
-        "pieChart",
-        "mindMap",
-    ]
-    structured = {
-        "title": "Cellular respiration sequence",
-        "theme": {
-            "palette": "sage",
-            "density": "comfortable",
-            "motion": "subtle",
+            ],
         },
-        "blocks": [
-            {
-                "title": f"Lesson visual {index + 1}",
-                "diagramType": diagram_types[index],
-                "visualPrompt": f"Show lesson stage {index + 1} and its relationships.",
-                "visualAlt": f"Diagram of lesson stage {index + 1}.",
-                "recallPhrases": [f"lesson stage {index + 1}"],
-            }
-            for index in range(block_count)
-        ],
-    }
-    return {
-        "candidates": [
-            {
-                "content": {
-                    "parts": [{"text": json.dumps(structured)}],
-                }
-            }
-        ]
     }
 
 
-def image_response() -> dict[str, Any]:
-    encoded = base64.b64encode(b"test-image").decode("ascii")
-    return {
-        "candidates": [
-            {
-                "content": {
-                    "parts": [
-                        {
-                            "inlineData": {
-                                "mimeType": "image/png",
-                                "data": encoded,
-                            }
-                        }
-                    ]
-                }
-            }
-        ]
-    }
+def gemini_text(value: dict[str, object] | str) -> dict[str, object]:
+    text = value if isinstance(value, str) else json.dumps(value)
+    return {"candidates": [{"content": {"parts": [{"text": text}]}}]}
 
 
 class StubTransport:
-    def __init__(self, responses: list[dict[str, Any]]) -> None:
-        self.responses = responses
-        self.requests: list[tuple[urllib.request.Request, float]] = []
+    def __init__(self, responses: list[dict[str, object]]) -> None:
+        self.responses = list(responses)
+        self.requests = []
 
-    def __call__(
-        self,
-        request: urllib.request.Request,
-        timeout_seconds: float,
-    ) -> dict[str, Any]:
+    def __call__(self, request, timeout_seconds):
         self.requests.append((request, timeout_seconds))
         return self.responses.pop(0)
 
 
-class StubStreamTransport:
-    def __init__(self, responses: list[dict[str, Any]]) -> None:
-        self.responses = responses
-        self.requests: list[tuple[urllib.request.Request, float]] = []
-
-    def __call__(
-        self,
-        request: urllib.request.Request,
-        timeout_seconds: float,
-    ) -> list[dict[str, Any]]:
-        self.requests.append((request, timeout_seconds))
-        return self.responses
-
-
-TEST_DEV_KEY = "dev-secret"
-TEST_PROD_KEY = "prod-secret"
-TEST_TEXT_MODEL = "text-test-model"
-TEST_DIAGRAM_MODEL = "diagram-test-model"
-TEST_IMAGE_MODEL = "image-test-model"
-
-
-class GeminiTransportTests(unittest.TestCase):
-    def test_http_error_includes_sanitized_provider_context(self) -> None:
-        body = json.dumps(
-            {
-                "error": {
-                    "code": 400,
-                    "message": "Publisher model is not found.",
-                    "status": "INVALID_ARGUMENT",
-                }
-            }
-        ).encode("utf-8")
-        error = urllib.error.HTTPError(
-            "https://generativelanguage.googleapis.com/v1beta/models/test:generateContent",
-            400,
-            "Bad Request",
-            {},
-            io.BytesIO(body),
-        )
-        request = urllib.request.Request("https://example.test")
-
-        with patch("urllib.request.urlopen", side_effect=error):
-            with self.assertRaisesRegex(
-                GeminiProviderError,
-                "HTTP 400 INVALID_ARGUMENT: Publisher model is not found",
-            ):
-                _default_json_transport(request, 1)
-
-    def test_quota_error_reports_429_context(self) -> None:
-        body = json.dumps(
-            {
-                "error": {
-                    "code": 429,
-                    "message": "Quota exceeded.",
-                    "status": "RESOURCE_EXHAUSTED",
-                }
-            }
-        ).encode("utf-8")
-        error = urllib.error.HTTPError(
-            "https://generativelanguage.googleapis.com/v1beta/models/test:generateContent",
-            429,
-            "Too Many Requests",
-            {},
-            io.BytesIO(body),
-        )
-        request = urllib.request.Request("https://example.test")
-
-        with patch("urllib.request.urlopen", side_effect=error):
-            with self.assertRaisesRegex(
-                GeminiProviderError,
-                "temporarily quota-limited. HTTP 429 RESOURCE_EXHAUSTED",
-            ):
-                _default_json_transport(request, 1)
-
-    def test_stream_transport_decodes_sse_events_incrementally(self) -> None:
-        first = {"candidates": [{"content": {"parts": [{"text": "one"}]}}]}
-        second = {"candidates": [{"content": {"parts": [{"text": " two"}]}}]}
-        response = io.BytesIO(
-            (
-                f"data: {json.dumps(first)}\n\n"
-                f"data: {json.dumps(second)}\n\n"
-                "data: [DONE]\n\n"
-            ).encode("utf-8")
-        )
-        request = urllib.request.Request("https://example.test")
-
-        with patch("urllib.request.urlopen", return_value=response):
-            events = list(_default_stream_transport(request, 1))
-
-        self.assertEqual(events, [first, second, {}])
-
-
 class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
-    async def test_text_only_uses_notes_and_planner_requests(self) -> None:
-        transport = StubTransport([text_response(), planner_response()])
-        pipeline = GeminiPipeline(
-            text_api_key=TEST_DEV_KEY,
-            image_api_key=TEST_PROD_KEY,
-            text_model=TEST_TEXT_MODEL,
-            image_model=TEST_IMAGE_MODEL,
+    def pipeline(self, transport: StubTransport, *, image_key: str = TEST_KEY) -> GeminiPipeline:
+        return GeminiPipeline(
+            text_api_key=TEST_KEY,
+            image_api_key=image_key,
+            text_model=TEST_MODEL,
+            image_model="image-test",
             transport=transport,
-            cache_enabled=False,
         )
 
-        result = await pipeline.generate("Explain ATP.")
-
-        self.assertEqual(len(transport.requests), 2)
-        notes_request, _ = transport.requests[0]
-        planner_request, _ = transport.requests[1]
-        self.assertIn(TEST_TEXT_MODEL, notes_request.full_url)
-        self.assertIn(TEST_TEXT_MODEL, planner_request.full_url)
-        self.assertNotIn(TEST_DEV_KEY, notes_request.full_url)
-        self.assertEqual(
-            dict(notes_request.header_items())["X-goog-api-key"],
-            TEST_DEV_KEY,
-        )
-        self.assertEqual(
-            dict(planner_request.header_items())["X-goog-api-key"],
-            TEST_DEV_KEY,
-        )
-        notes_body = json.loads(notes_request.data.decode("utf-8"))
-        planner_body = json.loads(planner_request.data.decode("utf-8"))
-        self.assertEqual(notes_body["generationConfig"]["maxOutputTokens"], 512)
-        self.assertEqual(planner_body["generationConfig"]["maxOutputTokens"], 900)
-        self.assertEqual(result["layoutMode"], "textDominant")
-        self.assertEqual(result["blocks"][0]["kind"], "notes")
-        self.assertEqual(result["_visualRequests"], [])
-
-    async def test_prepare_uses_one_diagram_only_planner_request(self) -> None:
-        transport = StubTransport([prepare_planner_response(4)])
-        stream_transport = StubStreamTransport([])
-        pipeline = GeminiPipeline(
-            text_api_key=TEST_DEV_KEY,
-            text_model=TEST_TEXT_MODEL,
-            transport=transport,
-            stream_transport=stream_transport,
-            cache_enabled=False,
-        )
-
-        result = await pipeline.generate("Teach cellular respiration.", "prepare")
-
-        self.assertEqual(len(transport.requests), 1)
-        request_body = json.loads(transport.requests[0][0].data.decode("utf-8"))
-        instruction = request_body["systemInstruction"]["parts"][0]["text"]
-        schema = request_body["generationConfig"]["responseSchema"]
-        self.assertIn("3-5 distinct diagrams", instruction)
-        self.assertEqual(schema["properties"]["blocks"]["minItems"], 3)
-        self.assertEqual(schema["properties"]["blocks"]["maxItems"], 5)
-        self.assertEqual(len(result["blocks"]), 4)
-        self.assertTrue(all(block["kind"] == "diagram" for block in result["blocks"]))
-        self.assertTrue(all(block["body"] == "" for block in result["blocks"]))
-        self.assertTrue(all(block["items"] == [] for block in result["blocks"]))
-        self.assertTrue(all(block["visualAlt"] for block in result["blocks"]))
-        self.assertTrue(
-            all(1 <= len(block["recallPhrases"]) <= 3 for block in result["blocks"])
-        )
-        self.assertEqual(len(result["_visualRequests"]), 4)
-        self.assertTrue(
-            all(
-                request["visualStrategy"] == "diagram"
-                for request in result["_visualRequests"]
-            )
-        )
-        self.assertEqual(stream_transport.requests, [])
-
-    async def test_prepare_rejects_fewer_than_three_valid_diagrams(self) -> None:
-        pipeline = GeminiPipeline(
-            text_api_key=TEST_DEV_KEY,
-            text_model=TEST_TEXT_MODEL,
-            transport=StubTransport([prepare_planner_response(2)]),
-            cache_enabled=False,
-        )
-
-        with self.assertRaisesRegex(GeminiProviderError, "fewer than three"):
-            await pipeline.generate("Teach cellular respiration.", "prepare")
-
-    async def test_prepare_stream_returns_result_without_text_deltas(self) -> None:
-        transport = StubTransport([prepare_planner_response(3)])
-        stream_transport = StubStreamTransport([])
-        pipeline = GeminiPipeline(
-            text_api_key=TEST_DEV_KEY,
-            text_model=TEST_TEXT_MODEL,
-            transport=transport,
-            stream_transport=stream_transport,
-            cache_enabled=False,
-        )
-
-        events = [
-            event
-            async for event in pipeline.generate_stream(
-                "Teach cellular respiration.",
-                "prepare",
-            )
-        ]
-
-        self.assertEqual([event["type"] for event in events], ["result"])
-        self.assertEqual(len(events[0]["result"]["blocks"]), 3)
-        self.assertEqual(stream_transport.requests, [])
-
-    async def test_stream_yields_provider_deltas_before_final_composition(self) -> None:
-        notes_text = text_response()["candidates"][0]["content"]["parts"][0]["text"]
-        split_at = len(notes_text) // 2
-        stream_transport = StubStreamTransport(
-            [
-                {
-                    "candidates": [
-                        {"content": {"parts": [{"text": notes_text[:split_at]}]}}
-                    ]
-                },
-                {
-                    "candidates": [
-                        {"content": {"parts": [{"text": notes_text[split_at:]}]}}
-                    ]
-                },
-            ]
-        )
-        transport = StubTransport([planner_response()])
-        pipeline = GeminiPipeline(
-            text_api_key=TEST_DEV_KEY,
-            text_model=TEST_TEXT_MODEL,
-            transport=transport,
-            stream_transport=stream_transport,
-            cache_enabled=False,
-        )
-
-        events = [event async for event in pipeline.generate_stream("Explain ATP.")]
-
-        self.assertEqual(
-            [event["type"] for event in events],
-            ["text_delta", "text_delta", "result"],
-        )
-        self.assertEqual("".join(event["text"] for event in events[:2]), notes_text)
-        self.assertEqual(events[-1]["result"]["title"], "Cell energy map")
-        self.assertEqual(len(stream_transport.requests), 1)
-        stream_request, _ = stream_transport.requests[0]
-        self.assertIn(":streamGenerateContent?alt=sse", stream_request.full_url)
-        self.assertEqual(
-            dict(stream_request.header_items())["Accept"],
-            "text/event-stream",
-        )
-        self.assertEqual(len(transport.requests), 1)
-
-    async def test_cached_stream_returns_result_without_text_or_transport(self) -> None:
-        cached_result = {
-            "title": "Cached lesson",
-            "layoutMode": "textDominant",
-            "theme": {
-                "palette": "slate",
-                "density": "comfortable",
-                "motion": "none",
-            },
-            "blocks": [
-                {
-                    "blockId": "notes-1",
-                    "kind": "notes",
-                    "title": "Cached lesson",
-                    "body": "",
-                    "items": ["Already prepared."],
-                    "size": "medium",
-                    "visual": None,
-                    "visualJobId": None,
-                    "recallPhrases": [],
-                }
-            ],
-            "warning": None,
-        }
-        transport = StubTransport([])
-        stream_transport = StubStreamTransport([])
-        pipeline = GeminiPipeline(
-            text_api_key=TEST_DEV_KEY,
-            text_model=TEST_TEXT_MODEL,
-            transport=transport,
-            stream_transport=stream_transport,
-        )
-
-        with patch.object(
-            pipeline,
-            "_get_cached_result",
-            return_value=cached_result,
-        ):
-            events = [
-                event async for event in pipeline.generate_stream("Explain ATP.")
-            ]
-
-        self.assertEqual(events, [{"type": "result", "result": cached_result}])
-        self.assertEqual(transport.requests, [])
-        self.assertEqual(stream_transport.requests, [])
-
-    def test_visual_recall_phrases_are_normalized_with_title_fallback(self) -> None:
-        pipeline = GeminiPipeline(cache_enabled=False)
-        notes = {
-            "title": "Cell energy",
-            "bullets": ["Cells make ATP."],
-            "visualStrategy": "none",
-            "visualPrompt": "",
-            "visualAlt": "",
-        }
-        first_visual = {
-            **diagram_block(),
-            "recallPhrases": [
-                " Imagine, show me: ATP production flow! ",
-                "atp production flow",
-                "cellular energy pathway",
-                "unused fourth phrase",
-            ],
-        }
-        second_visual = {
-            **image_block(),
-            "recallPhrases": [],
-        }
-        non_visual = {
-            "kind": "notes",
-            "title": "Key idea",
-            "body": "",
-            "items": ["ATP powers cell work."],
-            "size": "medium",
-            "visualKind": "none",
-            "visualPrompt": "",
-            "visualAlt": "",
-            "recallPhrases": ["must be ignored"],
-        }
-
-        result = pipeline._normalize_composition(
-            {
-                "title": "Cell energy",
-                "layoutMode": "balanced",
-                "theme": {},
-                "blocks": [first_visual, second_visual, non_visual],
-            },
-            notes,
-        )
-
-        self.assertEqual(
-            result["blocks"][0]["recallPhrases"],
-            [
-                "ATP production flow",
-                "cellular energy pathway",
-                "unused fourth phrase",
-            ],
-        )
-        self.assertEqual(
-            result["blocks"][1]["recallPhrases"],
-            ["ATP illustration"],
-        )
-        self.assertEqual(result["blocks"][2]["recallPhrases"], [])
-
-    async def test_diagram_preference_returns_visual_request_for_block(self) -> None:
-        transport = StubTransport(
-            [
-                text_response(
-                    strategy="diagram",
-                    visual_prompt="Show glucose becoming ATP through cellular respiration.",
-                    visual_alt="Flowchart showing glucose becoming ATP.",
-                ),
-                planner_response(
-                    layout_mode="visualDominant",
-                    blocks=[
-                        {
-                            "kind": "notes",
-                            "title": "Energy transfer",
-                            "body": "",
-                            "items": ["Glucose stores energy before ATP captures it."],
-                            "size": "medium",
-                            "visualKind": "none",
-                            "visualPrompt": "",
-                            "visualAlt": "",
-                            "recallPhrases": [],
-                        },
-                        diagram_block(),
-                    ],
-                ),
-            ]
-        )
-        pipeline = GeminiPipeline(
-            text_api_key=TEST_DEV_KEY,
-            image_api_key=TEST_PROD_KEY,
-            text_model=TEST_TEXT_MODEL,
-            image_model=TEST_IMAGE_MODEL,
-            transport=transport,
-            cache_enabled=False,
-        )
-
-        result = await pipeline.generate("Make a flowchart of ATP production.")
-
-        self.assertEqual(len(transport.requests), 2)
-        self.assertEqual(result["layoutMode"], "visualDominant")
-        self.assertEqual(result["blocks"][1]["blockId"], "diagram-2")
-        self.assertEqual(result["blocks"][1]["size"], "wide")
-        self.assertEqual(result["_visualRequests"][0]["blockId"], "diagram-2")
-        self.assertIn("glucose", result["_visualRequests"][0]["visualPrompt"].lower())
-
-    async def test_generate_visual_returns_structured_adaptive_diagram(self) -> None:
-        transport = StubTransport([diagram_response(node_count=9)])
-        pipeline = GeminiPipeline(
-            text_api_key=TEST_DEV_KEY,
-            image_api_key=TEST_PROD_KEY,
-            text_model=TEST_TEXT_MODEL,
-            diagram_model=TEST_DIAGRAM_MODEL,
-            image_model=TEST_IMAGE_MODEL,
-            transport=transport,
-            cache_enabled=False,
-        )
-
-        visual = await pipeline.generate_visual(
-            "diagram",
-            "Show glucose becoming ATP through cellular respiration.",
-            "Flowchart showing glucose becoming ATP.",
+    async def test_live_turn_uses_one_structured_director_request(self) -> None:
+        transport = StubTransport([gemini_text(director_decision())])
+        result = await self.pipeline(transport).generate(
+            "Explain evaporation.",
+            context={"turnSequence": 4, "board": {"version": 7, "currentPage": 1}},
         )
 
         self.assertEqual(len(transport.requests), 1)
-        self.assertIn(TEST_DIAGRAM_MODEL, transport.requests[0][0].full_url)
+        request = transport.requests[0][0]
+        body = json.loads(request.data)
+        self.assertIn("Visual Director", body["systemInstruction"]["parts"][0]["text"])
+        self.assertEqual(body["generationConfig"]["responseMimeType"], "application/json")
         self.assertEqual(
-            dict(transport.requests[0][0].header_items())["X-goog-api-key"],
-            TEST_DEV_KEY,
+            body["generationConfig"]["thinkingConfig"],
+            {"thinkingLevel": "medium"},
         )
-        request_body = json.loads(transport.requests[0][0].data.decode("utf-8"))
-        self.assertEqual(request_body["generationConfig"]["maxOutputTokens"], 4200)
-        self.assertEqual(
-            request_body["generationConfig"]["thinkingConfig"]["thinkingBudget"],
-            DIAGRAM_THINKING_BUDGET,
-        )
-        self.assertGreater(DIAGRAM_THINKING_BUDGET, 0)
-        self.assertEqual(
-            request_body["generationConfig"]["responseMimeType"],
-            "application/json",
-        )
-        response_schema = request_body["generationConfig"]["responseSchema"]
-        self.assertEqual(response_schema["properties"]["type"]["enum"], ["flowchart"])
-        self.assertIn("lines", response_schema["required"])
-        self.assertNotIn("root", response_schema["properties"])
-        self.assertEqual(visual["kind"], "diagram")
-        self.assertEqual(visual["diagram"]["version"], 3)
-        self.assertEqual(visual["diagram"]["type"], "flowchart")
-        self.assertEqual(len(visual["diagram"]["lines"]), 1)
-        self.assertEqual(len(visual["diagram"]["lines"][0]["blocks"]), 8)
-        self.assertEqual(
-            visual["diagram"]["lines"][0]["blocks"][0]["type"], "block"
-        )
-        self.assertNotIn("html", visual)
+        self.assertLessEqual(body["generationConfig"]["temperature"], 0.2)
+        self.assertLessEqual(body["generationConfig"]["maxOutputTokens"], 2400)
+        self.assertNotIn(TEST_KEY, request.full_url)
+        self.assertNotIn(TEST_KEY, request.data.decode())
+        self.assertEqual(result["action"], "create")
+        self.assertEqual(result["boardVersion"], 8)
+        self.assertEqual(result["turnSequence"], 4)
+        self.assertEqual(result["stickScene"]["version"], 1)
 
-    async def test_explicit_user_diagram_type_overrides_visual_prompt_heuristics(
-        self,
-    ) -> None:
+    async def test_notes_only_promotes_to_small_without_diagram_or_image_job(self) -> None:
+        raw = director_decision()
+        raw.update({
+            "contentModes": ["notes"],
+            "requestedFootprint": "small",
+            "renderMode": "structured",
+            "imagePrompt": "",
+            "scene": {"entities": [], "connections": []},
+        })
+        result = await self.pipeline(StubTransport([gemini_text(raw)])).generate("Define evaporation.")
+        self.assertEqual(result["contentModes"], ["notes"])
+        self.assertEqual(result["requestedFootprint"], "small")
+        self.assertEqual((result["placement"]["width"], result["placement"]["height"]), (8, 5))
+        self.assertIsNone(result["stickScene"])
+        self.assertIsNone(result["_imageRequest"])
+
+    async def test_diagram_only_is_promoted_to_medium(self) -> None:
+        raw = director_decision()
+        raw.update({"contentModes": ["diagram"], "summaryBullets": [], "requestedFootprint": "small", "renderMode": "structured", "imagePrompt": ""})
+        result = await self.pipeline(StubTransport([gemini_text(raw)])).generate("Show evaporation.")
+        self.assertEqual(result["requestedFootprint"], "medium")
+        self.assertEqual((result["placement"]["width"], result["placement"]["height"]), (12, 6))
+
+    async def test_structured_visual_uses_the_concept_scene_without_connections(self) -> None:
+        raw = director_decision()
+        raw.update({
+            "contentModes": ["visual"],
+            "summaryBullets": [],
+            "requestedFootprint": "small",
+            "renderMode": "structured",
+            "imagePrompt": "",
+        })
+        result = await self.pipeline(StubTransport([gemini_text(raw)])).generate(
+            "Show the water cycle as a simple outline."
+        )
+        self.assertEqual(result["requestedFootprint"], "medium")
+        self.assertIsNotNone(result["stickScene"])
+        self.assertIsNone(result["_imageRequest"])
+
+    async def test_generated_visual_discards_unused_scene_and_keeps_image_request(self) -> None:
+        raw = director_decision()
+        raw.update({
+            "contentModes": ["visual"],
+            "summaryBullets": [],
+            "requestedFootprint": "medium",
+        })
+        result = await self.pipeline(StubTransport([gemini_text(raw)])).generate(
+            "Explain evaporation."
+        )
+        self.assertIsNone(result["stickScene"])
+        self.assertEqual(result["renderMode"], "generatedAsset")
+        self.assertEqual(result["_imageRequest"], {
+            "imagePrompt": raw["imagePrompt"],
+            "visualAlt": raw["summary"],
+        })
+
+    async def test_required_stick_scenes_still_reject_empty_entities(self) -> None:
         cases = (
-            (
-                "Create a pie chart comparing product categories.",
-                "Show categories as a sequential flowchart.",
-                "pieChart",
-            ),
-            (
-                "Create a tree diagram of revenue percentages.",
-                "Show revenue percentages as proportional pie slices.",
-                "tree",
-            ),
+            {
+                "contentModes": ["diagram"], "summaryBullets": [],
+                "requestedFootprint": "medium", "renderMode": "structured",
+                "imagePrompt": "",
+            },
+            {
+                "contentModes": ["visual"], "summaryBullets": [],
+                "requestedFootprint": "medium", "renderMode": "structured",
+                "imagePrompt": "",
+            },
         )
-
-        for user_input, misleading_visual_prompt, expected_type in cases:
-            with self.subTest(expected_type=expected_type):
-                transport = StubTransport(
-                    [
-                        text_response(
-                            strategy="diagram",
-                            visual_prompt=misleading_visual_prompt,
-                            visual_alt="Requested diagram.",
-                        ),
-                        planner_response(
-                            layout_mode="visualDominant",
-                            blocks=[
-                                {
-                                    **diagram_block(),
-                                    "visualPrompt": misleading_visual_prompt,
-                                    "visualAlt": "Requested diagram.",
-                                }
-                            ],
-                        ),
-                        diagram_response(diagram_type=expected_type),
-                    ]
-                )
-                pipeline = GeminiPipeline(
-                    text_api_key=TEST_DEV_KEY,
-                    diagram_model=TEST_DIAGRAM_MODEL,
-                    text_model=TEST_TEXT_MODEL,
-                    transport=transport,
-                    cache_enabled=False,
-                )
-
-                composition = await pipeline.generate(user_input)
-                visual_request = composition["_visualRequests"][0]
-                self.assertEqual(visual_request["diagramType"], expected_type)
-                self.assertTrue(
-                    visual_request["visualPrompt"].startswith(
-                        f"REQUIRED_DIAGRAM_TYPE={expected_type}\n"
+        for overrides in cases:
+            with self.subTest(content_modes=overrides["contentModes"]):
+                raw = director_decision()
+                raw.update({
+                    **overrides,
+                    "scene": {"entities": [], "connections": []},
+                })
+                with self.assertRaisesRegex(GeminiProviderError, "empty StickScene"):
+                    await self.pipeline(StubTransport([gemini_text(raw)])).generate(
+                        "Explain evaporation."
                     )
-                )
 
-                visual = await pipeline.generate_visual(
-                    visual_request["visualStrategy"],
-                    visual_request["visualPrompt"],
-                    visual_request["visualAlt"],
-                )
-                self.assertEqual(visual["diagram"]["type"], expected_type)
-                diagram_request = json.loads(
-                    transport.requests[2][0].data.decode("utf-8")
-                )
-                self.assertEqual(
-                    diagram_request["generationConfig"]["responseSchema"]
-                    ["properties"]["type"]["enum"],
-                    [expected_type],
-                )
-
-    def test_explicit_visual_prompt_type_overrides_topic_words(self) -> None:
-        cases = (
-            ("Flowchart for baking an apple pie", "flowchart"),
-            ("Flow chart comparing both tree branches", "flowchart"),
-            ("Tree diagram of percentages and market shares", "tree"),
-            ("Tree chart comparing pie distributions", "tree"),
-            ("Use a tree diagram to organize pie chart categories", "tree"),
-            ("Venn diagram comparing pie charts", "vennDiagram"),
-            ("VennDiagram for tree branch percentages", "vennDiagram"),
-            ("Pie chart showing a sequential process", "pieChart"),
-            ("Use pieChart for tree species", "pieChart"),
-            ("Mind map about tree branches and percentages", "mindMap"),
-            ("MindMap for a comparison of both categories", "mindMap"),
-        )
-
-        for visual_prompt, expected_type in cases:
-            with self.subTest(visual_prompt=visual_prompt):
-                self.assertEqual(
-                    _infer_diagram_type(visual_prompt),
-                    expected_type,
-                )
-
-    def test_cache_schema_invalidates_results_without_recall_phrases(self) -> None:
-        self.assertEqual(CACHE_SCHEMA_VERSION, 6)
-
-    def test_cache_identity_separates_live_and_prepare_modes(self) -> None:
-        self.assertNotEqual(
-            _cache_key("Explain ATP", "live"),
-            _cache_key("Explain ATP", "prepare"),
-        )
-
-    async def test_diagram_retries_invalid_argument_with_compatibility_payload(
-        self,
-    ) -> None:
-        requests: list[tuple[urllib.request.Request, float]] = []
-        responses: list[object] = [
-            GeminiProviderError(
-                "The AI provider could not complete the request. "
-                "HTTP 400 INVALID_ARGUMENT: Request contains an invalid argument."
-            ),
-            diagram_response(),
-        ]
-
-        def transport(
-            request: urllib.request.Request,
-            timeout_seconds: float,
-        ) -> dict[str, Any]:
-            requests.append((request, timeout_seconds))
-            response = responses.pop(0)
-            if isinstance(response, Exception):
-                raise response
-            assert isinstance(response, dict)
-            return response
-
-        pipeline = GeminiPipeline(
-            text_api_key=TEST_DEV_KEY,
-            diagram_model=TEST_DIAGRAM_MODEL,
-            transport=transport,
-            cache_enabled=False,
-        )
-
-        visual = await pipeline.generate_visual(
-            "diagram",
-            "Explain a process from start to finish.",
-            "Process flowchart",
-        )
-
-        self.assertEqual(visual["diagram"]["type"], "flowchart")
-        self.assertEqual(len(requests), 2)
-        first_body = json.loads(requests[0][0].data.decode("utf-8"))
-        retry_body = json.loads(requests[1][0].data.decode("utf-8"))
-        self.assertIn("responseSchema", first_body["generationConfig"])
-        self.assertNotIn("responseSchema", retry_body["generationConfig"])
-        self.assertNotIn("responseMimeType", retry_body["generationConfig"])
-        self.assertNotIn("thinkingConfig", retry_body["generationConfig"])
-
-    async def test_diagram_compatibility_retry_accepts_json_fence(self) -> None:
-        fenced_response = diagram_response()
-        raw_json = fenced_response["candidates"][0]["content"]["parts"][0]["text"]
-        fenced_response["candidates"][0]["content"]["parts"][0]["text"] = (
-            f"```json\n{raw_json}\n```"
-        )
-        responses: list[object] = [
-            GeminiProviderError("HTTP 400 INVALID_ARGUMENT"),
-            fenced_response,
-        ]
-
-        def transport(
-            request: urllib.request.Request,
-            timeout_seconds: float,
-        ) -> dict[str, Any]:
-            response = responses.pop(0)
-            if isinstance(response, Exception):
-                raise response
-            assert isinstance(response, dict)
-            return response
-
-        pipeline = GeminiPipeline(
-            text_api_key=TEST_DEV_KEY,
-            diagram_model=TEST_DIAGRAM_MODEL,
-            transport=transport,
-            cache_enabled=False,
-        )
-
-        visual = await pipeline.generate_visual(
-            "diagram",
-            "Explain a process.",
-            "Process flowchart",
-        )
-
-        self.assertEqual(visual["diagram"]["type"], "flowchart")
-
-    async def test_diagram_repairs_duplicate_component_ids(self) -> None:
-        transport = StubTransport(
-            [
-                {
-                    "candidates": [
-                        {
-                            "content": {
-                                "parts": [
-                                    {
-                                        "text": json.dumps(
-                                            {
-                                                "version": 3,
-                                                "type": "flowchart",
-                                                "title": "Car power flow",
-                                                "description": "Fuel becomes motion.",
-                                                "lines": [
-                                                    {
-                                                        "type": "blockLine",
-                                                        "id": "line",
-                                                        "blocks": [
-                                                            {
-                                                                "type": "block",
-                                                                "id": "same",
-                                                                "heading": "Fuel ignites",
-                                                                "description": "Combustion releases energy.",
-                                                            },
-                                                            {
-                                                                "type": "block",
-                                                                "id": "same-2",
-                                                                "heading": "Wheels turn",
-                                                                "description": "The drivetrain transfers torque.",
-                                                            },
-                                                            {
-                                                                "type": "block",
-                                                                "id": "same",
-                                                                "heading": "Car moves",
-                                                                "description": "The repaired ID must keep advancing.",
-                                                            },
-                                                        ],
-                                                    }
-                                                ],
-                                            }
-                                        )
-                                    }
-                                ]
-                            }
-                        }
-                    ]
-                }
-            ]
-        )
-        pipeline = GeminiPipeline(
-            text_api_key=TEST_DEV_KEY,
-            diagram_model=TEST_DIAGRAM_MODEL,
-            transport=transport,
-            cache_enabled=False,
-        )
-
-        visual = await pipeline.generate_visual(
-            "diagram",
-            "Explain how a car turns fuel into motion.",
-            "Car power flow",
-        )
-
-        blocks = visual["diagram"]["lines"][0]["blocks"]
-        self.assertEqual(blocks[0]["id"], "same")
-        self.assertEqual(blocks[1]["id"], "same-2")
-        self.assertEqual(blocks[2]["id"], "same-3")
-
-    async def test_diagram_provider_error_is_not_silently_discarded(self) -> None:
-        transport = StubTransport(
-            [{"candidates": [{"content": {"parts": [{"text": "not-json"}]}}]}]
-        )
-        pipeline = GeminiPipeline(
-            text_api_key=TEST_DEV_KEY,
-            diagram_model=TEST_DIAGRAM_MODEL,
-            transport=transport,
-            cache_enabled=False,
-        )
-
-        with self.assertRaisesRegex(GeminiProviderError, "malformed diagram data"):
-            await pipeline.generate_visual(
-                "diagram",
-                "Explain a process.",
-                "Process diagram",
+    async def test_visual_and_diagram_cannot_duplicate_one_structured_scene(self) -> None:
+        raw = director_decision()
+        raw.update({"renderMode": "structured", "imagePrompt": ""})
+        with self.assertRaisesRegex(GeminiProviderError, "generated visual asset"):
+            await self.pipeline(StubTransport([gemini_text(raw)])).generate(
+                "Explain the water cycle."
             )
 
-    def test_normalizer_supports_every_hardcoded_diagram_type(self) -> None:
-        diagram_types = {
-            "flowchart",
-            "tree",
-            "vennDiagram",
-            "pieChart",
-            "mindMap",
-        }
+    async def test_heading_mode_shows_primary_and_is_preserved_on_update(self) -> None:
+        first = director_decision()
+        first["headingMode"] = "inheritPrimary"
+        first_result = await self.pipeline(StubTransport([gemini_text(first)])).generate(
+            "Explain the water cycle."
+        )
+        self.assertEqual(first_result["headingMode"], "show")
 
-        for diagram_type in diagram_types:
-            with self.subTest(diagram_type=diagram_type):
-                response = diagram_response(diagram_type=diagram_type)
-                raw = json.loads(response["candidates"][0]["content"]["parts"][0]["text"])
-                normalized = _normalize_diagram(
-                    raw,
-                    "Vehicle system diagram",
-                )
-                self.assertEqual(normalized["type"], diagram_type)
-                self.assertEqual(normalized["version"], 3)
-
-    def test_diagram_schema_does_not_use_numeric_enum_values(self) -> None:
-        from backend.services.gemini_pipeline import DIAGRAM_RESPONSE_SCHEMA
-
-        self.assertNotIn("anyOf", DIAGRAM_RESPONSE_SCHEMA)
-        version_schema = DIAGRAM_RESPONSE_SCHEMA["properties"]["version"]
-        self.assertEqual(version_schema["type"], "INTEGER")
-        self.assertNotIn("enum", version_schema)
-        self.assertEqual(version_schema["minimum"], 3)
-        self.assertEqual(version_schema["maximum"], 3)
-        self.assertEqual(
-            set(DIAGRAM_RESPONSE_SCHEMA["properties"]["type"]["enum"]),
-            {"flowchart", "tree", "vennDiagram", "pieChart", "mindMap"},
-        )
-
-    def test_normalizer_scales_pie_portions_to_one_hundred(self) -> None:
-        normalized = _normalize_diagram(
-            {
-                "version": 3,
-                "type": "pieChart",
-                "title": "Energy output",
-                "description": "Provider proportions need repair.",
-                "portions": [
-                    {"heading": "Motion", "proportion": 2},
-                    {"heading": "Heat", "proportion": 1},
-                ],
-            },
-            "Energy output",
-        )
-
-        self.assertEqual(
-            sum(portion["proportion"] for portion in normalized["portions"]),
-            100,
-        )
-
-    async def test_image_strategy_uses_no_text_prompt_prefix(self) -> None:
-        transport = StubTransport(
-            [
-                text_response(
-                    strategy="image",
-                    visual_prompt="A clean illustration of ATP production.",
-                    visual_alt="ATP production illustration.",
-                ),
-                planner_response(
-                    layout_mode="visualDominant",
-                    blocks=[image_block()],
-                ),
-                image_response(),
-            ]
-        )
-        pipeline = GeminiPipeline(
-            text_api_key=TEST_DEV_KEY,
-            image_api_key=TEST_PROD_KEY,
-            text_model=TEST_TEXT_MODEL,
-            image_model=TEST_IMAGE_MODEL,
-            transport=transport,
-            cache_enabled=False,
-        )
-
-        result = await pipeline.generate("Draw how a cell makes ATP.")
-        visual_request = result["_visualRequests"][0]
-        visual = await pipeline.generate_visual(
-            visual_request["visualStrategy"],
-            visual_request["visualPrompt"],
-            visual_request["visualAlt"],
-        )
-
-        self.assertEqual(len(transport.requests), 3)
-        image_request, _ = transport.requests[2]
-        self.assertIn(TEST_IMAGE_MODEL, image_request.full_url)
-        self.assertEqual(
-            dict(transport.requests[0][0].header_items())["X-goog-api-key"],
-            TEST_DEV_KEY,
-        )
-        self.assertEqual(
-            dict(transport.requests[1][0].header_items())["X-goog-api-key"],
-            TEST_DEV_KEY,
-        )
-        self.assertEqual(
-            dict(image_request.header_items())["X-goog-api-key"],
-            TEST_PROD_KEY,
-        )
-        image_body = json.loads(image_request.data.decode("utf-8"))
-        prompt = image_body["contents"][0]["parts"][0]["text"]
-        self.assertIn("absolutely no text", prompt)
-        self.assertEqual(visual["kind"], "generated")
-        self.assertNotIn("source", visual)
-
-    async def test_only_repeated_exact_input_uses_persistent_cache(self) -> None:
-        cache_dir = Path.cwd() / ".cache" / f"test-visual-cache-{uuid.uuid4().hex}"
-        transport = StubTransport(
-            [
-                text_response(
-                    strategy="diagram",
-                    visual_prompt="Show evaporation, condensation, and precipitation in the water cycle.",
-                    visual_alt="Water cycle flowchart.",
-                ),
-                planner_response(
-                    layout_mode="sequence",
-                    blocks=[
-                        {
-                            **diagram_block(),
-                            "visualPrompt": "Show evaporation, condensation, and precipitation in the water cycle.",
-                            "visualAlt": "Water cycle flowchart.",
-                        }
-                    ],
-                ),
-                diagram_response(diagram_type="flowchart", node_count=4),
-            ]
-        )
-        pipeline = GeminiPipeline(
-            text_api_key=TEST_DEV_KEY,
-            image_api_key=TEST_PROD_KEY,
-            text_model=TEST_TEXT_MODEL,
-            diagram_model=TEST_DIAGRAM_MODEL,
-            image_model=TEST_IMAGE_MODEL,
-            transport=transport,
-            cache_dir=cache_dir,
-        )
-
-        first = await pipeline.generate(
-            "Create a flowchart diagram of water cycle evaporation condensation precipitation."
-        )
-        visual_request = first["_visualRequests"][0]
-        visual = await pipeline.generate_visual(
-            visual_request["visualStrategy"],
-            visual_request["visualPrompt"],
-            visual_request["visualAlt"],
-        )
-        first_result = {key: value for key, value in first.items() if key != "_visualRequests"}
-        first_result["blocks"][0]["visual"] = visual
-        pipeline.cache_result(
-            "Create a flowchart diagram of water cycle evaporation condensation precipitation.",
-            first_result,
-        )
-
-        cached_transport = StubTransport([])
-        cached_pipeline = GeminiPipeline(
-            text_api_key=TEST_DEV_KEY,
-            image_api_key=TEST_PROD_KEY,
-            text_model=TEST_TEXT_MODEL,
-            diagram_model=TEST_DIAGRAM_MODEL,
-            image_model=TEST_IMAGE_MODEL,
-            transport=cached_transport,
-            cache_dir=cache_dir,
-        )
-        second = await cached_pipeline.generate(
-            "Create a flowchart diagram of water cycle evaporation condensation precipitation."
-        )
-
-        self.assertEqual(first_result, second)
-        self.assertEqual(cached_transport.requests, [])
-        self.assertIsNone(
-            cached_pipeline._get_cached_result(
-                "Make a flowchart diagram of water cycle evaporation condensation precipitation."
-            )
-        )
-
-    async def test_image_failure_returns_none_without_retry(self) -> None:
-        transport = StubTransport(
-            [
-                {
-                    "candidates": [
-                        {"content": {"parts": [{"text": "No image available"}]}}
-                    ]
+        update = director_decision("update")
+        update["targetSceneId"] = "existing"
+        update["headingMode"] = "show"
+        updated = await self.pipeline(StubTransport([gemini_text(update)])).generate(
+            "Clarify evaporation.",
+            context={
+                "turnSequence": 2,
+                "board": {
+                    "version": 1,
+                    "scenes": [{
+                        "sceneId": "existing",
+                        "conceptKey": "water-cycle",
+                        "title": "Water cycle",
+                        "headingMode": "inheritPrimary",
+                        "contentModes": ["diagram"],
+                        "placement": {"page": 1, "column": 0, "row": 0, "width": 12, "height": 6},
+                    }],
                 },
-            ]
+            },
         )
-        pipeline = GeminiPipeline(
-            text_api_key=TEST_DEV_KEY,
-            image_api_key=TEST_PROD_KEY,
-            text_model=TEST_TEXT_MODEL,
-            image_model=TEST_IMAGE_MODEL,
-            transport=transport,
-            cache_enabled=False,
+        self.assertEqual(updated["headingMode"], "inheritPrimary")
+
+    async def test_explicit_modes_are_exact_and_keep_cue_order(self) -> None:
+        cases = {
+            "I want a diagram of how a car functions.": ["diagram"],
+            "Let's look at a summary of how a car works.": ["notes"],
+            "Give me a summary, then a diagram of the car.": ["notes", "diagram"],
+            "Show a diagram and then a summary.": ["diagram", "notes"],
+            "Show a diagram, not a summary.": ["diagram"],
+        }
+        for prompt, expected in cases.items():
+            with self.subTest(prompt=prompt):
+                result = await self.pipeline(
+                    StubTransport([gemini_text(director_decision())])
+                ).generate(prompt)
+                self.assertEqual(result["contentModes"], expected)
+                self.assertEqual(bool(result["summaryBullets"]), "notes" in expected)
+                self.assertEqual(bool(result["stickScene"]), "diagram" in expected)
+                self.assertEqual(result["renderMode"], "structured")
+
+    async def test_ordinary_prompt_keeps_the_models_smallest_subset(self) -> None:
+        raw = director_decision()
+        raw.update({
+            "contentModes": ["visual"],
+            "summaryBullets": [],
+            "requestedFootprint": "small",
+            "scene": {"entities": [], "connections": []},
+        })
+        result = await self.pipeline(StubTransport([gemini_text(raw)])).generate(
+            "Explain evaporation."
+        )
+        self.assertEqual(result["contentModes"], ["visual"])
+
+    async def test_negation_never_leaks_a_forbidden_model_mode(self) -> None:
+        raw = director_decision()
+        raw.update({
+            "contentModes": ["diagram"],
+            "summaryBullets": [],
+            "requestedFootprint": "medium",
+        })
+        result = await self.pipeline(StubTransport([gemini_text(raw)])).generate(
+            "Explain evaporation without a diagram."
+        )
+        self.assertEqual(result["contentModes"], ["visual"])
+        self.assertIsNone(result["stickScene"])
+
+    def test_explicit_intent_uses_boundaries_negation_and_action_precedence(self) -> None:
+        combined = classify_whiteboard_intent(
+            "Add a diagram and summary, but do not include an image."
+        )
+        self.assertEqual(combined.required_modes, ("diagram", "notes"))
+        self.assertEqual(combined.forbidden_modes, ("visual",))
+        self.assertEqual(combined.action, "create")
+        self.assertEqual(
+            classify_whiteboard_intent("Add and then correct that diagram.").action,
+            "update",
+        )
+        self.assertEqual(
+            classify_whiteboard_intent("Those are notable changes.").required_modes,
+            (),
+        )
+        self.assertEqual(
+            classify_whiteboard_intent("Do not create a diagram.").forbidden_modes,
+            ("diagram",),
+        )
+        self.assertIsNone(classify_whiteboard_intent("Explain climate change.").action)
+        for prompt in ("Also explain another part of the car.",):
+            with self.subTest(prompt=prompt):
+                self.assertEqual(classify_whiteboard_intent(prompt).action, "create")
+        for prompt in (
+            "Next, teach the braking system.",
+            "And now cover the transmission.",
+        ):
+            with self.subTest(prompt=prompt):
+                self.assertIsNone(classify_whiteboard_intent(prompt).action)
+        for prompt in (
+            "Actually, make that a summary.",
+            "I meant the rear brakes.",
+            "Make that a diagram.",
+        ):
+            with self.subTest(prompt=prompt):
+                self.assertEqual(classify_whiteboard_intent(prompt).action, "update")
+
+    def test_explicit_intent_bounds_long_negation_to_its_clause(self) -> None:
+        diagram = classify_whiteboard_intent("Do not show me any sort of diagram.")
+        self.assertEqual(diagram.required_modes, ())
+        self.assertEqual(diagram.forbidden_modes, ("diagram",))
+
+        visual_diagram = classify_whiteboard_intent(
+            "Do not include any kind of visual diagram."
+        )
+        self.assertEqual(visual_diagram.required_modes, ())
+        self.assertEqual(visual_diagram.forbidden_modes, ("visual", "diagram"))
+
+        contrasted = classify_whiteboard_intent(
+            "Do not show a diagram but give me a summary."
+        )
+        self.assertEqual(contrasted.required_modes, ("notes",))
+        self.assertEqual(contrasted.forbidden_modes, ("diagram",))
+        self.assertEqual(
+            classify_whiteboard_intent("Not just a visual diagram.").required_modes,
+            ("visual", "diagram"),
+        )
+        instead = classify_whiteboard_intent(
+            "Do not show a diagram and instead use a visual."
+        )
+        self.assertEqual(instead.required_modes, ("visual",))
+        self.assertEqual(instead.forbidden_modes, ("diagram",))
+
+    def test_actually_only_marks_clause_level_corrections(self) -> None:
+        self.assertIsNone(
+            classify_whiteboard_intent(
+                "Explain how photosynthesis actually works."
+            ).action
+        )
+        self.assertEqual(
+            classify_whiteboard_intent(
+                "Explain evaporation. Actually, use a summary."
+            ).action,
+            "update",
+        )
+        self.assertEqual(
+            classify_whiteboard_intent("I meant the rear brakes.").action,
+            "update",
+        )
+        self.assertEqual(
+            classify_whiteboard_intent("Make that a diagram.").action,
+            "update",
         )
 
-        visual = await pipeline.generate_visual(
-            "image",
-            "A diagram of ATP production.",
-            "ATP production diagram.",
+    def test_nonexclusive_negation_only_exempts_its_own_token(self) -> None:
+        for prompt in (
+            "Use not only a diagram and no summary.",
+            "Not only a diagram without a summary.",
+        ):
+            with self.subTest(prompt=prompt):
+                intent = classify_whiteboard_intent(prompt)
+                self.assertEqual(intent.required_modes, ("diagram",))
+                self.assertEqual(intent.forbidden_modes, ("notes",))
+
+    async def test_unselected_visual_cannot_request_an_image(self) -> None:
+        raw = director_decision()
+        raw.update({
+            "contentModes": ["notes"],
+            "requestedFootprint": "small",
+            "renderMode": "generatedAsset",
+            "imagePrompt": "A cloud.",
+            "scene": {"entities": [], "connections": []},
+        })
+        with self.assertRaisesRegex(GeminiProviderError, "unselected visual"):
+            await self.pipeline(StubTransport([gemini_text(raw)])).generate("Define a cloud.")
+
+    async def test_duplicate_content_modes_are_rejected(self) -> None:
+        raw = director_decision()
+        raw["contentModes"] = ["notes", "notes"]
+        with self.assertRaisesRegex(GeminiProviderError, "invalid content modes"):
+            await self.pipeline(StubTransport([gemini_text(raw)])).generate("Explain evaporation.")
+
+    async def test_provider_schema_allows_only_complete_create_or_update_actions(self) -> None:
+        modes_schema = VISUAL_DIRECTOR_RESPONSE_SCHEMA["properties"]["contentModes"]
+        action_schema = VISUAL_DIRECTOR_RESPONSE_SCHEMA["properties"]["action"]
+        bullets_schema = VISUAL_DIRECTOR_RESPONSE_SCHEMA["properties"]["summaryBullets"]
+        strategy_schema = VISUAL_DIRECTOR_RESPONSE_SCHEMA["properties"]["boardStrategy"]
+        self.assertEqual(strategy_schema["enum"], ["integrate", "reset"])
+        self.assertEqual(action_schema["enum"], ["create", "update"])
+        self.assertEqual(modes_schema["minItems"], 1)
+        self.assertEqual(bullets_schema["maxItems"], 4)
+        self.assertNotIn("keywords", VISUAL_DIRECTOR_RESPONSE_SCHEMA["properties"])
+        self.assertIn("summaryBullets", VISUAL_DIRECTOR_RESPONSE_SCHEMA["required"])
+        self.assertIn("contentModes", VISUAL_DIRECTOR_RESPONSE_SCHEMA["required"])
+        self.assertIn("boardStrategy", VISUAL_DIRECTOR_RESPONSE_SCHEMA["required"])
+
+        with self.assertRaisesRegex(GeminiProviderError, "invalid action"):
+            await self.pipeline(StubTransport([gemini_text(director_decision("hold"))])).generate("Moving on.")
+
+        accepted = director_decision()
+        accepted["contentModes"] = []
+        with self.assertRaisesRegex(GeminiProviderError, "invalid content modes"):
+            await self.pipeline(StubTransport([gemini_text(accepted)])).generate("Explain evaporation.")
+
+        invalid_strategy = director_decision()
+        invalid_strategy["boardStrategy"] = "archive"
+        with self.assertRaisesRegex(GeminiProviderError, "invalid board strategy"):
+            await self.pipeline(StubTransport([gemini_text(invalid_strategy)])).generate(
+                "Explain evaporation."
+            )
+
+    async def test_independent_subject_reset_uses_an_empty_page_one_board_at_capacity(self) -> None:
+        raw = director_decision("update")
+        raw.update({
+            "boardStrategy": "reset",
+            "targetSceneId": "scene-0",
+            "conceptKey": "car-functions",
+            "title": "How a car functions",
+            "summary": "A car converts stored energy into controlled motion.",
+        })
+        scenes = [{
+            "sceneId": f"scene-{index}",
+            "conceptKey": "skeletal-system" if index == 0 else f"concept-{index}",
+            "contentModes": ["notes"],
+            "placement": {
+                "page": index + 1, "column": 0, "row": 0, "width": 8, "height": 5,
+            },
+        } for index in range(48)]
+
+        result = await self.pipeline(StubTransport([gemini_text(raw)])).generate(
+            "Now teach how a car functions.",
+            context={
+                "turnSequence": 49,
+                "recentTurns": [{
+                    "turnSequence": 48,
+                    "userInput": "Explain the skeletal system.",
+                    "action": "create",
+                    "conceptKey": "skeletal-system",
+                    "summary": "Bones support the body.",
+                }],
+                "board": {"version": 48, "currentPage": 48, "scenes": scenes},
+            },
         )
 
+        self.assertEqual(result["boardStrategy"], "reset")
+        self.assertEqual(result["action"], "create")
+        self.assertIsNone(result["targetSceneId"])
+        self.assertEqual(result["sceneId"], "scene-49-car-functions")
+        self.assertEqual(result["placement"]["page"], 1)
+        self.assertEqual(result["boardVersion"], 49)
+        self.assertEqual(result["turnSequence"], 49)
+
+    async def test_explicit_addition_forces_integration_even_when_model_requests_reset(self) -> None:
+        raw = director_decision()
+        raw["boardStrategy"] = "reset"
+        result = await self.pipeline(StubTransport([gemini_text(raw)])).generate(
+            "Also explain another water-cycle example.",
+            context={
+                "turnSequence": 2,
+                "board": {
+                    "version": 1,
+                    "scenes": [{
+                        "sceneId": "existing",
+                        "conceptKey": "water-cycle",
+                        "contentModes": ["notes"],
+                        "placement": {"page": 1, "column": 0, "row": 0, "width": 8, "height": 5},
+                    }],
+                },
+            },
+        )
+        self.assertEqual(result["boardStrategy"], "integrate")
+        self.assertEqual(result["action"], "create")
+        self.assertEqual(result["placement"]["page"], 2)
+
+    async def test_sequencing_language_keeps_an_unrelated_model_reset(self) -> None:
+        for prompt in (
+            "Next, explain how a car works.",
+            "And now teach how a car works.",
+        ):
+            with self.subTest(prompt=prompt):
+                raw = director_decision("update")
+                raw.update({
+                    "boardStrategy": "reset",
+                    "targetSceneId": "skeleton",
+                    "conceptKey": "car-functions",
+                    "title": "How a car functions",
+                    "summary": "A car converts stored energy into controlled motion.",
+                })
+                result = await self.pipeline(StubTransport([gemini_text(raw)])).generate(
+                    prompt,
+                    context={
+                        "turnSequence": 2,
+                        "board": {
+                            "version": 1,
+                            "scenes": [{
+                                "sceneId": "skeleton",
+                                "conceptKey": "skeletal-system",
+                                "contentModes": ["notes"],
+                                "placement": {
+                                    "page": 1, "column": 0, "row": 0,
+                                    "width": 8, "height": 5,
+                                },
+                            }],
+                        },
+                    },
+                )
+                self.assertEqual(result["boardStrategy"], "reset")
+                self.assertEqual(result["action"], "create")
+                self.assertIsNone(result["targetSceneId"])
+                self.assertEqual(result["conceptKey"], "car-functions")
+                self.assertEqual(result["placement"]["page"], 1)
+
+    async def test_duplicate_create_becomes_stable_update(self) -> None:
+        transport = StubTransport([gemini_text(director_decision())])
+        result = await self.pipeline(transport).generate(
+            "The water also condenses.",
+            context={
+                "turnSequence": 5,
+                "board": {
+                    "version": 3,
+                    "currentPage": 1,
+                    "scenes": [{
+                        "sceneId": "existing", "conceptKey": "water-cycle",
+                        "contentModes": ["diagram"],
+                        "placement": {"page": 1, "column": 12, "row": 2, "width": 12, "height": 6},
+                    }],
+                },
+            },
+        )
+        self.assertEqual(result["action"], "update")
+        self.assertEqual(result["sceneId"], "existing")
+        self.assertEqual(result["placement"]["column"], 0)
+
+    async def test_explicit_addition_creates_a_unique_compartment_for_same_topic(self) -> None:
+        raw = director_decision("update")
+        raw["targetSceneId"] = "existing"
+        result = await self.pipeline(StubTransport([gemini_text(raw)])).generate(
+            "Also explain another part of the water cycle.",
+            context={
+                "turnSequence": 6,
+                "board": {
+                    "version": 1,
+                    "currentPage": 1,
+                    "scenes": [{
+                        "sceneId": "existing",
+                        "conceptKey": "water-cycle",
+                        "contentModes": ["notes"],
+                        "placement": {"page": 1, "column": 0, "row": 0, "width": 8, "height": 5},
+                    }],
+                },
+            },
+        )
+        self.assertEqual(result["action"], "create")
+        self.assertIsNone(result["targetSceneId"])
+        self.assertEqual(result["contentModes"], ["visual", "notes", "diagram"])
+        self.assertEqual(result["conceptKey"], "water-cycle-addition-6")
+        self.assertNotEqual(result["sceneId"], "existing")
+
+    async def test_natural_correction_updates_a_safely_resolved_scene(self) -> None:
+        raw = director_decision("create")
+        result = await self.pipeline(StubTransport([gemini_text(raw)])).generate(
+            "Actually, make that a summary.",
+            context={
+                "turnSequence": 7,
+                "board": {
+                    "version": 1,
+                    "currentPage": 1,
+                    "scenes": [{
+                        "sceneId": "existing",
+                        "conceptKey": "water-cycle",
+                        "contentModes": ["diagram"],
+                        "placement": {"page": 1, "column": 0, "row": 0, "width": 12, "height": 6},
+                    }],
+                },
+            },
+        )
+        self.assertEqual(result["action"], "update")
+        self.assertEqual(result["targetSceneId"], "existing")
+        self.assertEqual(result["contentModes"], ["notes"])
+
+    async def test_mid_sentence_actually_does_not_overwrite_recent_scene(self) -> None:
+        raw = director_decision("create")
+        raw.update({
+            "conceptKey": "photosynthesis",
+            "title": "Photosynthesis",
+            "summary": "Plants turn light energy into stored chemical energy.",
+        })
+        result = await self.pipeline(StubTransport([gemini_text(raw)])).generate(
+            "Explain how photosynthesis actually works.",
+            context={
+                "turnSequence": 8,
+                "recentTurns": [{
+                    "turnSequence": 7,
+                    "userInput": "Explain the water cycle.",
+                    "action": "create",
+                    "conceptKey": "water-cycle",
+                    "summary": "Water circulates through the environment.",
+                }],
+                "board": {
+                    "version": 1,
+                    "currentPage": 1,
+                    "scenes": [{
+                        "sceneId": "existing",
+                        "conceptKey": "water-cycle",
+                        "contentModes": ["diagram"],
+                        "placement": {
+                            "page": 1, "column": 0, "row": 0,
+                            "width": 12, "height": 6,
+                        },
+                    }],
+                },
+            },
+        )
+        self.assertEqual(result["action"], "create")
+        self.assertIsNone(result["targetSceneId"])
+        self.assertEqual(result["conceptKey"], "photosynthesis")
+        self.assertNotEqual(result["sceneId"], "existing")
+
+    async def test_correction_without_a_safe_target_creates_instead_of_overwriting(self) -> None:
+        raw = director_decision("update")
+        raw["targetSceneId"] = "missing"
+        raw["conceptKey"] = "unresolved-topic"
+        result = await self.pipeline(StubTransport([gemini_text(raw)])).generate(
+            "Correct the unresolved topic.",
+            context={
+                "turnSequence": 3,
+                "board": {
+                    "version": 2,
+                    "currentPage": 1,
+                    "scenes": [
+                        {
+                            "sceneId": "first", "conceptKey": "gravity",
+                            "contentModes": ["notes"],
+                            "placement": {"page": 1, "column": 0, "row": 0, "width": 8, "height": 5},
+                        },
+                        {
+                            "sceneId": "second", "conceptKey": "friction",
+                            "contentModes": ["notes"],
+                            "placement": {"page": 1, "column": 9, "row": 0, "width": 8, "height": 5},
+                        },
+                    ],
+                },
+            },
+        )
+        self.assertEqual(result["action"], "create")
+        self.assertIsNone(result["targetSceneId"])
+
+    async def test_full_model_request_remains_page_exclusive(self) -> None:
+        raw = director_decision()
+        raw["requestedFootprint"] = "full"
+        result = await self.pipeline(StubTransport([gemini_text(raw)])).generate(
+            "Explain the complete water cycle."
+        )
+        self.assertEqual(result["requestedFootprint"], "full")
+        self.assertEqual((result["placement"]["width"], result["placement"]["height"]), (24, 10))
+
+    async def test_update_preserves_the_target_scenes_concept_key(self) -> None:
+        raw = director_decision("update")
+        raw["targetSceneId"] = "existing"
+        raw["conceptKey"] = "model-renamed-concept"
+        transport = StubTransport([gemini_text(raw)])
+
+        result = await self.pipeline(transport).generate(
+            "Correct the existing water-cycle scene.",
+            context={
+                "turnSequence": 6,
+                "board": {
+                    "version": 3,
+                    "currentPage": 1,
+                    "scenes": [{
+                        "sceneId": "existing",
+                        "conceptKey": "water-cycle",
+                        "contentModes": ["diagram"],
+                        "placement": {
+                            "page": 1,
+                            "column": 8,
+                            "row": 2,
+                            "width": 16,
+                            "height": 7,
+                        },
+                    }],
+                },
+            },
+        )
+
+        self.assertEqual(result["action"], "update")
+        self.assertEqual(result["sceneId"], "existing")
+        self.assertEqual(result["conceptKey"], "water-cycle")
+
+    async def test_exact_concept_scene_wins_over_a_conflicting_valid_target(self) -> None:
+        raw = director_decision("update")
+        raw["targetSceneId"] = "wrong-target"
+        result = await self.pipeline(StubTransport([gemini_text(raw)])).generate(
+            "Update the water cycle.",
+            context={
+                "turnSequence": 7,
+                "board": {
+                    "version": 2,
+                    "scenes": [
+                        {
+                            "sceneId": "wrong-target",
+                            "conceptKey": "photosynthesis",
+                            "contentModes": ["notes"],
+                            "placement": {"page": 1, "column": 0, "row": 0, "width": 8, "height": 5},
+                        },
+                        {
+                            "sceneId": "water-target",
+                            "conceptKey": "water-cycle",
+                            "contentModes": ["notes"],
+                            "placement": {"page": 2, "column": 0, "row": 0, "width": 8, "height": 5},
+                        },
+                    ],
+                },
+            },
+        )
+        self.assertEqual(result["action"], "update")
+        self.assertEqual(result["sceneId"], "water-target")
+        self.assertEqual(result["targetSceneId"], "water-target")
+        self.assertEqual(result["conceptKey"], "water-cycle")
+
+    async def test_create_raises_when_board_has_48_scenes(self) -> None:
+        scenes = [
+            {
+                "sceneId": f"scene-{index}",
+                "conceptKey": f"concept-{index}",
+                "placement": {
+                    "page": index + 1,
+                    "column": 0,
+                    "row": 0,
+                    "width": 8,
+                    "height": 5,
+                },
+            }
+            for index in range(48)
+        ]
+        transport = StubTransport([gemini_text(director_decision())])
+
+        with self.assertRaisesRegex(GeminiProviderError, "48-scene limit"):
+            await self.pipeline(transport).generate(
+                "Add the water cycle.",
+                context={
+                    "turnSequence": 49,
+                    "board": {"version": 48, "currentPage": 1, "scenes": scenes},
+                },
+            )
+
+    async def test_full_board_still_allows_an_existing_scene_update(self) -> None:
+        scenes = [
+            {
+                "sceneId": f"scene-{index}",
+                "conceptKey": "water-cycle" if index == 0 else f"concept-{index}",
+                "placement": {
+                    "page": index + 1,
+                    "column": 0,
+                    "row": 0,
+                    "width": 8,
+                    "height": 5,
+                },
+            }
+            for index in range(48)
+        ]
+        raw = director_decision("update")
+        raw["targetSceneId"] = "scene-0"
+        transport = StubTransport([gemini_text(raw)])
+
+        result = await self.pipeline(transport).generate(
+            "Update the water cycle.",
+            context={
+                "turnSequence": 49,
+                "board": {"version": 48, "currentPage": 1, "scenes": scenes},
+            },
+        )
+
+        self.assertEqual(result["action"], "update")
+        self.assertEqual(result["boardVersion"], 49)
+        self.assertEqual(result["sceneId"], "scene-0")
+        self.assertEqual(result["placement"]["page"], 1)
+
+    async def test_stale_update_becomes_a_fresh_create(self) -> None:
+        raw = director_decision("update")
+        raw["targetSceneId"] = "missing"
+        transport = StubTransport([gemini_text(raw)])
+        result = await self.pipeline(transport).generate("Correct that detail.")
+        self.assertEqual(result["action"], "create")
+        self.assertIsNone(result["targetSceneId"])
+        self.assertEqual(result["sceneId"], "scene-0-water-cycle")
+        self.assertIsNotNone(result["placement"])
+
+    async def test_stale_update_recovers_by_exact_concept_before_creating(self) -> None:
+        raw = director_decision("update")
+        raw["targetSceneId"] = "missing"
+        result = await self.pipeline(StubTransport([gemini_text(raw)])).generate(
+            "Correct the water cycle.",
+            context={
+                "turnSequence": 4,
+                "board": {
+                    "version": 1,
+                    "scenes": [{
+                        "sceneId": "water-scene",
+                        "conceptKey": "water-cycle",
+                        "contentModes": ["notes"],
+                        "placement": {"page": 1, "column": 0, "row": 0, "width": 8, "height": 5},
+                    }],
+                },
+            },
+        )
+        self.assertEqual(result["action"], "update")
+        self.assertEqual(result["targetSceneId"], "water-scene")
+        self.assertEqual(result["sceneId"], "water-scene")
+
+    async def test_stale_update_can_recover_through_current_concept_memory(self) -> None:
+        raw = director_decision("update")
+        raw["targetSceneId"] = "missing"
+        result = await self.pipeline(StubTransport([gemini_text(raw)])).generate(
+            "Correct condensation in that cycle.",
+            context={
+                "turnSequence": 5,
+                "concepts": [{"conceptKey": "water-cycle", "sceneId": "memory-scene"}],
+                "board": {
+                    "version": 2,
+                    "scenes": [{
+                        "sceneId": "memory-scene",
+                        "conceptKey": "",
+                        "contentModes": ["notes"],
+                        "placement": {"page": 1, "column": 0, "row": 0, "width": 8, "height": 5},
+                    }],
+                },
+            },
+        )
+        self.assertEqual(result["action"], "update")
+        self.assertEqual(result["sceneId"], "memory-scene")
+
+    async def test_stale_update_does_not_fuzzy_match_a_nearby_concept(self) -> None:
+        raw = director_decision("update")
+        raw["targetSceneId"] = "missing"
+        raw["conceptKey"] = "water-cycles"
+        result = await self.pipeline(StubTransport([gemini_text(raw)])).generate(
+            "Teach a separate cycle.",
+            context={
+                "turnSequence": 6,
+                "board": {
+                    "version": 1,
+                    "scenes": [{
+                        "sceneId": "water-scene",
+                        "conceptKey": "water-cycle",
+                        "contentModes": ["notes"],
+                        "placement": {"page": 1, "column": 0, "row": 0, "width": 8, "height": 5},
+                    }],
+                },
+            },
+        )
+        self.assertEqual(result["action"], "create")
+        self.assertIsNone(result["targetSceneId"])
+
+    async def test_context_is_bounded_for_direct_pipeline_callers(self) -> None:
+        transport = StubTransport([gemini_text(director_decision())])
+        await self.pipeline(transport).generate(
+            "Continue.",
+            context={
+                "lessonContext": {"source": "s" * 5000},
+                "recentTurns": [{"turnSequence": i, "userInput": "x" * 500} for i in range(10)],
+                "concepts": [{"conceptKey": f"c-{i}", "title": "Title"} for i in range(30)],
+            },
+        )
+        body = json.loads(transport.requests[0][0].data)
+        context = json.loads(body["contents"][0]["parts"][0]["text"])
+        self.assertEqual(len(context["lessonContext"]["source"]), 3600)
+        self.assertLessEqual(len(context["recentTurns"]), 6)
+        self.assertLessEqual(sum(len(turn["userInput"]) for turn in context["recentTurns"]), 2400)
+        self.assertEqual(len(context["concepts"]), 24)
+
+    async def test_director_receives_context_needed_to_choose_update_or_create(self) -> None:
+        transport = StubTransport([gemini_text(director_decision())])
+        await self.pipeline(transport).generate(
+            "Show another example of that.",
+            context={
+                "turnSequence": 8,
+                "recentTurns": [
+                    {
+                        "turnSequence": 6,
+                        "userInput": "We finished the warmup.",
+                        "action": "hold",
+                        "conceptKey": "",
+                        "summary": "",
+                    },
+                    {
+                        "turnSequence": 7,
+                        "userInput": "Explain evaporation.",
+                        "action": "create",
+                        "conceptKey": "water-cycle",
+                        "summary": "Liquid water becomes vapor.",
+                    },
+                ],
+                "concepts": [{
+                    "conceptKey": "water-cycle",
+                    "title": "Water cycle",
+                    "summary": "Liquid water becomes vapor.",
+                    "sceneId": "scene-water",
+                }],
+                "board": {
+                    "version": 1,
+                    "currentPage": 1,
+                    "scenes": [{
+                        "sceneId": "scene-water",
+                        "conceptKey": "water-cycle",
+                        "title": "Water cycle",
+                        "contentModes": ["diagram"],
+                        "placement": {
+                            "page": 1,
+                            "column": 0,
+                            "row": 0,
+                            "width": 12,
+                            "height": 6,
+                        },
+                    }],
+                },
+            },
+        )
+
+        body = json.loads(transport.requests[0][0].data)
+        context = json.loads(body["contents"][0]["parts"][0]["text"])
+        self.assertEqual(context["userInput"], "Show another example of that.")
+        self.assertEqual(context["recentTurns"][-1]["action"], "create")
+        self.assertEqual(context["recentTurns"][-1]["conceptKey"], "water-cycle")
+        self.assertEqual(context["concepts"][0]["sceneId"], "scene-water")
+        self.assertNotIn("keywords", context["concepts"][0])
+        self.assertEqual(context["board"]["scenes"][0]["sceneId"], "scene-water")
+        self.assertEqual(context["explicitIntent"]["requiredContentModes"], [])
+
+    async def test_malformed_provider_decision_fails_after_one_call(self) -> None:
+        transport = StubTransport([gemini_text("not-json")])
+        with self.assertRaisesRegex(GeminiProviderError, "malformed Visual Director"):
+            await self.pipeline(transport).generate("Explain ATP.")
         self.assertEqual(len(transport.requests), 1)
-        self.assertIsNone(visual)
 
-    async def test_missing_text_key_fails_before_any_request(self) -> None:
-        transport = StubTransport([])
-        pipeline = GeminiPipeline(
-            text_api_key="",
-            image_api_key=TEST_PROD_KEY,
-            text_model=TEST_TEXT_MODEL,
-            image_model=TEST_IMAGE_MODEL,
-            transport=transport,
-            cache_enabled=False,
+    async def test_image_prompt_and_response_remain_server_side(self) -> None:
+        encoded = base64.b64encode(b"image").decode()
+        transport = StubTransport([{"candidates": [{"content": {"parts": [{"inlineData": {"mimeType": "image/png", "data": encoded}}]}}]}])
+        visual = await self.pipeline(transport).generate_visual(
+            "image", "Two people exchange a ball.", "Exchange"
         )
+        body = json.loads(transport.requests[0][0].data)
+        self.assertNotIn("thinkingConfig", json.dumps(body))
+        prompt_text = body["contents"][0]["parts"][0]["text"].lower()
+        self.assertIn("sparse monochrome black or neutral outline drawing", prompt_text)
+        self.assertIn("grounded only in the supplied facts", prompt_text)
+        self.assertIn("white or transparent background", prompt_text)
+        self.assertIn("stick figures", prompt_text)
+        self.assertIn("no color fills", prompt_text)
+        self.assertIn("numbers", prompt_text)
+        self.assertIn("watermarks", prompt_text)
+        self.assertIn("photorealism", prompt_text)
+        self.assertEqual(visual["mimeType"], "image/png")
 
+    async def test_image_failure_returns_none_and_does_not_retry(self) -> None:
+        transport = StubTransport([gemini_text("No image")])
+        visual = await self.pipeline(transport).generate_visual("image", "Prompt", "Alt")
+        self.assertIsNone(visual)
+        self.assertEqual(len(transport.requests), 1)
+
+    async def test_missing_text_key_fails_without_transport(self) -> None:
+        transport = StubTransport([])
+        pipeline = GeminiPipeline(text_api_key="", text_model=TEST_MODEL, transport=transport)
         with self.assertRaises(GeminiConfigurationError):
             await pipeline.generate("Explain ATP.")
-
         self.assertEqual(transport.requests, [])
 
-    async def test_missing_image_key_returns_none_without_request(self) -> None:
-        transport = StubTransport([image_response()])
-        pipeline = GeminiPipeline(
-            text_api_key=TEST_DEV_KEY,
-            image_api_key="",
-            text_model=TEST_TEXT_MODEL,
-            image_model=TEST_IMAGE_MODEL,
-            transport=transport,
-            cache_enabled=False,
-        )
-
-        visual = await pipeline.generate_visual(
-            "image",
-            "A diagram of ATP production.",
-            "ATP production diagram.",
-        )
-
-        self.assertIsNone(visual)
-        self.assertEqual(transport.requests, [])
-
-    async def test_legacy_gemini_key_env_is_ignored(self) -> None:
-        transport = StubTransport([])
+    def test_prod_key_and_stable_models_are_the_runtime_defaults(self) -> None:
+        obsolete_key = "DEV_" + "GEMINI_API_KEY"
         with patch.dict(
             "os.environ",
             {
-                "GEMINI_API_KEY": "legacy-secret",
-                "GEMINI_TEXT_MODEL": TEST_TEXT_MODEL,
-                "GEMINI_IMAGE_MODEL": TEST_IMAGE_MODEL,
+                obsolete_key: "development-secret",
+                "PROD_GEMINI_API_KEY": " production-secret ",
+                "GEMINI_TEXT_MODEL": "   ",
+                "GEMINI_IMAGE_MODEL": "",
+            },
+            clear=True,
+        ):
+            pipeline = GeminiPipeline(transport=StubTransport([]))
+
+        self.assertEqual(pipeline.text_api_key, "production-secret")
+        self.assertEqual(pipeline.image_api_key, "production-secret")
+        self.assertEqual(pipeline.text_model, DEFAULT_TEXT_MODEL)
+        self.assertEqual(pipeline.image_model, DEFAULT_IMAGE_MODEL)
+
+    def test_nonblank_env_models_override_defaults(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "PROD_GEMINI_API_KEY": TEST_KEY,
+                "GEMINI_TEXT_MODEL": " text-override ",
+                "GEMINI_IMAGE_MODEL": " image-override ",
+            },
+            clear=True,
+        ):
+            pipeline = GeminiPipeline(transport=StubTransport([]))
+
+        self.assertEqual(pipeline.text_model, "text-override")
+        self.assertEqual(pipeline.image_model, "image-override")
+
+    def test_explicit_constructor_values_keep_precedence_and_empty_semantics(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "PROD_GEMINI_API_KEY": "environment-secret",
+                "GEMINI_TEXT_MODEL": "environment-text",
+                "GEMINI_IMAGE_MODEL": "environment-image",
             },
             clear=True,
         ):
             pipeline = GeminiPipeline(
-                transport=transport,
-                cache_enabled=False,
+                text_api_key=" explicit-text-key ",
+                image_api_key=" explicit-image-key ",
+                text_model="",
+                image_model="",
+                transport=StubTransport([]),
             )
 
-        with self.assertRaises(GeminiConfigurationError):
-            await pipeline.generate("Explain ATP.")
+        self.assertEqual(pipeline.text_api_key, "explicit-text-key")
+        self.assertEqual(pipeline.image_api_key, "explicit-image-key")
+        self.assertEqual(pipeline.text_model, "")
+        self.assertEqual(pipeline.image_model, "")
 
-        self.assertEqual(transport.requests, [])
+    def test_prompt_covers_required_private_direction(self) -> None:
+        prompt_text = VISUAL_DIRECTOR_SYSTEM_INSTRUCTION.lower()
+        for phrase in (
+            "evidence in this order", "one atomic concept", "update",
+            "left-to-right", "12 by 8", "image gate", "never expose reasoning", "json only",
+            "sparse monochrome black or neutral outline",
+            "grounded only in the supplied facts", "embedded text", "watermarks",
+            "smallest useful ordered contentmodes subset", "visual, notes, and diagram",
+            "concept-specific scene entities", "never a partial patch",
+            "never emit html, css, svg", "do not provide coordinates or sizes",
+        ):
+            self.assertIn(phrase, prompt_text)
+        self.assertNotIn("hold", prompt_text)
 
-    async def test_malformed_notes_do_not_trigger_planner_call(self) -> None:
-        transport = StubTransport(
-            [
-                {
-                    "candidates": [
-                        {"content": {"parts": [{"text": "not-json"}]}}
-                    ]
-                }
-            ]
+    def test_prompt_decides_topic_continuation_before_content_modes(self) -> None:
+        prompt_text = VISUAL_DIRECTOR_SYSTEM_INSTRUCTION.lower()
+        strategy_policy = prompt_text.index("board strategy decision")
+        action_policy = prompt_text.index("action decision order")
+        content_direction = prompt_text.index("content direction")
+        self.assertLess(strategy_policy, action_policy)
+        self.assertLess(action_policy, content_direction)
+        for phrase in (
+            "use integrate by default",
+            "transition is ambiguous",
+            "same subject, a related continuation, clarification, correction, example, comparison, or explicit addition",
+            "independent instructional subject or domain",
+            "skeletal system to how a car functions resets the board",
+            "forces integrate",
+            "explicitly names, points to, or corrects an existing topic or scene",
+            "single strongest semantic match",
+            "including synonyms and rephrasings",
+            "most recent topic that still exists on the board",
+            "correction, clarification, deepening, rephrasing, example, counterexample",
+            "independently teachable atomic concept with no clear existing-topic anchor",
+            "two or more existing targets are comparably plausible",
+            "create one focused scene rather than merging unrelated scenes",
+            "set targetsceneid to the anchored board scene",
+            "copy its stored conceptkey exactly",
+        ):
+            self.assertIn(phrase, prompt_text)
+
+
+class GeminiTransportTests(unittest.TestCase):
+    def test_quota_error_preserves_bounded_context_for_server_logs(self) -> None:
+        error = urllib.error.HTTPError(
+            "https://provider.invalid", 429, "Too Many Requests", {},
+            io.BytesIO(json.dumps({"error": {"status": "RESOURCE_EXHAUSTED", "message": "quota"}}).encode()),
         )
-        pipeline = GeminiPipeline(
-            text_api_key=TEST_DEV_KEY,
-            image_api_key=TEST_PROD_KEY,
-            text_model=TEST_TEXT_MODEL,
-            image_model=TEST_IMAGE_MODEL,
-            transport=transport,
-            cache_enabled=False,
-        )
-
-        with self.assertRaisesRegex(RuntimeError, "malformed notes"):
-            await pipeline.generate("Explain ATP.")
-
-        self.assertEqual(len(transport.requests), 1)
-
-    async def test_malformed_planner_fails_after_notes_call(self) -> None:
-        transport = StubTransport(
-            [
-                text_response(),
-                {
-                    "candidates": [
-                        {"content": {"parts": [{"text": "not-json"}]}}
-                    ]
-                },
-            ]
-        )
-        pipeline = GeminiPipeline(
-            text_api_key=TEST_DEV_KEY,
-            image_api_key=TEST_PROD_KEY,
-            text_model=TEST_TEXT_MODEL,
-            image_model=TEST_IMAGE_MODEL,
-            transport=transport,
-            cache_enabled=False,
-        )
-
-        with self.assertRaisesRegex(RuntimeError, "malformed composition"):
-            await pipeline.generate("Explain ATP.")
-
-        self.assertEqual(len(transport.requests), 2)
+        with patch("urllib.request.urlopen", side_effect=error):
+            with self.assertRaisesRegex(GeminiProviderError, "RESOURCE_EXHAUSTED"):
+                _default_json_transport(urllib.request.Request("https://provider.invalid"), 1)
 
 
 if __name__ == "__main__":
