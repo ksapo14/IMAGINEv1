@@ -123,6 +123,8 @@ backend uses port `8010`.
 ## Vercel frontend-only deployment
 
 Vercel builds the Next.js frontend with `npm ci` and `npm run build:vercel`.
+The root `.npmrc` must keep legacy peer resolution because the lockfile was
+generated with that mode.
 That build automatically selects frontend-only mode and native Next.js output;
 no Vercel system-variable exposure or dashboard setup is required. The existing
 `npm run build` command remains the Vinext/Cloudflare build, and non-Vercel

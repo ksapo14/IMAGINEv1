@@ -339,6 +339,20 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn("Frontend: http://localhost:3000", dev_script)
         self.assertIn("& $next dev -p 3000", dev_script)
 
+    def test_vercel_install_uses_the_lockfile_peer_resolution_mode(self) -> None:
+        npmrc = (ROOT / ".npmrc").read_text(encoding="utf-8").splitlines()
+        vercel = json.loads((ROOT / "vercel.json").read_text(encoding="utf-8"))
+        package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
+        package_lock = json.loads(
+            (ROOT / "package-lock.json").read_text(encoding="utf-8")
+        )
+
+        self.assertEqual(npmrc, ["legacy-peer-deps=true"])
+        self.assertEqual(vercel["installCommand"], "npm ci")
+        self.assertNotIn("webpack", package["dependencies"])
+        self.assertNotIn("webpack", package["devDependencies"])
+        self.assertNotIn("node_modules/webpack", package_lock["packages"])
+
     def test_vercel_uses_the_next_build_without_replacing_vinext(self) -> None:
         vercel = json.loads((ROOT / "vercel.json").read_text(encoding="utf-8"))
         package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
