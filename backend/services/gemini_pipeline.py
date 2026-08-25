@@ -288,7 +288,7 @@ def _as_int(value: Any, fallback: int) -> int:
 
 
 class GeminiPipeline:
-    """Make one Visual Director decision, plus an optional independent image."""
+    """Make one Live Assistant decision, plus an optional independent image."""
 
     def __init__(
         self,
@@ -425,7 +425,7 @@ class GeminiPipeline:
         if not text:
             raise GeminiProviderError("The AI provider returned no decision.")
         return self._normalize_decision(
-            _parse_json_object(text, "Visual Director data"),
+            _parse_json_object(text, "Live Assistant data"),
             context,
             explicit_intent,
         )

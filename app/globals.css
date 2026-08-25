@@ -370,16 +370,6 @@ select:focus-visible {
   display: none;
 }
 
-.marketing-eyebrow {
-  margin: 0;
-  color: var(--marketing-muted);
-  font-size: 0.7rem;
-  font-weight: 820;
-  letter-spacing: 0.15em;
-  line-height: 1.3;
-  text-transform: uppercase;
-}
-
 .marketing-hero {
   display: grid;
   min-height: min(820px, calc(100dvh - 78px));
@@ -392,7 +382,7 @@ select:focus-visible {
 .marketing-hero-copy h1,
 .marketing-page-hero h1 {
   max-width: 1000px;
-  margin: 24px 0 0;
+  margin: 0;
   font-family: Georgia, "Times New Roman", serif;
   font-size: clamp(4rem, 8.6vw, 8.4rem);
   font-weight: 400;
@@ -498,11 +488,7 @@ select:focus-visible {
 }
 
 .marketing-section-heading {
-  display: grid;
   max-width: 1000px;
-  grid-template-columns: minmax(130px, 0.35fr) minmax(0, 1.65fr);
-  align-items: start;
-  gap: 28px 56px;
 }
 
 .marketing-section-heading h2,
@@ -520,9 +506,8 @@ select:focus-visible {
 }
 
 .marketing-lede {
-  grid-column: 2;
   max-width: 620px;
-  margin: 0;
+  margin: 28px 0 0;
   color: var(--marketing-muted);
   font-size: 1rem;
   line-height: 1.7;
@@ -612,37 +597,6 @@ select:focus-visible {
   background: var(--marketing-signal);
 }
 
-.marketing-mode-section {
-  display: grid;
-  grid-template-columns: minmax(0, 0.75fr) minmax(0, 1.25fr);
-  gap: 80px;
-}
-
-.marketing-mode-section .marketing-section-heading {
-  display: block;
-}
-
-.marketing-mode-section .marketing-section-heading h2 {
-  margin-top: 24px;
-}
-
-.marketing-mode-list article {
-  display: grid;
-  grid-template-columns: 70px 1fr;
-  gap: 24px;
-  border-top: 1px solid var(--marketing-line-strong);
-  padding: 24px 0 46px;
-}
-
-.marketing-mode-list h3 {
-  margin: 0;
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: clamp(1.8rem, 3vw, 3.2rem);
-  font-weight: 400;
-  letter-spacing: -0.045em;
-}
-
-.marketing-mode-list p,
 .marketing-workflow p,
 .marketing-technical-grid p,
 .marketing-control-grid p,
@@ -660,53 +614,11 @@ select:focus-visible {
   letter-spacing: 0.08em;
 }
 
-.marketing-pattern-band,
 .marketing-team-band {
   background: var(--marketing-forest);
   color: #f1efe7;
 }
-
-.marketing-pattern-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
-  gap: 72px;
-  padding-block: clamp(110px, 13vw, 180px);
-}
-
-.marketing-pattern-grid .marketing-section-heading {
-  display: block;
-}
-
-.marketing-pattern-grid .marketing-section-heading h2 {
-  margin-top: 24px;
-}
-
-.marketing-pattern-grid .marketing-eyebrow,
-.marketing-team-band .marketing-eyebrow {
-  color: rgba(241, 239, 231, 0.58);
-}
-
-.marketing-pattern-list {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-content: start;
-  border-top: 1px solid rgba(241, 239, 231, 0.4);
-}
-
-.marketing-pattern-list > div {
-  min-height: 190px;
-  border-right: 1px solid rgba(241, 239, 231, 0.18);
-  border-bottom: 1px solid rgba(241, 239, 231, 0.18);
-  padding: 22px;
-}
-
-.marketing-pattern-list > div:nth-child(even) {
-  border-right: 0;
-}
-
-.marketing-pattern-list span,
-.marketing-form-ledger span,
-.marketing-team-list article > div > p {
+.marketing-form-ledger span {
   display: block;
   margin: 0 0 46px;
   font-family: var(--mono);
@@ -714,7 +626,6 @@ select:focus-visible {
   opacity: 0.6;
 }
 
-.marketing-pattern-list strong,
 .marketing-form-ledger strong {
   display: block;
   font-family: Georgia, "Times New Roman", serif;
@@ -723,7 +634,6 @@ select:focus-visible {
   letter-spacing: -0.035em;
 }
 
-.marketing-pattern-list p,
 .marketing-form-ledger p {
   margin: 10px 0 0;
   color: inherit;
@@ -739,7 +649,7 @@ select:focus-visible {
 
 .marketing-closing h2 {
   max-width: 980px;
-  margin-top: 24px;
+  margin-top: 0;
 }
 
 .marketing-closing .marketing-diagram-motif {
@@ -878,7 +788,7 @@ select:focus-visible {
 .marketing-technical-grid h2,
 .marketing-control-grid h2,
 .direction-section h2 {
-  margin-top: 24px;
+  margin-top: 0;
 }
 
 .marketing-technical-grid .marketing-diagram-motif {
@@ -940,7 +850,7 @@ select:focus-visible {
 }
 
 .marketing-demo-status {
-  margin: 26px 0 0;
+  margin: 0;
   color: var(--marketing-ink);
   font-family: var(--mono);
   font-size: clamp(1.3rem, 2.5vw, 2.3rem);
@@ -1172,48 +1082,17 @@ select:focus-visible {
 
 .marketing-team-list {
   display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .marketing-team-list article {
-  display: grid;
-  min-height: 320px;
-  grid-template-columns: auto 1fr;
-  gap: 26px;
   border-top: 1px solid rgba(241, 239, 231, 0.42);
   border-right: 1px solid rgba(241, 239, 231, 0.18);
   border-bottom: 1px solid rgba(241, 239, 231, 0.18);
-  padding: 24px;
 }
 
-.marketing-team-list article:nth-child(1) {
-  grid-column: 1 / span 5;
-}
-
-.marketing-team-list article:nth-child(2) {
-  grid-column: 6 / span 3;
-}
-
-.marketing-team-list article:nth-child(3) {
-  grid-column: 9 / span 4;
+.marketing-team-list article:last-child {
   border-right: 0;
-}
-
-.marketing-team-list article > span {
-  display: grid;
-  width: 46px;
-  height: 46px;
-  place-items: center;
-  border: 1px solid rgba(241, 239, 231, 0.42);
-  border-radius: 50%;
-  color: var(--marketing-signal);
-  font-family: var(--mono);
-  font-size: 0.7rem;
-}
-
-.marketing-team-list article > div {
-  display: flex;
-  flex-direction: column;
 }
 
 .marketing-team-list article h2 {
@@ -1375,8 +1254,6 @@ select:focus-visible {
     min-height: 320px;
   }
 
-  .marketing-mode-section,
-  .marketing-pattern-grid,
   .marketing-technical-grid,
   .marketing-control-grid,
   .marketing-demo,
@@ -1458,14 +1335,6 @@ select:focus-visible {
     min-height: 260px;
   }
 
-  .marketing-section-heading {
-    display: block;
-  }
-
-  .marketing-section-heading h2 {
-    margin-top: 22px;
-  }
-
   .marketing-lede {
     margin-top: 24px;
   }
@@ -1477,20 +1346,6 @@ select:focus-visible {
   .walkthrough-stage:nth-child(n) {
     min-height: 270px;
     grid-column: 1;
-    border-right: 0;
-  }
-
-  .marketing-mode-section,
-  .marketing-pattern-grid {
-    gap: 70px;
-  }
-
-  .marketing-pattern-list {
-    grid-template-columns: 1fr;
-  }
-
-  .marketing-pattern-list > div,
-  .marketing-pattern-list > div:nth-child(even) {
     border-right: 0;
   }
 
@@ -1554,9 +1409,8 @@ select:focus-visible {
     grid-template-columns: 1fr;
   }
 
-  .marketing-team-list article:nth-child(n) {
+  .marketing-team-list article {
     min-height: 260px;
-    grid-column: 1;
     border-right: 0;
   }
 
@@ -1580,18 +1434,6 @@ select:focus-visible {
 }
 
 /* Marketing product previews and editorial media ------------------------- */
-
-.marketing-sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-  padding: 0;
-}
 
 .marketing-hero-with-photo {
   grid-template-columns: minmax(0, 1.15fr) minmax(340px, 0.85fr);
@@ -1638,171 +1480,73 @@ select:focus-visible {
   text-transform: uppercase;
 }
 
-.marketing-visual-marquee {
-  position: relative;
-  overflow: hidden;
-  border-block: 1px solid var(--marketing-line-strong);
-  background: var(--marketing-signal);
-  color: var(--marketing-ink);
-  padding-block: 16px;
-}
-
-.marketing-visual-marquee-track {
-  display: flex;
-  width: max-content;
-  animation: marketing-visual-marquee 42s linear infinite;
-}
-
-.marketing-visual-marquee-track > div {
-  display: flex;
-  flex: none;
-}
-
-.marketing-visual-marquee-track span {
-  display: inline-flex;
-  align-items: center;
-  gap: 18px;
-  padding-inline: 24px;
-  font-family: var(--mono);
-  font-size: 0.66rem;
-  font-weight: 700;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-}
-
-.marketing-visual-marquee-track span::after {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: currentColor;
-  content: "";
-  opacity: 0.48;
-}
-
-@keyframes marketing-visual-marquee {
-  to {
-    transform: translateX(-50%);
-  }
-}
-
-.marketing-product-story {
-  position: relative;
-  min-height: calc(100dvh + 480px);
-}
-
-.marketing-product-story > [data-product-story-copy] {
-  max-width: 1080px;
-}
-
-.marketing-product-story > [data-product-story-pin] {
-  margin-top: clamp(72px, 9vw, 118px);
-}
-
-.marketing-mode-accordion {
-  border-top: 1px solid var(--marketing-line-strong);
-}
-
-.marketing-mode-accordion-controls {
+.marketing-home-mode-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: clamp(64px, 8vw, 104px) 0 0;
+  border-top: 1px solid var(--marketing-line-strong);
+  padding: 0;
+  list-style: none;
 }
 
-.marketing-mode-accordion-controls button {
-  display: grid;
-  min-height: 98px;
-  grid-template-columns: 46px 1fr;
-  align-items: center;
-  border: 0;
+.marketing-home-mode-grid > li {
   border-right: 1px solid var(--marketing-line);
   border-bottom: 1px solid var(--marketing-line);
-  background: transparent;
-  color: var(--marketing-muted);
-  padding: 18px 22px;
-  text-align: left;
-  cursor: pointer;
-  transition: background-color 180ms ease, color 180ms ease;
 }
 
-.marketing-mode-accordion-controls button:last-child {
+.marketing-home-mode-grid > li:last-child {
   border-right: 0;
 }
 
-.marketing-mode-accordion-controls button.is-active {
-  background: var(--marketing-ink);
-  color: var(--marketing-paper);
+.marketing-home-mode-grid article {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
 }
 
-.marketing-mode-accordion-controls button > span {
+.marketing-home-mode-copy {
+  min-height: 230px;
+  padding: 24px;
+}
+
+.marketing-home-mode-copy > span {
+  color: var(--marketing-muted);
   font-family: var(--mono);
-  font-size: 0.65rem;
-  opacity: 0.65;
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
 }
 
-.marketing-mode-accordion-controls button > strong {
+.marketing-home-mode-copy h3 {
+  margin: 54px 0 0;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: clamp(1.25rem, 2.2vw, 2rem);
-  font-weight: 400;
-  letter-spacing: -0.035em;
-}
-
-.marketing-mode-accordion-panels > section {
-  display: none;
-  min-height: 510px;
-  grid-template-columns: minmax(210px, 0.45fr) minmax(0, 1.55fr);
-  align-items: center;
-  gap: 46px;
-  border-bottom: 1px solid var(--marketing-line-strong);
-  background: var(--marketing-paper-deep);
-  padding: 38px;
-}
-
-.marketing-mode-accordion-panels > section.is-active {
-  display: grid;
-}
-
-.marketing-mode-accordion-panels h3 {
-  margin: 20px 0 0;
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: clamp(1.65rem, 3vw, 3.15rem);
+  font-size: clamp(1.8rem, 3vw, 3rem);
   font-weight: 400;
   letter-spacing: -0.045em;
-  line-height: 1.04;
+  line-height: 1;
+}
+
+.marketing-home-mode-copy p {
+  margin: 16px 0 0;
+  color: var(--marketing-muted);
+  font-size: 0.86rem;
+  line-height: 1.6;
 }
 
 .marketing-diagram-preview {
-  --canvas-bg: #f7f5ed;
-  --canvas-text: #171b16;
-  --canvas-muted: #62675f;
-  --canvas-surface: #e8e4d8;
-  --canvas-soft: #f7f5ed;
-  --line: rgba(23, 27, 22, 0.16);
-  --line-strong: rgba(23, 27, 22, 0.34);
-  --signal: #a9df48;
-  --shadow: rgba(36, 41, 34, 0.12);
   position: relative;
-  height: 470px;
+  width: 100%;
+  aspect-ratio: 3 / 2;
   overflow: hidden;
   border: 1px solid var(--marketing-line-strong);
-  background: var(--canvas-bg);
-  color: var(--canvas-text);
-  font-family: var(--marketing-ui);
+  background: var(--marketing-paper-deep);
 }
 
 .marketing-diagram-preview.is-compact {
-  height: 380px;
+  max-width: 680px;
 }
 
-.marketing-diagram-preview-canvas {
-  width: 151.52%;
-  height: 151.52%;
-  transform: scale(0.66);
-  transform-origin: top left;
-}
-
-.marketing-diagram-preview.is-compact .marketing-diagram-preview-canvas {
-  width: 181.82%;
-  height: 181.82%;
-  transform: scale(0.55);
+.marketing-diagram-preview img {
+  object-fit: cover;
 }
 
 .marketing-control-media {
@@ -1862,13 +1606,6 @@ select:focus-visible {
   font-size: 0.62rem;
 }
 
-.marketing-team-list article > .marketing-team-meta > p {
-  margin: 0;
-  font-family: var(--mono);
-  font-size: 0.64rem;
-  opacity: 0.56;
-}
-
 .marketing-team-list article h2 {
   overflow-wrap: anywhere;
 }
@@ -1885,7 +1622,6 @@ select:focus-visible {
   }
 
   .marketing-workflow li,
-  .marketing-pattern-list > div,
   .marketing-form-ledger li,
   .schools-measures li,
   .marketing-benefit-lines p {
@@ -1893,17 +1629,11 @@ select:focus-visible {
   }
 
   .marketing-workflow li:hover,
-  .marketing-pattern-list > div:hover,
   .marketing-form-ledger li:hover,
   .schools-measures li:hover,
   .marketing-benefit-lines p:hover {
     background: color-mix(in srgb, var(--marketing-signal) 10%, transparent);
     transform: translateY(-2px);
-  }
-
-  .marketing-mode-accordion-controls button:hover:not(.is-active) {
-    background: color-mix(in srgb, var(--marketing-signal) 20%, transparent);
-    color: var(--marketing-ink);
   }
 
   .marketing-team-list article:hover {
@@ -1917,6 +1647,35 @@ select:focus-visible {
   }
 }
 
+@media (min-width: 1025px) {
+  .marketing-home-hero {
+    min-height: calc(100dvh - 78px);
+    align-items: center;
+    gap: clamp(44px, 6vw, 96px);
+    padding-block: clamp(28px, 4vh, 48px);
+  }
+
+  .marketing-home-hero .marketing-hero-copy h1 {
+    font-size: clamp(4rem, 7vw, 7.1rem);
+  }
+
+  .marketing-home-hero .marketing-mission {
+    margin-top: 18px;
+  }
+
+  .marketing-home-hero .marketing-hero-lede {
+    margin-top: 22px;
+  }
+
+  .marketing-home-hero .marketing-actions {
+    margin-top: 26px;
+  }
+
+  .marketing-home-hero .marketing-hero-photo {
+    min-height: min(560px, calc(100dvh - 138px));
+  }
+}
+
 @media (max-width: 1024px) {
   .marketing-hero-with-photo {
     grid-template-columns: 1fr;
@@ -1926,13 +1685,6 @@ select:focus-visible {
     min-height: min(780px, 105vw);
   }
 
-  .marketing-product-story {
-    min-height: auto;
-  }
-
-  .marketing-mode-accordion-panels > section {
-    grid-template-columns: 1fr;
-  }
 }
 
 @media (max-width: 720px) {
@@ -1940,39 +1692,15 @@ select:focus-visible {
     min-height: 118vw;
   }
 
-  .marketing-visual-marquee-track {
-    animation-duration: 54s;
-  }
-
-  .marketing-mode-accordion-controls {
+  .marketing-home-mode-grid {
     grid-template-columns: 1fr;
   }
 
-  .marketing-mode-accordion-controls button,
-  .marketing-mode-accordion-controls button:last-child {
-    min-height: 74px;
+  .marketing-home-mode-grid > li {
     border-right: 0;
   }
 
-  .marketing-mode-accordion-panels > section,
-  .marketing-mode-accordion-panels > section.is-active {
-    display: grid;
-    min-height: 0;
-    gap: 30px;
-    padding: 26px 0 54px;
-    background: transparent;
-  }
-
-  .marketing-mode-accordion-panels > section:not(.is-active) {
-    border-bottom-color: var(--marketing-line);
-  }
-
-  .marketing-diagram-preview,
-  .marketing-diagram-preview.is-compact {
-    height: 390px;
-  }
-
-  .marketing-team-list article:nth-child(n) {
+  .marketing-team-list article {
     min-height: 0;
   }
 
@@ -1999,14 +1727,8 @@ select:focus-visible {
   .marketing-root [data-stage],
   .marketing-root [data-reveal],
   .marketing-root [data-parallax-media],
-  .marketing-root [data-product-flow-step],
-  .marketing-root [data-product-story-copy] {
+  .marketing-root [data-product-flow-step] {
     opacity: 1 !important;
-    transform: none !important;
-  }
-
-  .marketing-visual-marquee-track {
-    animation: none !important;
     transform: none !important;
   }
 }

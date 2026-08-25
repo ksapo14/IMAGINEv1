@@ -59,17 +59,14 @@ export function StagedWalkthrough() {
 }
 
 export function SectionHeading({
-  eyebrow,
   title,
   body
 }: {
-  eyebrow: string;
   title: string;
   body?: string;
 }) {
   return (
     <header className="marketing-section-heading" data-reveal>
-      <p className="marketing-eyebrow">{eyebrow}</p>
       <h2>{title}</h2>
       {body ? <p className="marketing-lede">{body}</p> : null}
     </header>

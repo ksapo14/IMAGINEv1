@@ -7,7 +7,8 @@ cumulative live StickScene whiteboard.
 
 The public product narrative is available at `/`, `/product`, `/educators`,
 `/schools`, and `/about`. Those routes share a marketing-only layout and use
-static, non-live StickScene previews.
+static, generated editorial diagrams that remain separate from live workspace
+state.
 
 The educator workspace remains directly addressable at `/canvas`. It is omitted
 from the public sitemap, disallowed in `robots.txt`, and marked
@@ -24,7 +25,7 @@ Lesson context
 Live teaching turn
   -> submit typed input, or say "Hey Imagine" before one Deepgram speech command
   -> send lesson + recent turns + concepts + board digest
-  -> one Visual Director text call returns CREATE or UPDATE
+  -> one Live Assistant text call returns CREATE or UPDATE
   -> server assigns deterministic, non-overlapping board placement
   -> trusted React renders the selected visual, notes, and/or diagram modes
   -> optional simple image job can replace the scene artwork when complete
@@ -111,8 +112,8 @@ GEMINI_IMAGE_MODEL=gemini-3.1-flash-image
 CORS_ALLOW_ORIGIN_REGEX=
 ```
 
-`gemini-3.7-flash` is the default text choice for fast, schema-constrained Visual
-Director decisions and uses medium thinking. `gemini-3.1-flash-image` is the
+`gemini-3.7-flash` is the default text choice for fast, schema-constrained Live
+Assistant decisions and uses medium thinking. `gemini-3.1-flash-image` is the
 optional image default; the trusted visual-summary renderer remains the fallback
 when visual mode is chosen. Nonblank model environment values override these
 defaults.
@@ -152,7 +153,7 @@ production project URL, and finally `http://localhost:3000`.
 
 ## Cost and context controls
 
-- Every processed live turn makes one Visual Director text call. Contextual
+- Every processed live turn makes one Live Assistant text call. Contextual
   decisions are not cached.
 - Ambient transcription does not create a processed turn. Only typed commands
   and wake-phrase-authorized speech increment the live turn sequence.
@@ -167,7 +168,7 @@ production project URL, and finally `http://localhost:3000`.
   characters.
 - The client sends at most 24 concept memories and 48 board-scene digests; it
   does not resend full rendered scenes as board context.
-- Visual Director output is capped at 2,400 tokens. Generated image payloads are
+- Live Assistant output is capped at 2,400 tokens. Generated image payloads are
   MIME-checked and bounded before reaching the client.
 - The backend permits 50 generation requests, transcription key checks, and
   transcription connection attempts per client IP per minute. Visual polling

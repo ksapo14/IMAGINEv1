@@ -12,7 +12,7 @@ export const productWorkflow = [
   {
     index: "03",
     title: "Build one cumulative board",
-    body: "The Visual Director creates or updates a trusted stick scene without overlapping existing board work."
+    body: "The Live Assistant creates or updates a trusted stick scene without overlapping existing board work."
   }
 ];
 

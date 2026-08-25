@@ -8,8 +8,8 @@ Updated: 2026-08-24 (original landing-site change: 2026-08-08)
   Product, About, and Contact. Educators and Schools remain directly routable
   but are no longer promoted through primary navigation or the public sitemap.
 - Home now presents the Imaginer name and mission, “Revolutionizing the way
-  people explain things,” while retaining the cumulative-whiteboard product
-  story and founder presentation visual.
+  people explain things,” with a compact first-viewport hero, founder
+  presentation visual, and an always-visible Context / Live / Cumulative grid.
 - Product identifies Imaginev1, presents the verified workflow as a semantic
   ordered flowchart with a reduced-motion-safe scroll reveal, and labels the
   public demo Coming Soon with a direct Contact path.
@@ -33,14 +33,16 @@ Updated: 2026-08-24 (original landing-site change: 2026-08-08)
   public origin, so the sitemap reference is absolute and trailing slashes do
   not produce double slashes.
 - Public marketing pages do not link to the canvas or import lesson-library,
-  generation-stream, or live-session modules. Read-only marketing previews reuse
-  the trusted StickScene renderer through the marketing preview component.
+  generation-stream, live-session, or workspace-rendering modules. Read-only
+  marketing previews use generated editorial PNGs through one focused
+  `next/image` wrapper.
 
 ## Page narratives
 
 - Home leads with the Imaginer mission and “Keep teaching. Let the picture take
-  shape.” beside a real founder presentation photo. A renderer-backed mode
-  accordion introduces the current lesson-context and cumulative-board flow.
+  shape.” beside a real founder presentation photo. Three static cards keep the
+  lesson-context, live-turn, and cumulative-board story visible without an
+  accordion or marquee.
 - Product documents the current lesson-context, finalized-speech, and cumulative
   live whiteboard flow, trusted scene rendering, browser-local storage, and the
   Coming Soon demo path.
@@ -50,9 +52,10 @@ Updated: 2026-08-24 (original landing-site change: 2026-08-08)
 - Schools remains directly routable with its invitation-only pilot framework,
   but is not promoted in primary navigation or the public sitemap.
 - About records the founders’ AP Biology motivation, core values, and showcase,
-  and identifies Vivaan Grover as CEO, Jackson Bizell as CFO, and Krish
-  Sapovadia as CTO alongside their portraits. The browser-local classroom
-  product is explicitly separated from possible future directions.
+  and presents the Founder Team in three uniform cards: Vivaan Grover as CEO,
+  Jackson Bizell as CFO, and Krish Sapovadia as CTO alongside their portraits.
+  The browser-local classroom product is explicitly separated from possible
+  future directions.
 - Contact invites teachers to beta test and provides direct email links to the
   three founders.
 
@@ -73,19 +76,19 @@ Updated: 2026-08-24 (original landing-site change: 2026-08-08)
 - Introduced a warm editorial/technical system with serif display type,
   asymmetric grids, varied flat surfaces, compact mono labels, and a reusable
   diagram motif.
-- Added compact previews that reuse the current trusted `StickScene` renderer.
-  Marketing route files remain independent of workspace, generation, and
-  session state; the shared marketing preview component owns the renderer
-  import.
+- Added compact generated-diagram previews with exact page-specific asset
+  mappings. Marketing route files and the shared preview component remain
+  independent of workspace, generation, and session state.
 - Added marketing-only Lenis smoothing with GSAP `ScrollTrigger` integration.
   It falls back to native scrolling for reduced-motion and coarse-pointer users,
   removes its ticker and listener on cleanup, and never calls global
   `ScrollTrigger.killAll()`.
-- Motion remains restrained: hero entrances, viewport reveals, the ordered
-  product-flow reveal, one desktop-only home product-story pin, one scrubbed
-  copy treatment, and small fine-pointer media parallax. A GSAP match-media
-  lifecycle responds to reduced-motion changes while the page is open and
-  forces complete static content without a global kill.
+- Motion remains restrained: internal-page hero entrances, viewport reveals,
+  the ordered product-flow reveal, and small fine-pointer media parallax. The
+  home hero is immediately visible, and the previous pin, scrub, accordion, and
+  marquee treatments have been removed. A GSAP match-media lifecycle responds
+  to reduced-motion changes while the page is open and forces complete static
+  content without a global kill.
 - Added a skip link, semantic page landmarks and heading structure, visible
   focus treatment, and a labeled mobile menu with `aria-expanded`,
   `aria-controls`, first-link focus, a Tab/Shift+Tab focus boundary, inert page
@@ -101,6 +104,8 @@ Updated: 2026-08-24 (original landing-site change: 2026-08-08)
 
 - Added `imagine-founders-showcase.jpg`, `vivaan-portrait.jpg`,
   `jackson-portrait.jpg`, and `krish-portrait.jpg` under `public/media/`.
+- Added five 3:2 editorial diagrams under `public/media/diagrams/` for the home,
+  Product, Educators, and Schools narratives.
 - Because no bundled Pillow runtime was available, the approved offline
   `System.Drawing` fallback applied EXIF orientation where present and
   re-encoded each source once as metadata-stripped RGB JPEG at quality 88,
@@ -115,6 +120,8 @@ Updated: 2026-08-24 (original landing-site change: 2026-08-08)
 
 Tracked source removed:
 
+- The interactive product mode accordion and its home-only pin, scrub, and
+  marquee styling and motion hooks.
 - `app/page.tsx`, `app/loading.tsx`, and `app/debug/page.tsx`.
 - `components/marketing-experience.tsx`, `components/knowledge-scene.tsx`,
   `components/launch-loader.tsx`, and `components/smooth-scroll.tsx`.
@@ -144,18 +151,19 @@ blocks, local data, `.codex/`, and Git metadata were not touched.
 
 Completed verification:
 
-- `backend\.venv\Scripts\python -m unittest discover -s tests`: 57 tests
-  passed, including 14 frontend contracts for public-route isolation, JPEG
-  signatures/dimensions, exact media focus and alt text, Lenis lifecycle and
-  guards, real-renderer previews, and accordion keyboard/ARIA behavior.
-- `npm run test:frontend`: 11 tests passed.
+- `backend\.venv\Scripts\python -m unittest discover -s tests -p
+  test_frontend_contract.py`: 32 tests passed, including exact raster mappings,
+  static home modes, immediate home hero content, no heading kickers, Founder
+  Team cards, and marketing/workspace isolation.
+- `backend\.venv\Scripts\python -m unittest discover -s tests -p
+  test_gemini_pipeline.py`: 47 tests passed with the Live Assistant prompt and
+  error terminology.
 - `.\node_modules\.bin\tsc.cmd --noEmit`: passed.
 - `npm run build`: passed and produced Vinext standalone output; the generated
   `dist/` directory was removed again after the proof completed.
 - `git diff --check`: passed.
-- Direct scans found one root `<html>` element, no marketing-to-canvas links or
-  generation/session imports in route files, no superseded runtime references,
-  and none of the banned evidence claims on public routes.
+- Direct scans found no old assistant name, heading-kicker class, removed home
+  copy, or deleted accordion reference.
 
 The configured `npm run lint` command did not run a linter: Next 16 interpreted
 `next lint` as a project-directory argument and returned

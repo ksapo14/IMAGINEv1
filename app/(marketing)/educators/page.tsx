@@ -1,8 +1,5 @@
 import type { Metadata } from "next";
-import {
-  MarketingScenePreview,
-  updateScene
-} from "@/components/marketing/diagram-previews";
+import { MarketingScenePreview } from "@/components/marketing/diagram-previews";
 import { educatorJobs } from "@/components/marketing/evidence";
 import { DiagramMotif, SectionHeading } from "@/components/marketing/visual-language";
 
@@ -24,9 +21,6 @@ export default function EducatorsPage() {
     <main id="main-content">
       <section className="marketing-shell marketing-page-hero educator-hero">
         <div>
-          <p className="marketing-eyebrow" data-hero>
-            Educators
-          </p>
           <h1 data-hero>The lesson stays yours.</h1>
         </div>
         <div className="marketing-page-hero-note" data-hero>
@@ -40,7 +34,6 @@ export default function EducatorsPage() {
 
       <section className="marketing-shell marketing-section educator-jobs">
         <SectionHeading
-          eyebrow="Classroom jobs"
           title="Use a visual when the idea calls for one."
         />
         <ol data-reveal>
@@ -56,7 +49,6 @@ export default function EducatorsPage() {
       <section className="marketing-control-section">
         <div className="marketing-shell marketing-control-grid">
           <div data-reveal>
-            <p className="marketing-eyebrow">Educator control</p>
             <h2>The current explanation guides the next board decision.</h2>
             <p>
               Imagine waits for finalized speech, then interprets it with the
@@ -71,8 +63,8 @@ export default function EducatorsPage() {
               <code>lesson context + current board</code>
             </div>
             <MarketingScenePreview
-              scene={updateScene}
-              alt="Stick-scene preview of an educator explaining how oxygen contributes to cellular respiration and ATP."
+              src="/media/diagrams/respiration-update.png"
+              alt="Editorial diagram of an educator explaining how oxygen contributes to cellular respiration and ATP."
               compact
             />
           </div>
@@ -81,7 +73,6 @@ export default function EducatorsPage() {
 
       <section className="marketing-shell marketing-section">
         <SectionHeading
-          eyebrow="Design intent"
           title="Support the flow without making promises about outcomes."
         />
         <div className="marketing-benefit-lines">

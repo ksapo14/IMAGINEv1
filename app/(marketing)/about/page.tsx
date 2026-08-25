@@ -55,9 +55,6 @@ export default function AboutPage() {
     <main id="main-content">
       <section className="marketing-shell marketing-page-hero about-hero">
         <div>
-          <p className="marketing-eyebrow" data-hero>
-            Origin
-          </p>
           <h1 data-hero>A classroom question worth making visible.</h1>
         </div>
         <p className="marketing-page-hero-note" data-hero>
@@ -70,8 +67,7 @@ export default function AboutPage() {
 
       <section className="marketing-shell marketing-section about-story">
         <SectionHeading
-          eyebrow="Founder motivation"
-          title="Build for the moment an idea needs a shape."
+          title="Founder motivation: build for the moment an idea needs a shape."
           body="That classroom experience is the origin story. It is not presented as a formal study or evidence of a guaranteed learning outcome."
         />
         <blockquote data-reveal>
@@ -91,7 +87,7 @@ export default function AboutPage() {
       </section>
 
       <section className="marketing-shell marketing-section marketing-values">
-        <SectionHeading eyebrow="Core values" title="Principles for building alongside teachers." />
+        <SectionHeading title="Core values for building alongside teachers." />
         <ol>
           {coreValues.map((value, index) => (
             <li key={value.name} data-reveal>
@@ -105,9 +101,9 @@ export default function AboutPage() {
 
       <section className="marketing-team-band">
         <div className="marketing-shell">
-          <SectionHeading eyebrow="Team" title="Three roles. One current product." />
+          <SectionHeading title="Founder Team" />
           <div className="marketing-team-list">
-            {team.map((member, index) => (
+            {team.map((member) => (
               <article key={member.name} data-reveal>
                 <figure>
                   <Image
@@ -120,7 +116,6 @@ export default function AboutPage() {
                 </figure>
                 <div className="marketing-team-meta">
                   <span>{member.initials}</span>
-                  <p>0{index + 1}</p>
                   <h2>{member.name}</h2>
                   <strong>{member.role}</strong>
                 </div>
@@ -132,8 +127,7 @@ export default function AboutPage() {
 
       <section className="marketing-shell marketing-section direction-section">
         <div className="direction-current" data-reveal>
-          <p className="marketing-eyebrow">Current product</p>
-          <h2>A browser-local educator workspace.</h2>
+          <h2>Current product: a browser-local educator workspace.</h2>
           <p>
             Today, Imagine saves lesson context before class and interprets
             finalized speech against a cumulative live whiteboard. It creates or
@@ -141,8 +135,7 @@ export default function AboutPage() {
           </p>
         </div>
         <div className="direction-future" data-reveal>
-          <p className="marketing-eyebrow">Future direction</p>
-          <h2>Other rooms may come later.</h2>
+          <h2>Future direction: other rooms may come later.</h2>
           <p>
             Lecture halls, boardrooms, and keynote stages are directions the team
             may explore. They are not current product surfaces or availability

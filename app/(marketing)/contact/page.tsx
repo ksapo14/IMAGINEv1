@@ -29,9 +29,6 @@ export default function ContactPage() {
     <main id="main-content">
       <section className="marketing-shell marketing-page-hero contact-hero">
         <div>
-          <p className="marketing-eyebrow" data-hero>
-            Contact
-          </p>
           <h1 data-hero>Help test Imaginev1 in the classroom.</h1>
         </div>
         <div className="marketing-page-hero-note" data-hero>
@@ -47,7 +44,6 @@ export default function ContactPage() {
         aria-labelledby="contact-team-title"
       >
         <header data-reveal>
-          <p className="marketing-eyebrow">Teacher beta testing</p>
           <h2 id="contact-team-title">Start a conversation with the team.</h2>
           <p>
             Tell us what you teach, the classroom setting you have in mind, and

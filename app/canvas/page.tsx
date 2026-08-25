@@ -780,7 +780,7 @@ export default function CanvasPage() {
             <form onSubmit={saveLessonContext} className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-6 lg:p-8">
               <p className="font-[var(--mono)] text-xs uppercase tracking-[0.12em] text-[var(--text-soft)]">Context only — no generation</p>
               <h1 className="mt-5 text-4xl leading-none">Prepare lesson context</h1>
-              <p className="mt-4 text-sm leading-6 text-[var(--text-soft)]">Give the live Visual Director the lesson boundaries it should remember.</p>
+              <p className="mt-4 text-sm leading-6 text-[var(--text-soft)]">Give the Live Assistant the lesson boundaries it should remember.</p>
               <div className="mt-8 space-y-5">
                 <label className="block text-sm font-semibold">Lesson title<input value={lessonTitle} onChange={(event) => setLessonTitle(event.target.value)} maxLength={160} className="mt-2 h-12 w-full rounded-lg border border-[var(--line)] bg-[var(--page)] px-4 outline-none focus:border-[var(--signal)]" /></label>
                 <label className="block text-sm font-semibold">Subject <span className="font-normal text-[var(--text-soft)]">optional</span><input value={lessonSubject} onChange={(event) => setLessonSubject(event.target.value)} maxLength={120} className="mt-2 h-12 w-full rounded-lg border border-[var(--line)] bg-[var(--page)] px-4 outline-none focus:border-[var(--signal)]" /></label>

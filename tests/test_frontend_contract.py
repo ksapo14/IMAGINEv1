@@ -44,6 +44,14 @@ def jpeg_dimensions(path: Path) -> tuple[int, int]:
     raise AssertionError(f"{path} has no JPEG start-of-frame marker")
 
 
+def png_dimensions(path: Path) -> tuple[int, int]:
+    """Read the fixed-width dimensions from a valid PNG header."""
+    data = path.read_bytes()
+    if not data.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise AssertionError(f"{path} is not a PNG")
+    return int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
+
+
 class FrontendContractTests(unittest.TestCase):
     def marketing_source(self) -> str:
         files = [
@@ -511,9 +519,7 @@ class FrontendContractTests(unittest.TestCase):
 
         self.assertNotIn('href="/canvas"', marketing_source)
         self.assertNotIn('from "@/components/workspace', marketing_pages)
-        self.assertIn(
-            'from "@/components/workspace/stick-scene"', marketing_source
-        )
+        self.assertNotIn('from "@/components/workspace', marketing_source)
         self.assertNotIn('from "@/lib/generation-stream', marketing_source)
         self.assertNotIn('from "@/lib/lesson-library', marketing_source)
         self.assertNotIn('from "@/lib/live-session', marketing_source)
@@ -625,11 +631,14 @@ class FrontendContractTests(unittest.TestCase):
         about = (marketing / "about" / "page.tsx").read_text(encoding="utf-8")
         contact = (marketing / "contact" / "page.tsx").read_text(encoding="utf-8")
 
-        self.assertIn("<h1 data-hero>Imaginer</h1>", home)
+        self.assertIn("<h1>Imaginer</h1>", home)
         self.assertIn(
             "<strong>Keep teaching. Let the picture take shape.</strong>", home
         )
         self.assertIn("Revolutionizing the way people explain things", home)
+        self.assertIn("marketing-home-hero", home)
+        self.assertNotIn("data-hero", home)
+        self.assertNotIn("data-parallax-media", home)
         self.assertIn("Imaginev1", product)
         self.assertIn("<ol", product)
         self.assertIn("data-product-flow", product)
@@ -637,6 +646,8 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn("Coming Soon", product)
         self.assertIn('href="/contact"', product)
         self.assertIn("Core values", about)
+        self.assertIn('title="Founder Team"', about)
+        self.assertNotIn("team.map((member, index)", about)
         self.assertIn('src="/media/imagine-founders-showcase.jpg"', about)
         self.assertIn("export const metadata: Metadata", contact)
         self.assertIn("teacher beta test", contact.lower())
@@ -749,9 +760,8 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn("if (reduceMotion)", motion)
         self.assertIn("return () => motionMedia.revert()", motion)
         self.assertNotIn("window.matchMedia", motion)
-        self.assertIn("pin: productStoryPin", motion)
-        self.assertEqual(motion.count("pin: productStoryPin"), 1)
-        self.assertIn("scrub: 0.65", motion)
+        self.assertNotIn("data-product-story", motion)
+        self.assertNotIn("pin:", motion)
         self.assertIn("[data-parallax-media]", motion)
         self.assertIn("[data-product-flow-step]", motion)
         self.assertIn("trigger: productFlow", motion)
@@ -764,41 +774,99 @@ class FrontendContractTests(unittest.TestCase):
         )
         self.assertNotIn("killAll", motion)
 
-    def test_marketing_previews_use_trusted_stick_scenes_and_accessible_modes(self) -> None:
+    def test_marketing_previews_use_static_rasters_with_exact_page_mappings(self) -> None:
         previews = (
             ROOT / "components" / "marketing" / "diagram-previews.tsx"
         ).read_text(encoding="utf-8")
-        accordion = (
-            ROOT / "components" / "marketing" / "product-mode-accordion.tsx"
-        ).read_text(encoding="utf-8")
-        pages = "\n".join(
-            (ROOT / "app" / "(marketing)" / route / "page.tsx").read_text(
+        marketing = ROOT / "app" / "(marketing)"
+        pages = {
+            "home": (marketing / "page.tsx").read_text(encoding="utf-8"),
+            "product": (marketing / "product" / "page.tsx").read_text(
                 encoding="utf-8"
-            )
-            for route in ["product", "educators", "schools"]
-        )
+            ),
+            "educators": (marketing / "educators" / "page.tsx").read_text(
+                encoding="utf-8"
+            ),
+            "schools": (marketing / "schools" / "page.tsx").read_text(
+                encoding="utf-8"
+            ),
+        }
 
-        self.assertIn(
-            'from "@/components/workspace/stick-scene"', previews
-        )
-        self.assertIn("<StickScene", previews)
-        self.assertIn("scene={scene}", previews)
+        self.assertIn('from "next/image"', previews)
+        self.assertIn("<Image", previews)
+        self.assertIn("src={src}", previews)
+        self.assertIn("alt={alt}", previews)
+        self.assertNotIn("components/workspace", previews)
+        self.assertNotIn("StickScene", previews)
         self.assertNotIn("DiagramRenderer", previews)
         self.assertNotIn("BuildingBlockDiagramData", previews)
         self.assertNotIn("generation-stream", previews)
         self.assertNotIn("lesson-library", previews)
-        self.assertGreaterEqual(pages.count("<MarketingScenePreview"), 3)
-        for phrase in [
-            "aria-expanded={expanded}",
-            "aria-controls={`product-mode-panel-${mode.id}`}",
-            'role="region"',
-            'event.key === "ArrowRight"',
-            'event.key === "ArrowLeft"',
-            'event.key === "Home"',
-            'event.key === "End"',
-            'window.matchMedia("(max-width: 720px)")',
-        ]:
-            self.assertIn(phrase, accordion)
+        removed_component = "product-mode-" + "accordion.tsx"
+        self.assertFalse(
+            (ROOT / "components" / "marketing" / removed_component).exists()
+        )
+
+        expected_assets = {
+            "home": [
+                "/media/diagrams/lesson-context-flow.png",
+                "/media/diagrams/cellular-energy-flow.png",
+                "/media/diagrams/cumulative-board-flow.png",
+            ],
+            "product": ["/media/diagrams/cumulative-board-flow.png"],
+            "educators": ["/media/diagrams/respiration-update.png"],
+            "schools": ["/media/diagrams/pilot-review-flow.png"],
+        }
+        for page, assets in expected_assets.items():
+            for asset in assets:
+                with self.subTest(page=page, asset=asset):
+                    self.assertIn(asset, pages[page])
+
+        for assets in expected_assets.values():
+            for asset in assets:
+                path = ROOT / "public" / asset.removeprefix("/")
+                with self.subTest(asset=asset):
+                    self.assertTrue(path.is_file())
+                    width, height = png_dimensions(path)
+                    self.assertEqual(width * 2, height * 3)
+
+        self.assertEqual(pages["home"].count("<MarketingScenePreview"), 1)
+        self.assertIn("productModes.map", pages["home"])
+        self.assertIn("<ol", pages["home"])
+        self.assertNotIn("useState", pages["home"])
+
+    def test_marketing_cleanup_removes_kickers_and_obsolete_home_patterns(self) -> None:
+        source = self.marketing_source()
+        home = (ROOT / "app" / "(marketing)" / "page.tsx").read_text(
+            encoding="utf-8"
+        )
+        styles = (ROOT / "app" / "globals.css").read_text(encoding="utf-8")
+        visual_language = (
+            ROOT / "components" / "marketing" / "visual-language.tsx"
+        ).read_text(encoding="utf-8")
+
+        self.assertNotIn("marketing-" + "eyebrow", source + styles)
+        self.assertNotIn("eye" + "brow:", visual_language)
+        self.assertNotIn("data-product-story", source + styles)
+        self.assertNotIn("marketing-visual-" + "marquee", source + styles)
+        self.assertNotIn("From spoken explanation to a " + "useful visual.", home)
+        self.assertNotIn(
+            "Each turn changes only what the " + "explanation needs.", home
+        )
+
+    def test_live_assistant_is_the_public_and_backend_name(self) -> None:
+        files = [
+            *sorted((ROOT / "app").rglob("*.tsx")),
+            *sorted((ROOT / "components").rglob("*.ts")),
+            *sorted((ROOT / "components").rglob("*.tsx")),
+            *sorted((ROOT / "backend").rglob("*.py")),
+            ROOT / ".env.example",
+            ROOT / "README.md",
+            ROOT / "docs" / "LANDING_SITE_CHANGELOG.md",
+        ]
+        source = "\n".join(path.read_text(encoding="utf-8") for path in files)
+        self.assertNotIn("Visual" + " Director", source)
+        self.assertIn("Live Assistant", source)
 
     def test_canvas_is_not_indexed_or_in_the_public_sitemap(self) -> None:
         canvas_layout = (ROOT / "app" / "canvas" / "layout.tsx").read_text(
@@ -885,7 +953,7 @@ class FrontendContractTests(unittest.TestCase):
     def test_readme_documents_the_live_whiteboard_contract(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         for phrase in [
-            "one Visual Director text call",
+            "one Live Assistant text call",
             "CREATE or UPDATE",
             "24-column by 14-row grid",
             "typed `WhiteboardDecision`",

@@ -98,7 +98,7 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(transport.requests), 1)
         request = transport.requests[0][0]
         body = json.loads(request.data)
-        self.assertIn("Visual Director", body["systemInstruction"]["parts"][0]["text"])
+        self.assertIn("Live Assistant", body["systemInstruction"]["parts"][0]["text"])
         self.assertEqual(body["generationConfig"]["responseMimeType"], "application/json")
         self.assertEqual(
             body["generationConfig"]["thinkingConfig"],
@@ -937,7 +937,7 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_malformed_provider_decision_fails_after_one_call(self) -> None:
         transport = StubTransport([gemini_text("not-json")])
-        with self.assertRaisesRegex(GeminiProviderError, "malformed Visual Director"):
+        with self.assertRaisesRegex(GeminiProviderError, "malformed Live Assistant"):
             await self.pipeline(transport).generate("Explain ATP.")
         self.assertEqual(len(transport.requests), 1)
 

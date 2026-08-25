@@ -44,15 +44,6 @@ export function MarketingMotionBoundary({
             desktop: boolean;
             finePointer: boolean;
           };
-          const productStory = scope.current?.querySelector<HTMLElement>(
-            "[data-product-story]"
-          );
-          const productStoryPin = scope.current?.querySelector<HTMLElement>(
-            "[data-product-story-pin]"
-          );
-          const productStoryCopy = scope.current?.querySelector<HTMLElement>(
-            "[data-product-story-copy]"
-          );
           const productFlow = scope.current?.querySelector<HTMLElement>(
             "[data-product-flow]"
           );
@@ -60,10 +51,8 @@ export function MarketingMotionBoundary({
             ...heroNodes,
             ...revealNodes,
             ...parallaxNodes,
-            ...productFlowSteps,
-            productStoryPin,
-            productStoryCopy
-          ].filter((node): node is HTMLElement => Boolean(node));
+            ...productFlowSteps
+          ];
 
           if (reduceMotion) {
             gsap.set(animatedNodes, {
@@ -129,28 +118,6 @@ export function MarketingMotionBoundary({
           }
 
           if (desktop && finePointer) {
-            if (productStory && productStoryPin) {
-              ScrollTrigger.create({
-                trigger: productStory,
-                start: "top top+=104",
-                end: "+=420",
-                pin: productStoryPin,
-                pinSpacing: true
-              });
-            }
-            if (productStory && productStoryCopy) {
-              gsap.to(productStoryCopy, {
-                y: -38,
-                ease: "none",
-                scrollTrigger: {
-                  trigger: productStory,
-                  start: "top 72%",
-                  end: "bottom 34%",
-                  scrub: 0.65
-                }
-              });
-            }
-
             parallaxNodes.forEach((node) => {
               gsap.fromTo(
                 node,
