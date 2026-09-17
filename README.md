@@ -1,7 +1,7 @@
 # Imagine v1
 
 Real-time speech workspace that turns lesson-grounded teaching turns into a
-cumulative live StickScene whiteboard.
+cumulative live visual whiteboard.
 
 ## Public site
 
@@ -28,7 +28,8 @@ Live teaching turn
   -> one Live Assistant text call returns CREATE or UPDATE
   -> server assigns deterministic, non-overlapping board placement
   -> trusted React renders the selected visual, notes, and/or diagram modes
-  -> optional simple image job can replace the scene artwork when complete
+  -> diagram modes show a drawing loader while one raster-diagram job runs
+  -> visual-only modes schedule an image only when the concept needs one
 ```
 
 Deepgram continues transcribing while the microphone stays on, but ambient
@@ -72,17 +73,29 @@ Each CREATE or UPDATE carries an ordered, unique subset of visual, notes, and
 diagram modes. Explicit diagram and summary/notes cues select exactly those
 artifacts in cue order, while negation excludes the named artifact; ordinary
 prompts remain model-directed to the smallest useful subset.
+Related requests for a complementary mode can expand the resolved scene: its
+existing mode order remains the prefix and new modes are appended. Expanding a
+diagram with notes preserves ready, pending, failed, or restored-unavailable
+diagram state instead of scheduling another image. The diagram reflows beside
+the notes before a short, one-shot typing reveal; narrow layouts stack, and
+reduced-motion users receive the complete final content immediately.
 
 Notes contain 1–4 semantic `summaryBullets` and no keyword payload or chips;
-summary metadata remains available for context and accessibility. Diagram
-scenes use a trusted 12-by-8 renderer with at most six entities and six
-connections; the server, not the model, assigns their coordinates. Trusted and
-generated visuals are directed as sparse monochrome outlines on white or
-transparent backgrounds, using stick figures when people are needed and no
-color fills, gradients, decorative density, embedded text, or photorealism.
-Whiteboard sessions use storage schema v3. Legacy v1/v2 note scenes derive
-bullets from their summary sentences while unrelated state and legal placements
-are retained.
+summary metadata remains available for context and accessibility. Structured
+visual panes use a trusted 12-by-8 renderer with at most six entities and six
+connections; the server, not the model, assigns their coordinates. Deterministic
+StickScene SVGs remain sparse monochrome outlines with trusted grid placement,
+palette, and connector routing. Every new or explicitly regenerated diagram
+schedules exactly one provider-generated raster and shows a lightweight drawing
+animation until it settles. In combined visual-and-diagram scenes, StickScene content is
+retained only for the separate visual pane. Raster diagrams and optional generated visuals use
+separate server-owned instructions, restrained accessible color, balanced
+composition, generous spacing, and content-aware connector routing while
+remaining evidence-only, text-free, and non-photorealistic.
+Whiteboard sessions use storage schema v5. Legacy v1/v2 note scenes derive
+bullets from their summary sentences. Earlier schemas promote undersized mode
+footprints to the v5 minimums and discard diagram-only StickScene fallbacks
+while preserving combined structured visual content.
 
 ## Local setup
 
@@ -107,16 +120,41 @@ DEEPGRAM_LANGUAGE_HINT=
 
 PROD_GEMINI_API_KEY=your-prod-gemini-key
 GEMINI_TEXT_MODEL=gemini-3.7-flash
+GEMINI_TEXT_FALLBACK_MODEL=gemini-3.6-flash
 GEMINI_IMAGE_MODEL=gemini-3.1-flash-image
+GEMINI_IMAGE_FALLBACK_MODEL=gemini-2.5-flash-image
 
 CORS_ALLOW_ORIGIN_REGEX=
 ```
 
 `gemini-3.7-flash` is the default text choice for fast, schema-constrained Live
 Assistant decisions and uses medium thinking. `gemini-3.1-flash-image` is the
-optional image default; the trusted visual-summary renderer remains the fallback
-when visual mode is chosen. Nonblank model environment values override these
-defaults.
+image default; diagram panes remain pending until their generated asset settles,
+while structured rendering remains available to visual panes. Nonblank
+primary-model environment values override these defaults.
+
+Transient provider failures use `gemini-3.6-flash` for text and
+`gemini-2.5-flash-image` for images as stable fallback defaults. A missing
+fallback variable uses its default; a present blank value disables that
+fallback. The primary model receives at most three attempts (the initial call
+and two jittered retries), followed by one distinct fallback attempt when fast
+failures leave enough time. All attempts share the original 30-second text or
+90-second image deadline. Text requests reserve the final 10 seconds for
+fallback and cap each primary attempt at 20 seconds; images reserve 30 seconds
+and cap primary attempts at 60 seconds. A retry runs only when its delay still
+leaves the reserve plus a useful 5-second text or 15-second image attempt. A
+slow primary therefore goes directly to fallback without sleeping, while fast
+failures can still use all three primary attempts and one fallback. Fallback
+always receives all time actually remaining, including the full 30/90-second
+deadline when a cooldown bypasses primary. This may cut a slow primary call
+short to preserve one fallback opportunity; it never extends the total deadline.
+
+After primary transient exhaustion with an enabled fallback, that channel and
+primary model enter a 30-second cooldown. Cooldown state is held only in memory
+within each backend process; it is not persisted or shared across workers or
+pipeline instances. Invalid requests, quota responses, and malformed provider
+content do not retry. These safeguards improve recovery but cannot guarantee
+provider availability.
 
 Run the stack with `npm run dev`. The frontend uses port `3000` and the FastAPI
 backend uses port `8010`.
@@ -154,15 +192,18 @@ production project URL, and finally `http://localhost:3000`.
 ## Cost and context controls
 
 - Every processed live turn makes one Live Assistant text call. Contextual
-  decisions are not cached.
+  decisions are not cached. A transient failure can add up to two primary
+  retries and one fallback call, and each provider attempt may add usage cost.
 - Ambient transcription does not create a processed turn. Only typed commands
   and wake-phrase-authorized speech increment the live turn sequence.
-- Image generation is optional and asynchronous. It runs only when one atomic
-  concept needs a concrete silhouette or action that the structured primitives
-  cannot clearly express. The image model receives the same monochrome outline,
-  no-text, and no-photorealism contract as the trusted fallback. Image failure
-  leaves that fallback visible. No image job is created when visual mode is
-  absent.
+- Image generation is asynchronous. Every scene containing diagram schedules
+  exactly one diagram-kind image job; a visual-only scene schedules a job only
+  when its atomic concept needs a concrete silhouette or action that structured
+  primitives cannot clearly express. The server selects distinct diagram and
+  visual instructions with accessible composition, clear spacing and routing,
+  and evidence-only, no-text, non-photorealistic boundaries. Failure is shown
+  honestly in the diagram pane without substituting a legacy graph; other
+  selected board content remains available.
 - User input is limited to 4,000 characters. Lesson source is limited to 3,600
   characters. Recent-turn context contains at most six turns and 2,400 combined
   characters.
@@ -182,8 +223,8 @@ never use a `NEXT_PUBLIC_` prefix. The production Gemini key is used for both
 text and image requests and is sent from the backend in the `x-goog-api-key`
 header; it is not placed in URLs or API responses.
 
-The model returns data that must pass the typed `WhiteboardDecision` and
-StickScene schemas. It cannot supply HTML, SVG markup, CSS, scripts, links,
+The model returns data that must pass the typed `WhiteboardDecision` and, for
+structured visual panes, StickScene schemas. It cannot supply HTML, SVG markup, CSS, scripts, links,
 event handlers, or arbitrary visual classes. Trusted React components own all
 scene markup and styling. Optional raster assets accept only JPEG, PNG, or WebP
 data URLs and cannot change a scene's identity, text, structure, or placement.

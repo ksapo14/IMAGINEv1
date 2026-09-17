@@ -4,8 +4,11 @@ import asyncio
 import base64
 import binascii
 import json
+import logging
 import os
+import random
 import re
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -17,33 +20,85 @@ from .visual_director_prompt import (
     VISUAL_DIRECTOR_RESPONSE_SCHEMA,
     VISUAL_DIRECTOR_SYSTEM_INSTRUCTION,
 )
-from .whiteboard_intent import WhiteboardIntent, classify_whiteboard_intent
-from .whiteboard_grid import allocate_placement, promote_footprint, repair_stick_scene
+from .whiteboard_intent import (
+    WhiteboardIntent,
+    allows_topic_continuity,
+    classify_whiteboard_intent,
+    resolve_topic_continuity,
+)
+from .whiteboard_grid import FOOTPRINTS, allocate_placement, promote_footprint, repair_stick_scene
 
 
 GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 DEFAULT_TEXT_MODEL = "gemini-3.7-flash"
 DEFAULT_IMAGE_MODEL = "gemini-3.1-flash-image"
+DEFAULT_TEXT_FALLBACK_MODEL = "gemini-3.6-flash"
+DEFAULT_IMAGE_FALLBACK_MODEL = "gemini-2.5-flash-image"
 TEXT_REQUEST_TIMEOUT_SECONDS = 30.0
 IMAGE_REQUEST_TIMEOUT_SECONDS = 90.0
+GEMINI_RETRY_DELAYS_SECONDS = (0.5, 1.0)
+GEMINI_RETRY_JITTER_SECONDS = 0.25
+GEMINI_COOLDOWN_SECONDS = 30.0
+GEMINI_FALLBACK_BUDGETS_SECONDS = {
+    "text": (10.0, 20.0, 5.0),
+    "image": (30.0, 60.0, 15.0),
+}
 MAX_IMAGE_BASE64_CHARACTERS = 20_000_000
 MAX_BOARD_SCENES = 48
 SUPPORTED_IMAGE_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
 GENERATION_MODES = {"live", "prepare"}
-IMAGE_STYLE_PREFIX = (
-    "Create a sparse monochrome black or neutral outline drawing grounded only "
-    "in the supplied facts, on a white or transparent background. Use simple "
-    "stick figures when people are needed. Use no color fills, gradients, "
-    "decorative density, embedded text, words, letters, numbers, labels, "
-    "captions, signs, watermarks, text-like marks, or photorealism. "
-)
+IMAGE_GENERATOR_SYSTEM_INSTRUCTION = """You are Imagine's educational image generator. Create one clear raster visual from the factual content brief in the user message.
+
+EVIDENCE AND SAFETY
+- Depict only subjects, actions, and relationships stated in the brief. Do not invent facts, relationships, measurements, symbols, or unsupported details.
+- Do not embed text, words, letters, numbers, labels, captions, signs, watermarks, or text-like marks anywhere in the image.
+- Use a clean two-dimensional educational illustration or diagram style. Do not use photorealism.
+
+COMPOSITION AND ROUTING
+- Keep all boxes, nodes, figures, and objects distinct and non-overlapping.
+- Anchor every connector to a node edge and route it around all content, never through a node or object. Keep crossings minimal, and make any unavoidable crossing unambiguous.
+- Provide generous internal padding, clear gutters between elements, and comfortable outer margins. Never crowd the canvas edges.
+- Use a balanced scale and composition that fills the canvas without making elements cramped, tiny, oversized, or visually lopsided.
+- Use restrained, consistent stroke weights and arrowheads. Avoid heavy outlines, oversized arrows, and competing visual emphasis.
+
+COLOR AND ACCESSIBILITY
+- Use a restrained, accessible educational color palette with a small set of harmonious colors and sufficient foreground/background contrast.
+- Never make meaning depend on color alone. Reinforce distinctions and direction with shape, position, pattern, silhouette, or connector style as non-color cues.
+- Prefer a clean white or lightly tinted background and avoid decorative clutter or distracting effects.
+"""
+DIAGRAM_IMAGE_GENERATOR_SYSTEM_INSTRUCTION = """You are Imagine's educational diagram generator. Create one actual diagram from the factual content brief, not a scene, photograph, or photorealistic illustration.
+
+EVIDENCE AND RELATIONSHIPS
+- Include only entities and relationships supported by the brief. Do not invent facts, nodes, measurements, symbols, or decorative objects.
+- Draw an arrow only when the brief supports that relationship. Never invent arrows, and preserve the correct direction for every directed relationship.
+- Do not embed text, words, letters, numbers, labels, captions, signs, watermarks, or text-like marks anywhere in the diagram.
+
+LAYOUT AND ROUTING
+- Keep every node and object distinct and non-overlapping.
+- Anchor connectors to node edges and route them around all content, never through a node or object. Keep crossings minimal and make unavoidable crossings unambiguous.
+- Use generous internal padding, clear gutters, and comfortable outer margins. Keep all content fully visible with no cropping.
+- Use a balanced scale that fills the canvas without cramped, tiny, oversized, or lopsided elements.
+- Use restrained, consistent stroke weights and arrowheads so no connector overwhelms the teaching content.
+
+COLOR AND ACCESSIBILITY
+- Use a restrained, accessible educational color palette with sufficient foreground/background contrast.
+- Never make meaning depend on color alone. Reinforce distinctions and direction with shape, position, pattern, silhouette, or connector style as non-color cues.
+- Avoid clutter, distracting decoration, watermarks, text-like marks, and photorealism.
+"""
 
 JsonTransport = Callable[[urllib.request.Request, float], dict[str, Any]]
+logger = logging.getLogger(__name__)
 
 
 def _environment_model(name: str, default: str) -> str:
     """Use a nonblank model override or the stable production default."""
     return os.getenv(name, "").strip() or default
+
+
+def _environment_fallback_model(name: str, default: str) -> str:
+    """Use the fallback default only when its environment variable is absent."""
+    value = os.getenv(name)
+    return default if value is None else value.strip()
 
 
 class GeminiConfigurationError(RuntimeError):
@@ -54,40 +109,13 @@ class GeminiProviderError(RuntimeError):
     """Raised when Gemini cannot return a usable response."""
 
 
-def _clean_provider_error_text(value: Any, maximum_characters: int = 360) -> str:
-    if not isinstance(value, str):
-        return ""
-    return " ".join(value.split())[:maximum_characters].strip()
+class GeminiTransientError(GeminiProviderError):
+    """Raised for provider transport failures that are safe to retry briefly."""
 
 
 def _http_error_context(error: urllib.error.HTTPError) -> str:
-    """Extract a bounded diagnostic for server logs without exposing keys."""
-    status = _clean_provider_error_text(getattr(error, "reason", ""))
-    message = ""
-    try:
-        body = error.read(4096)
-    except (OSError, ValueError):
-        body = b""
-
-    if body:
-        try:
-            parsed = json.loads(body.decode("utf-8", errors="replace"))
-        except json.JSONDecodeError:
-            message = _clean_provider_error_text(body.decode("utf-8", errors="replace"))
-        else:
-            provider_error = parsed.get("error") if isinstance(parsed, dict) else None
-            if isinstance(provider_error, dict):
-                status = _clean_provider_error_text(provider_error.get("status")) or status
-                message = _clean_provider_error_text(provider_error.get("message"))
-            elif isinstance(parsed, dict):
-                message = _clean_provider_error_text(parsed.get("message"))
-
-    details = f"HTTP {error.code}"
-    if status:
-        details += f" {status}"
-    if message:
-        details += f": {message}"
-    return details
+    """Return only the safe HTTP status; provider text may contain private content."""
+    return f"HTTP {error.code}"
 
 
 def _default_json_transport(
@@ -100,27 +128,31 @@ def _default_json_transport(
             payload = response.read()
     except urllib.error.HTTPError as error:
         context = _http_error_context(error)
+        if error.code in {408, 500, 502, 503, 504}:
+            raise GeminiTransientError(
+                f"The AI provider could not complete the request. {context}."
+            ) from None
         if error.code == 429:
             raise GeminiProviderError(
                 f"AI generation is temporarily quota-limited. {context}."
-            ) from error
+            ) from None
         if error.code in {401, 403}:
             raise GeminiProviderError(
                 "AI generation is not available with the server configuration. "
                 f"{context}."
-            ) from error
+            ) from None
         raise GeminiProviderError(
             f"The AI provider could not complete the request. {context}."
-        ) from error
-    except (TimeoutError, urllib.error.URLError) as error:
-        raise GeminiProviderError("The AI provider did not respond in time.") from error
+        ) from None
+    except (TimeoutError, urllib.error.URLError):
+        raise GeminiTransientError("The AI provider did not respond in time.") from None
 
     try:
         parsed = json.loads(payload.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+    except (UnicodeDecodeError, json.JSONDecodeError):
         raise GeminiProviderError(
             "The AI provider returned an unreadable response."
-        ) from error
+        ) from None
     if not isinstance(parsed, dict):
         raise GeminiProviderError("The AI provider returned an unexpected response.")
     return parsed
@@ -258,6 +290,16 @@ def _bounded_context(context: Any) -> dict[str, Any]:
                     mode for mode in raw.get("contentModes", [])
                     if mode in {"visual", "notes", "diagram"}
                 ] if isinstance(raw.get("contentModes"), list) else [],
+                "renderMode": (
+                    raw.get("renderMode")
+                    if raw.get("renderMode") in {"structured", "generatedAsset"}
+                    else (
+                        "generatedAsset"
+                        if isinstance(raw.get("contentModes"), list)
+                        and "diagram" in raw.get("contentModes", [])
+                        else "structured"
+                    )
+                ),
                 "placement": {
                     "page": _as_int(placement.get("page"), 0),
                     "column": _as_int(placement.get("column"), -1),
@@ -297,6 +339,8 @@ class GeminiPipeline:
         image_api_key: str | None = None,
         text_model: str | None = None,
         image_model: str | None = None,
+        text_fallback_model: str | None = None,
+        image_fallback_model: str | None = None,
         transport: JsonTransport | None = None,
         **_: Any,
     ) -> None:
@@ -316,7 +360,23 @@ class GeminiPipeline:
             if image_model is not None
             else _environment_model("GEMINI_IMAGE_MODEL", DEFAULT_IMAGE_MODEL)
         ).strip()
+        self.text_fallback_model = (
+            text_fallback_model
+            if text_fallback_model is not None
+            else _environment_fallback_model(
+                "GEMINI_TEXT_FALLBACK_MODEL", DEFAULT_TEXT_FALLBACK_MODEL
+            )
+        ).strip()
+        self.image_fallback_model = (
+            image_fallback_model
+            if image_fallback_model is not None
+            else _environment_fallback_model(
+                "GEMINI_IMAGE_FALLBACK_MODEL", DEFAULT_IMAGE_FALLBACK_MODEL
+            )
+        ).strip()
         self.transport = transport or _default_json_transport
+        self._cooldown_lock = threading.Lock()
+        self._cooldowns: dict[tuple[str, str], float] = {}
 
     async def generate(
         self,
@@ -351,15 +411,27 @@ class GeminiPipeline:
         visual_strategy: str,
         visual_prompt: str,
         visual_alt: str,
+        image_kind: str = "visual",
     ) -> dict[str, Any] | None:
-        """Generate an optional server-side image; structured scenes need no job."""
-        if visual_strategy != "image" or not self.image_api_key or not self.image_model:
+        """Generate a server-side visual or diagram with its trusted instruction."""
+        instructions = {
+            "visual": IMAGE_GENERATOR_SYSTEM_INSTRUCTION,
+            "diagram": DIAGRAM_IMAGE_GENERATOR_SYSTEM_INSTRUCTION,
+        }
+        system_instruction = instructions.get(image_kind)
+        if (
+            visual_strategy != "image"
+            or system_instruction is None
+            or not self.image_api_key
+            or not self.image_model
+        ):
             return None
         try:
             return await asyncio.to_thread(
                 self._generate_image,
                 visual_prompt,
                 visual_alt,
+                system_instruction,
             )
         except GeminiProviderError:
             return None
@@ -416,6 +488,8 @@ class GeminiPipeline:
             self.text_api_key,
             payload,
             TEXT_REQUEST_TIMEOUT_SECONDS,
+            channel="text",
+            fallback_model=self.text_fallback_model,
         )
         text = "".join(
             part.get("text", "")
@@ -428,6 +502,7 @@ class GeminiPipeline:
             _parse_json_object(text, "Live Assistant data"),
             context,
             explicit_intent,
+            user_input,
         )
 
     def _normalize_decision(
@@ -435,6 +510,7 @@ class GeminiPipeline:
         raw: dict[str, Any],
         context: dict[str, Any],
         explicit_intent: WhiteboardIntent,
+        user_input: str,
     ) -> dict[str, Any]:
         model_board_strategy = raw.get("boardStrategy")
         if model_board_strategy not in {"integrate", "reset"}:
@@ -445,12 +521,15 @@ class GeminiPipeline:
         board = context["board"]
         turn_sequence = context["turnSequence"]
         board_version = board["version"]
+        continuity_target = resolve_topic_continuity(user_input, context, explicit_intent)
 
-        # Explicit create/update cues are educator-owned commands. Otherwise a
-        # model-selected reset resolves identity and placement against a blank
-        # effective board while the durable version remains monotonic.
+        # Explicit corrections and additions retain the board. Additions still
+        # leave semantic CREATE versus UPDATE ownership with Gemini.
         board_strategy = (
-            "integrate" if explicit_intent.action is not None else model_board_strategy
+            "integrate"
+            if explicit_intent.action is not None or explicit_intent.force_integrate
+            or continuity_target is not None
+            else model_board_strategy
         )
         effective_board = board if board_strategy == "integrate" else {
             "version": board_version,
@@ -467,35 +546,24 @@ class GeminiPipeline:
         summary = _clean_string(raw.get("summary"), 320)
         model_modes = _content_modes(raw.get("contentModes"))
         if explicit_intent.required_modes:
-            content_modes = list(explicit_intent.required_modes)
+            requested_content_modes = list(explicit_intent.required_modes)
         else:
-            content_modes = [
+            requested_content_modes = [
                 mode for mode in model_modes
                 if mode not in explicit_intent.forbidden_modes
             ]
-        if not content_modes:
+        if not requested_content_modes:
             available_bullets = _bounded_summary_bullets(raw.get("summaryBullets"))
             if "visual" not in explicit_intent.forbidden_modes:
-                content_modes = ["visual"]
+                requested_content_modes = ["visual"]
             elif "notes" not in explicit_intent.forbidden_modes and available_bullets:
-                content_modes = ["notes"]
+                requested_content_modes = ["notes"]
             else:
                 raise GeminiProviderError(
                     "The AI provider did not return a mode allowed by the explicit request."
                 )
-        modes_adjusted = content_modes != model_modes
+        modes_adjusted = requested_content_modes != model_modes
         summary_bullets = _bounded_summary_bullets(raw.get("summaryBullets"))
-        if "notes" in content_modes:
-            if not 1 <= len(summary_bullets) <= 4:
-                raise GeminiProviderError(
-                    "The AI provider returned incomplete summary bullets."
-                )
-        else:
-            if summary_bullets and not modes_adjusted:
-                raise GeminiProviderError(
-                    "The AI provider returned unselected summary bullets."
-                )
-            summary_bullets = []
         confidence = raw.get("confidence")
         if (
             not concept_key
@@ -508,13 +576,15 @@ class GeminiPipeline:
         requested = raw.get("requestedFootprint")
         if requested not in {"small", "medium", "wide", "full"}:
             raise GeminiProviderError("The AI provider returned an invalid footprint.")
-        requested = promote_footprint(requested, content_modes)
         model_heading_mode = raw.get("headingMode")
         if model_heading_mode not in {"show", "inheritPrimary"}:
             raise GeminiProviderError("The AI provider returned an invalid heading mode.")
         scene_layout = raw.get("sceneLayout")
         if scene_layout not in {"flow", "cycle", "comparison", "hierarchy", "hub"}:
             raise GeminiProviderError("The AI provider returned an invalid scene layout.")
+        model_merge_behavior = raw.get("mergeBehavior")
+        if model_merge_behavior not in {"replace", "expand"}:
+            raise GeminiProviderError("The AI provider returned an invalid merge behavior.")
 
         requested_target_scene_id = _clean_string(raw.get("targetSceneId"), 80)
         requested_target = next(
@@ -572,6 +642,9 @@ class GeminiPipeline:
         target_scene = None
         if board_strategy == "reset":
             action = "create"
+        elif continuity_target is not None:
+            action = "update"
+            target_scene = continuity_target
         elif explicit_intent.action == "update":
             # Correction wins over additive language, but never overwrites an
             # unrelated scene when no target can be resolved safely.
@@ -579,8 +652,6 @@ class GeminiPipeline:
             if target_scene is None and len(effective_board["scenes"]) == 1:
                 target_scene = effective_board["scenes"][0]
             action = "update" if target_scene is not None else "create"
-        elif explicit_intent.action == "create":
-            action = "create"
         else:
             action = model_action
             target_scene = requested_target if action == "update" else None
@@ -604,22 +675,83 @@ class GeminiPipeline:
             stored_concept_key = _concept_key(target_scene.get("conceptKey"))
             if stored_concept_key:
                 concept_key = stored_concept_key
-        elif explicit_intent.action == "create":
-            # Explicit additions retain their own stable identity even when the
-            # model reuses the existing topic's concept key.
-            occupied_concepts = {
-                _concept_key(scene.get("conceptKey")) for scene in effective_board["scenes"]
-            }
-            if concept_key in occupied_concepts:
-                suffix = f"-addition-{turn_sequence}"
-                base = concept_key[:80 - len(suffix)]
-                candidate = f"{base}{suffix}"
-                counter = 2
-                while candidate in occupied_concepts:
-                    counter_suffix = f"-{counter}"
-                    candidate = f"{base[:80 - len(suffix) - len(counter_suffix)]}{suffix}{counter_suffix}"
-                    counter += 1
-                concept_key = candidate
+
+        target_modes = (
+            [
+                mode for mode in target_scene.get("contentModes", [])
+                if mode in {"visual", "notes", "diagram"}
+            ]
+            if target_scene and isinstance(target_scene.get("contentModes"), list)
+            else []
+        )
+        if len(set(target_modes)) != len(target_modes):
+            target_modes = []
+        new_modes = [
+            mode for mode in requested_content_modes if mode not in target_modes
+        ]
+        forbidden_conflict = any(
+            mode in explicit_intent.forbidden_modes for mode in target_modes
+        )
+        retained_visual_is_structured = (
+            "visual" not in target_modes
+            or "diagram" in target_modes
+            or target_scene.get("renderMode") == "structured"
+        )
+        # A resolved model target can recognize synonyms that the conservative
+        # subject matcher cannot. Explicit new modes still complement that scene.
+        semantic_continuation = bool(explicit_intent.required_modes) and (
+            target_scene is not None
+            and (target_scene is matching_scene or target_scene is requested_target)
+        )
+        merge_behavior = (
+            "expand"
+            if (
+                (model_merge_behavior == "expand" or continuity_target is not None or semantic_continuation)
+                and action == "update"
+                and target_scene is not None
+                and target_modes
+                and new_modes
+                and allows_topic_continuity(user_input, explicit_intent)
+                and not forbidden_conflict
+                and retained_visual_is_structured
+            )
+            else "replace"
+        )
+        content_modes = (
+            [*target_modes, *new_modes]
+            if merge_behavior == "expand"
+            else requested_content_modes
+        )
+        modes_adjusted = modes_adjusted or content_modes != model_modes
+        preserves_notes = merge_behavior == "expand" and "notes" in target_modes
+        if preserves_notes:
+            # Empty bullets are an explicit marker; the accepting client copies
+            # the exact retained notes only after revalidating the target.
+            summary_bullets = []
+        elif "notes" in content_modes:
+            if not 1 <= len(summary_bullets) <= 4:
+                raise GeminiProviderError(
+                    "The AI provider returned incomplete summary bullets."
+                )
+        else:
+            if summary_bullets and not modes_adjusted:
+                raise GeminiProviderError(
+                    "The AI provider returned unselected summary bullets."
+                )
+            summary_bullets = []
+        requested = promote_footprint(requested, content_modes)
+        if (
+            merge_behavior == "expand"
+            and "diagram" in target_modes
+            and new_modes == ["notes"]
+        ):
+            # Notes share the diagram's reserved space. Keep its legal size so
+            # a model's larger request cannot push this continuation off-page.
+            prior_placement = target_scene["placement"]
+            prior_footprint = next((name for name, size in FOOTPRINTS.items()
+                                    if size == (prior_placement["width"], prior_placement["height"])), None)
+            if prior_footprint and promote_footprint(prior_footprint, content_modes) == prior_footprint:
+                requested = prior_footprint
 
         # The primary heading remains singular. Resets and genuinely empty
         # boards always display it; updates retain the scene's previous choice.
@@ -665,7 +797,20 @@ class GeminiPipeline:
 
         render_mode = raw.get("renderMode")
         image_prompt = _clean_string(raw.get("imagePrompt"), 800)
-        if "visual" not in content_modes:
+        has_diagram = "diagram" in content_modes
+        preserves_diagram = merge_behavior == "expand" and "diagram" in target_modes
+        preserves_structured_visual = (
+            merge_behavior == "expand" and "visual" in target_modes
+        )
+        if has_diagram:
+            # An expanded diagram keeps its prior asset/job state on the client;
+            # a new or replaced diagram requests exactly one raster job.
+            render_mode = "generatedAsset"
+            image_prompt = "" if preserves_diagram else image_prompt or summary
+        elif preserves_structured_visual:
+            render_mode = "structured"
+            image_prompt = ""
+        elif "visual" not in content_modes:
             if (render_mode != "structured" or image_prompt) and not modes_adjusted:
                 raise GeminiProviderError("The AI provider requested an unselected visual.")
             render_mode = "structured"
@@ -678,16 +823,16 @@ class GeminiPipeline:
                 raise GeminiProviderError("Structured visual mode cannot request an image.")
         else:
             raise GeminiProviderError("The AI provider returned an invalid render mode.")
-        if {"visual", "diagram"}.issubset(set(content_modes)) and render_mode != "generatedAsset":
-            raise GeminiProviderError(
-                "A combined visual and diagram requires a generated visual asset."
-            )
-
         raw_scene = raw.get("scene")
-        requires_stick_scene = "diagram" in content_modes or (
-            "visual" in content_modes and render_mode == "structured"
+        has_visual = "visual" in content_modes
+        requires_stick_scene = has_visual and (
+            has_diagram or render_mode == "structured"
         )
-        if requires_stick_scene:
+        if requires_stick_scene and preserves_structured_visual:
+            # Null is the retained-visual marker. The client accepts it only
+            # when the resolved target owns a complete structured StickScene.
+            stick_scene = None
+        elif requires_stick_scene:
             stick_scene = repair_stick_scene(raw_scene, scene_layout)
             if not stick_scene["entities"]:
                 raise GeminiProviderError("The AI provider returned an empty StickScene.")
@@ -702,6 +847,7 @@ class GeminiPipeline:
             "turnSequence": turn_sequence,
             "boardStrategy": board_strategy,
             "action": action,
+            "mergeBehavior": merge_behavior,
             "conceptKey": concept_key,
             "title": title,
             "headingMode": heading_mode,
@@ -720,17 +866,26 @@ class GeminiPipeline:
             "warning": None,
             "_imageRequest": (
                 {"imagePrompt": image_prompt, "visualAlt": summary}
-                if render_mode == "generatedAsset"
+                if render_mode == "generatedAsset" and not preserves_diagram
                 else None
             ),
         }
 
-    def _generate_image(self, visual_prompt: str, visual_alt: str) -> dict[str, Any]:
+    def _generate_image(
+        self,
+        visual_prompt: str,
+        visual_alt: str,
+        system_instruction: str,
+    ) -> dict[str, Any]:
+        """Request one raster asset under the server-selected image contract."""
         payload = {
+            "systemInstruction": {
+                "parts": [{"text": system_instruction}]
+            },
             "contents": [
                 {
                     "role": "user",
-                    "parts": [{"text": f"{IMAGE_STYLE_PREFIX}{visual_prompt}"}],
+                    "parts": [{"text": visual_prompt}],
                 }
             ],
             "generationConfig": {"responseModalities": ["IMAGE"]},
@@ -740,6 +895,8 @@ class GeminiPipeline:
             self.image_api_key,
             payload,
             IMAGE_REQUEST_TIMEOUT_SECONDS,
+            channel="image",
+            fallback_model=self.image_fallback_model,
         )
         for part in _candidate_parts(response):
             inline_data = part.get("inlineData")
@@ -771,8 +928,196 @@ class GeminiPipeline:
         api_key: str,
         payload: dict[str, Any],
         timeout_seconds: float,
+        *,
+        channel: str = "text",
+        fallback_model: str = "",
     ) -> dict[str, Any]:
-        """Keep API credentials in a server-side header, never a URL or payload."""
+        """Retry transient primary failures, then try one stable fallback model."""
+        deadline = time.monotonic() + timeout_seconds
+        usable_fallback = bool(fallback_model and fallback_model != model)
+        cooldown_key = (channel, model)
+        if usable_fallback and self._in_cooldown(cooldown_key):
+            logger.warning("Gemini %s cooldown active; trying fallback", channel)
+            return self._send_model_request(
+                fallback_model,
+                api_key,
+                payload,
+                self._remaining_timeout(deadline),
+            )
+
+        if not usable_fallback:
+            return self._request_primary_only(
+                model,
+                api_key,
+                payload,
+                deadline,
+                channel,
+            )
+
+        reserve, primary_cap, minimum_retry = GEMINI_FALLBACK_BUDGETS_SECONDS[channel]
+        last_transient_error: GeminiTransientError | None = None
+        for attempt in range(3):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                if last_transient_error is not None:
+                    return self._fallback_after_primary_failure(
+                        fallback_model,
+                        api_key,
+                        payload,
+                        deadline,
+                        channel,
+                        cooldown_key,
+                        last_transient_error,
+                    )
+                return self._send_model_request(
+                    fallback_model,
+                    api_key,
+                    payload,
+                    self._remaining_timeout(deadline),
+                )
+            retry_too_short = (
+                last_transient_error is not None
+                and remaining < reserve + minimum_retry
+            )
+            if remaining <= reserve or retry_too_short:
+                if last_transient_error is None:
+                    logger.warning(
+                        "Gemini %s primary skipped; fallback reserve reached", channel
+                    )
+                    return self._send_model_request(
+                        fallback_model,
+                        api_key,
+                        payload,
+                        remaining,
+                    )
+                logger.warning(
+                    "Gemini %s retry skipped; remaining budget reserved for fallback",
+                    channel,
+                )
+                return self._fallback_after_primary_failure(
+                    fallback_model,
+                    api_key,
+                    payload,
+                    deadline,
+                    channel,
+                    cooldown_key,
+                    last_transient_error,
+                )
+
+            try:
+                return self._send_model_request(
+                    model,
+                    api_key,
+                    payload,
+                    min(primary_cap, remaining - reserve),
+                )
+            except GeminiTransientError as error:
+                last_transient_error = error
+                if attempt == 2:
+                    break
+                delay = GEMINI_RETRY_DELAYS_SECONDS[attempt] + random.uniform(
+                    0.0, GEMINI_RETRY_JITTER_SECONDS
+                )
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                if remaining < delay + reserve + minimum_retry:
+                    logger.warning(
+                        "Gemini %s retry skipped; remaining budget reserved for fallback",
+                        channel,
+                    )
+                    break
+                logger.warning(
+                    "Gemini %s retry %d/2 in %.3fs", channel, attempt + 1, delay
+                )
+                time.sleep(delay)
+
+        assert last_transient_error is not None
+        return self._fallback_after_primary_failure(
+            fallback_model,
+            api_key,
+            payload,
+            deadline,
+            channel,
+            cooldown_key,
+            last_transient_error,
+        )
+
+    def _request_primary_only(
+        self,
+        model: str,
+        api_key: str,
+        payload: dict[str, Any],
+        deadline: float,
+        channel: str,
+    ) -> dict[str, Any]:
+        """Keep the original uncapped retry path when no fallback is usable."""
+        last_transient_error: GeminiTransientError | None = None
+        for attempt in range(3):
+            try:
+                return self._send_model_request(
+                    model,
+                    api_key,
+                    payload,
+                    self._remaining_timeout(deadline, last_transient_error),
+                )
+            except GeminiTransientError as error:
+                last_transient_error = error
+                if attempt == 2:
+                    break
+                delay = GEMINI_RETRY_DELAYS_SECONDS[attempt] + random.uniform(
+                    0.0, GEMINI_RETRY_JITTER_SECONDS
+                )
+                remaining = self._remaining_timeout(deadline, error)
+                if delay >= remaining:
+                    raise error
+                logger.warning(
+                    "Gemini %s retry %d/2 in %.3fs", channel, attempt + 1, delay
+                )
+                time.sleep(delay)
+
+        assert last_transient_error is not None
+        raise last_transient_error
+
+    def _fallback_after_primary_failure(
+        self,
+        fallback_model: str,
+        api_key: str,
+        payload: dict[str, Any],
+        deadline: float,
+        channel: str,
+        cooldown_key: tuple[str, str],
+        last_error: GeminiTransientError,
+    ) -> dict[str, Any]:
+        """Start cooldown, then spend any positive remaining budget on fallback."""
+        self._start_cooldown(cooldown_key)
+        try:
+            remaining = self._remaining_timeout(deadline, last_error)
+        except GeminiTransientError:
+            logger.warning(
+                "Gemini %s primary exhausted; cooldown started but deadline prevents fallback",
+                channel,
+            )
+            raise
+        logger.warning(
+            "Gemini %s primary exhausted; cooldown started and fallback selected",
+            channel,
+        )
+        return self._send_model_request(
+            fallback_model,
+            api_key,
+            payload,
+            remaining,
+        )
+
+    def _send_model_request(
+        self,
+        model: str,
+        api_key: str,
+        payload: dict[str, Any],
+        timeout_seconds: float,
+    ) -> dict[str, Any]:
+        """Build one model-specific request without placing credentials in its URL."""
         safe_model = urllib.parse.quote(model, safe="-._")
         request = urllib.request.Request(
             f"{GEMINI_API_BASE_URL}/{safe_model}:generateContent",
@@ -781,3 +1126,34 @@ class GeminiPipeline:
             method="POST",
         )
         return self.transport(request, timeout_seconds)
+
+    @staticmethod
+    def _remaining_timeout(
+        deadline: float,
+        last_error: GeminiTransientError | None = None,
+    ) -> float:
+        """Return positive time inside the shared deadline or preserve the last failure."""
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            return remaining
+        if last_error is not None:
+            raise last_error
+        raise GeminiTransientError("The AI provider did not respond in time.")
+
+    def _in_cooldown(self, key: tuple[str, str]) -> bool:
+        """Read and naturally expire one channel/model cooldown under a lock."""
+        now = time.monotonic()
+        with self._cooldown_lock:
+            expires_at = self._cooldowns.get(key)
+            if expires_at is None:
+                return False
+            if now >= expires_at:
+                del self._cooldowns[key]
+                return False
+            return True
+
+    def _start_cooldown(self, key: tuple[str, str]) -> None:
+        """Record primary exhaustion without shortening a concurrent cooldown."""
+        expires_at = time.monotonic() + GEMINI_COOLDOWN_SECONDS
+        with self._cooldown_lock:
+            self._cooldowns[key] = max(self._cooldowns.get(key, 0.0), expires_at)

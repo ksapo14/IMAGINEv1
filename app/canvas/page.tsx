@@ -15,7 +15,7 @@ import gsap from "gsap";
 import { ArrowLeft, ArrowUp, BookOpen, ChevronLeft, ChevronRight, Library, Loader2, Mic, MicOff, Plus, Sparkles, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { LiveWhiteboard, type SceneAnimationRequest } from "@/components/workspace/live-whiteboard";
+import { LiveWhiteboard, type SceneAnimationBlock, type SceneAnimationRequest } from "@/components/workspace/live-whiteboard";
 import type {
   DeepgramMessage,
   DeepgramStatusResponse,
@@ -29,6 +29,7 @@ import type {
 import { FRONTEND_ONLY_NOTICE, isFrontendOnlyDeployment } from "@/lib/deployment-mode";
 import { API_BASE_URL, streamGeneration } from "@/lib/generation-stream";
 import { loadLessonLibrary, removeLesson, saveLessonLibrary, upsertLesson } from "@/lib/lesson-library";
+import { getChangedSummaryBulletIndexes } from "@/lib/summary-typing";
 import {
   consumeWakeCommand,
   dequeueLiveTurn,
@@ -40,7 +41,7 @@ import {
   type WakeCommandState
 } from "@/lib/live-session";
 
-import { appendRecentTurn, applyBoardDecision, cancelRemovedVisualJobs, cancelSupersededVisualJob, EMPTY_WHITEBOARD, getBoardDigest, getConceptMemory, patchGeneratedAsset, sceneOwnsVisualJob, settlePendingVisualJobs } from "@/lib/whiteboard-session";
+import { appendRecentTurn, applyBoardDecision, cancelRemovedVisualJobs, cancelSupersededVisualJob, EMPTY_WHITEBOARD, getBoardDigest, getConceptMemory, patchGeneratedAsset, sceneOwnsVisualJob, settlePendingVisualJobs, shouldAnimateDiagramNotesExpansion } from "@/lib/whiteboard-session";
 import {
   createEmptyWhiteboardSession,
   loadWhiteboardSessionStore,
@@ -101,7 +102,7 @@ async function fetchDeepgramStatus() {
 async function fetchVisualJob(jobId: string, signal: AbortSignal) {
   if (isFrontendOnlyDeployment()) throw new Error(FRONTEND_ONLY_NOTICE);
   const response = await fetch(`${API_BASE_URL}/api/visual/${jobId}`, { cache: "no-store", signal });
-  if (!response.ok) throw new Error("The optional image request could not be completed.");
+  if (!response.ok) throw new Error("The image request could not be completed.");
   return (await response.json()) as VisualJobResponse;
 }
 
@@ -457,6 +458,15 @@ export default function CanvasPage() {
       && visualJobControllers.current.get(jobId) === controller
       && sceneOwnsVisualJob(boardRef.current, sceneId, jobId)
     );
+    const settleVisualJob = (asset: VisualJobResponse["generatedAsset"], failed: boolean) => {
+      const currentBoard = boardRef.current;
+      const settledBoard = patchGeneratedAsset(currentBoard, sceneId, jobId, asset, failed);
+      if (settledBoard === currentBoard) return false;
+      commitBoard(settledBoard);
+      return true;
+    };
+    const isDiagramJob = () => boardRef.current.scenes
+      .find((scene) => scene.sceneId === sceneId)?.contentModes.includes("diagram") === true;
     try {
       for (let attempt = 0; attempt < 100; attempt += 1) {
         if (!ownsVisualJob()) return;
@@ -466,18 +476,24 @@ export default function CanvasPage() {
         if (!ownsVisualJob()) return;
         if (job.status === "pending") continue;
         if (job.sceneId !== sceneId) return;
-        commitBoard(patchGeneratedAsset(boardRef.current, sceneId, job.generatedAsset, job.status === "failed"));
+        if (!settleVisualJob(job.generatedAsset, job.status === "failed")) return;
         if (job.warning) setWarning(job.warning);
         return;
       }
       if (ownsVisualJob()) {
-        commitBoard(patchGeneratedAsset(boardRef.current, sceneId, null, true));
-        setWarning("The structured scene is ready, but its optional image timed out.");
+        const diagramJob = isDiagramJob();
+        if (!settleVisualJob(null, true)) return;
+        setWarning(diagramJob
+          ? "The diagram timed out before it could be generated."
+          : "The visual timed out before it could be generated.");
       }
     } catch (jobError) {
       if (ownsVisualJob()) {
-        commitBoard(patchGeneratedAsset(boardRef.current, sceneId, null, true));
-        setWarning(jobError instanceof Error ? jobError.message : "The optional image could not be completed.");
+        const diagramJob = isDiagramJob();
+        if (!settleVisualJob(null, true)) return;
+        setWarning(jobError instanceof Error
+          ? jobError.message
+          : diagramJob ? "The diagram could not be generated." : "The visual could not be generated.");
       }
     } finally {
       if (visualJobControllers.current.get(jobId) === controller) visualJobControllers.current.delete(jobId);
@@ -523,23 +539,36 @@ export default function CanvasPage() {
       const committedSceneId = decision.targetSceneId ?? decision.sceneId;
       const previousScene = boardRef.current.scenes.find((scene) => scene.sceneId === committedSceneId);
       const acceptedScene = nextBoard.scenes.find((scene) => scene.sceneId === committedSceneId);
-      const changedBlocks: SceneAnimationRequest["blocks"] = [];
+      const changedBlocks: SceneAnimationBlock[] = [];
+      const changedNoteBulletIndexes = acceptedScene?.contentModes.includes("notes")
+        ? getChangedSummaryBulletIndexes(previousScene?.summaryBullets, acceptedScene.summaryBullets)
+        : [];
       if (acceptedScene?.headingMode === "show" && (
         !previousScene
         || previousScene.headingMode !== "show"
         || previousScene.title !== acceptedScene.title
       )) changedBlocks.push("heading");
-      if (acceptedScene?.contentModes.includes("notes") && (
-        !previousScene
-        || !previousScene.contentModes.includes("notes")
-        || previousScene.summaryBullets.join("\n") !== acceptedScene.summaryBullets.join("\n")
-      )) changedBlocks.push("notes");
+      if (changedNoteBulletIndexes.length) changedBlocks.push("notes");
       cancelRemovedVisualJobs(boardRef.current, nextBoard, visualJobControllers.current);
       cancelSupersededVisualJob(boardRef.current, nextBoard, committedSceneId, visualJobControllers.current);
       commitBoard(nextBoard);
-      if (changedBlocks.length) {
+      if (shouldAnimateDiagramNotesExpansion(previousScene, acceptedScene, decision)) {
         sceneAnimationSequence.current += 1;
-        setSceneAnimation({ sceneId: committedSceneId, revision: sceneAnimationSequence.current, blocks: changedBlocks });
+        setSceneAnimation({
+          kind: "expandDiagramNotes",
+          sceneId: committedSceneId,
+          revision: sceneAnimationSequence.current,
+          noteBulletIndexes: changedNoteBulletIndexes
+        });
+      } else if (changedBlocks.length) {
+        sceneAnimationSequence.current += 1;
+        setSceneAnimation({
+          kind: "reveal",
+          sceneId: committedSceneId,
+          revision: sceneAnimationSequence.current,
+          blocks: changedBlocks,
+          noteBulletIndexes: changedNoteBulletIndexes
+        });
       } else {
         setSceneAnimation(null);
       }
@@ -601,7 +630,7 @@ export default function CanvasPage() {
     setSceneAnimation(null);
   }, [stopTranscription]);
 
-  /** Store an outgoing lesson only after cancelled optional images become safe fallbacks. */
+  /** Store an outgoing lesson only after cancelled image jobs reach a terminal state. */
   const snapshotCurrentSession = useCallback(() => {
     const settledBoard = settlePendingVisualJobs(boardRef.current);
     if (settledBoard !== boardRef.current) commitBoard(settledBoard);

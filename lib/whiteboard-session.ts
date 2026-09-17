@@ -26,12 +26,13 @@ export function getBoardDigest(board: WhiteboardState): BoardDigest {
     currentPage: board.currentPage,
     columns: 24,
     rows: 14,
-    scenes: board.scenes.map(({ sceneId, conceptKey, title, headingMode, contentModes, placement }) => ({
+    scenes: board.scenes.map(({ sceneId, conceptKey, title, headingMode, contentModes, renderMode, placement }) => ({
       sceneId,
       conceptKey,
       title,
       headingMode,
       contentModes,
+      renderMode,
       placement
     }))
   };
@@ -81,7 +82,7 @@ export function applyBoardDecision(board: WhiteboardState, decision: GenerateRes
     return null;
   }
 
-  const scene: WhiteboardScene = {
+  let scene: WhiteboardScene = {
     sceneId: decision.sceneId,
     conceptKey: decision.conceptKey,
     title: decision.title,
@@ -124,6 +125,48 @@ export function applyBoardDecision(board: WhiteboardState, decision: GenerateRes
   const previous = board.scenes[index];
   if (decision.conceptKey !== previous.conceptKey) return null;
   if (decision.headingMode !== previous.headingMode) return null;
+  if (decision.mergeBehavior === "expand") {
+    const preservesPrefix = previous.contentModes.every((mode, modeIndex) => (
+      scene.contentModes[modeIndex] === mode
+    ));
+    const addsMode = scene.contentModes.length > previous.contentModes.length;
+    if (!preservesPrefix || !addsMode) return null;
+
+    const retainedNotes = previous.contentModes.includes("notes");
+    if (retainedNotes) {
+      if (scene.summaryBullets.length !== 0 || previous.summaryBullets.length === 0) return null;
+      scene = { ...scene, summaryBullets: [...previous.summaryBullets] };
+    } else if (scene.contentModes.includes("notes") && scene.summaryBullets.length === 0) {
+      return null;
+    }
+
+    const retainedVisual = previous.contentModes.includes("visual");
+    if (retainedVisual) {
+      if (scene.stickScene !== null || previous.stickScene === null) return null;
+      scene = { ...scene, stickScene: previous.stickScene };
+    } else if (
+      scene.contentModes.includes("visual")
+      && (scene.contentModes.includes("diagram") || scene.renderMode === "structured")
+      && scene.stickScene === null
+    ) {
+      return null;
+    }
+
+    const preservationMarker = scene.contentModes.includes("diagram")
+      && scene.renderMode === "generatedAsset"
+      && scene.generatedAsset === null
+      && scene.visualJobId === null;
+    const retainedDiagram = previous.contentModes.includes("diagram");
+    if (retainedDiagram !== preservationMarker) return null;
+    if (preservationMarker) {
+      scene = {
+        ...scene,
+        generatedAsset: previous.generatedAsset,
+        visualJobId: previous.visualJobId,
+        visualFailed: previous.visualFailed
+      };
+    }
+  }
   if (board.scenes.some((candidate, candidateIndex) => (
     candidateIndex !== index && placementsConflict(candidate.placement, scene.placement)
   ))) return null;
@@ -132,12 +175,25 @@ export function applyBoardDecision(board: WhiteboardState, decision: GenerateRes
   return { ...board, version: decision.boardVersion, currentPage: scene.placement.page, scenes };
 }
 
+/** Animate only the accepted transition that keeps a diagram and adds notes. */
+export function shouldAnimateDiagramNotesExpansion(
+  previous: WhiteboardScene | undefined,
+  next: WhiteboardScene | undefined,
+  decision: GenerateResponse
+) {
+  return decision.mergeBehavior === "expand"
+    && decision.action === "update"
+    && Boolean(previous?.contentModes.includes("diagram"))
+    && !previous?.contentModes.includes("notes")
+    && Boolean(next?.contentModes.includes("notes"));
+}
+
 /** Confirm that a scene still points to the optional image job being polled. */
 export function sceneOwnsVisualJob(board: WhiteboardState, sceneId: string, jobId: string) {
   return board.scenes.some((scene) => scene.sceneId === sceneId && scene.visualJobId === jobId);
 }
 
-/** Cancelled image work restores as a complete structured scene, never a permanent spinner. */
+/** Cancelled image work settles as failed, never as a permanent spinner. */
 export function settlePendingVisualJobs(board: WhiteboardState) {
   if (!board.scenes.some((scene) => Boolean(scene.visualJobId))) return board;
   return {
@@ -176,17 +232,18 @@ export function cancelRemovedVisualJobs(
   });
 }
 
-/** Optional image completion cannot alter scene identity, copy, structure, or placement. */
+/** Settle only the job still owned by this scene so stale work cannot overwrite it. */
 export function patchGeneratedAsset(
   board: WhiteboardState,
   sceneId: string,
+  expectedJobId: string,
   asset: GeneratedAsset | null,
   failed = false
 ) {
-  if (!board.scenes.some((scene) => scene.sceneId === sceneId)) return board;
+  if (!sceneOwnsVisualJob(board, sceneId, expectedJobId)) return board;
   return {
     ...board,
-    scenes: board.scenes.map((scene) => scene.sceneId === sceneId
+    scenes: board.scenes.map((scene) => scene.sceneId === sceneId && scene.visualJobId === expectedJobId
       ? { ...scene, generatedAsset: asset, visualJobId: null, visualFailed: failed }
       : scene)
   };

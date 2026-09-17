@@ -2,6 +2,7 @@
 export type SpeechStatus = "idle" | "connecting" | "listening";
 export type WhiteboardAction = "create" | "update";
 export type BoardStrategy = "integrate" | "reset";
+export type MergeBehavior = "replace" | "expand";
 export type RecentTurnAction = WhiteboardAction | "hold";
 export type ContentMode = "visual" | "notes" | "diagram";
 export type HeadingMode = "show" | "inheritPrimary";
@@ -48,6 +49,7 @@ export type BoardSceneDigest = {
   title: string;
   headingMode: HeadingMode;
   contentModes: ContentMode[];
+  renderMode: "structured" | "generatedAsset";
   placement: BoardPlacement;
 };
 
@@ -108,6 +110,7 @@ export type WhiteboardDecision = {
   turnSequence: number;
   boardStrategy: BoardStrategy;
   action: WhiteboardAction;
+  mergeBehavior: MergeBehavior;
   conceptKey: string;
   title: string;
   headingMode: HeadingMode;
@@ -119,6 +122,7 @@ export type WhiteboardDecision = {
   targetSceneId: string | null;
   requestedFootprint: "small" | "medium" | "wide" | "full";
   placement: BoardPlacement;
+  /** Structured visual content; generated diagram panes never render this value. */
   stickScene: StickScene | null;
   renderMode: "structured" | "generatedAsset";
   generatedAsset: GeneratedAsset | null;
@@ -142,6 +146,7 @@ export type WhiteboardScene = {
   summary: string;
   contentModes: ContentMode[];
   placement: BoardPlacement;
+  /** Structured visual content, including the visual half of a combined scene. */
   stickScene: StickScene | null;
   renderMode: "structured" | "generatedAsset";
   generatedAsset: GeneratedAsset | null;

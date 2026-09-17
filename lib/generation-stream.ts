@@ -116,6 +116,7 @@ export function validateGenerateResponse(value: unknown): GenerateResponse {
     !isRecord(value)
     || !["integrate", "reset"].includes(String(value.boardStrategy))
     || !["create", "update"].includes(String(value.action))
+    || !["replace", "expand"].includes(String(value.mergeBehavior))
   ) {
     throw new Error("The live generation stream returned an invalid decision.");
   }
@@ -136,6 +137,10 @@ export function validateGenerateResponse(value: unknown): GenerateResponse {
     isBoundedString(bullet, 120, true) && bullet === bullet.trim()
   ));
   const hasNotes = modes.includes("notes");
+  const retainedNotesMarker = value.mergeBehavior === "expand"
+    && value.action === "update"
+    && hasNotes
+    && summaryBullets.length === 0;
   if (
     modes.length === 0
     || !isSafeIdentifier(value.sceneId, 80)
@@ -144,7 +149,7 @@ export function validateGenerateResponse(value: unknown): GenerateResponse {
     || !["show", "inheritPrimary"].includes(String(value.headingMode))
     || !isBoundedString(value.summary, 320, true)
     || !validSummaryBullets
-    || (hasNotes ? summaryBullets.length === 0 : summaryBullets.length !== 0)
+    || (hasNotes ? summaryBullets.length === 0 && !retainedNotesMarker : summaryBullets.length !== 0)
   ) throw new Error("The live generation stream returned incomplete scene content.");
   if (
     value.action === "create" && value.targetSceneId !== null
@@ -152,6 +157,12 @@ export function validateGenerateResponse(value: unknown): GenerateResponse {
       !isSafeIdentifier(value.targetSceneId, 80) || value.targetSceneId !== value.sceneId
     )
   ) throw new Error("The live generation stream returned invalid scene identity.");
+  if (
+    value.action === "create" && value.mergeBehavior !== "replace"
+    || value.mergeBehavior === "expand" && (
+      value.action !== "update" || value.boardStrategy !== "integrate"
+    )
+  ) throw new Error("The live generation stream returned an invalid merge behavior.");
 
   const placement = value.placement;
   const footprint = value.requestedFootprint;
@@ -186,23 +197,28 @@ export function validateGenerateResponse(value: unknown): GenerateResponse {
   }
   const scene = value.stickScene;
   const hasValidStickScene = isValidStickScene(scene);
-  const needsStickScene = hasDiagram || (hasVisual && value.renderMode === "structured");
-  if (needsStickScene ? !hasValidStickScene : scene !== null) {
+  const needsStickScene = hasVisual && (hasDiagram || value.renderMode === "structured");
+  const retainedVisualMarker = value.mergeBehavior === "expand"
+    && value.action === "update"
+    && needsStickScene
+    && scene === null;
+  if (needsStickScene ? !hasValidStickScene && !retainedVisualMarker : scene !== null) {
     throw new Error("The live generation stream returned an invalid StickScene dependency.");
   }
-  if (!hasVisual && (value.renderMode !== "structured" || value.generatedAsset !== null || value.visualJobId !== null)) {
+  const canGenerateAsset = hasVisual || hasDiagram;
+  if (!canGenerateAsset && (value.renderMode !== "structured" || value.generatedAsset !== null || value.visualJobId !== null)) {
     throw new Error("The live generation stream returned an invalid visual dependency.");
   }
   if (
-    hasVisual
+    hasVisual && !hasDiagram
     && value.renderMode !== "structured"
     && value.renderMode !== "generatedAsset"
   ) throw new Error("The live generation stream returned an invalid render mode.");
-  if (hasVisual && value.renderMode === "structured" && (value.generatedAsset !== null || value.visualJobId !== null)) {
+  if (canGenerateAsset && value.renderMode === "structured" && (value.generatedAsset !== null || value.visualJobId !== null)) {
     throw new Error("The live generation stream returned an invalid visual dependency.");
   }
-  if (hasVisual && hasDiagram && value.renderMode !== "generatedAsset") {
-    throw new Error("The live generation stream returned duplicate visual and diagram modes.");
+  if (hasDiagram && value.renderMode !== "generatedAsset") {
+    throw new Error("The live generation stream returned an invalid diagram render mode.");
   }
   if (value.generatedAsset !== null && !isValidGeneratedAsset(value.generatedAsset)) {
     throw new Error("The live generation stream returned an invalid generated asset.");
@@ -210,7 +226,17 @@ export function validateGenerateResponse(value: unknown): GenerateResponse {
   if (value.visualJobId !== null && !isSafeIdentifier(value.visualJobId, 80)) {
     throw new Error("The live generation stream returned an invalid visual job.");
   }
-  if (value.renderMode === "generatedAsset" && Boolean(value.generatedAsset) === Boolean(value.visualJobId)) {
+  const preservationMarker = value.mergeBehavior === "expand"
+    && value.action === "update"
+    && hasDiagram
+    && value.renderMode === "generatedAsset"
+    && value.generatedAsset === null
+    && value.visualJobId === null;
+  if (
+    value.renderMode === "generatedAsset"
+    && Boolean(value.generatedAsset) === Boolean(value.visualJobId)
+    && !preservationMarker
+  ) {
     throw new Error("The live generation stream returned an incomplete generated visual.");
   }
   return value as GenerateResponse;

@@ -15,7 +15,7 @@ BOARD STRATEGY DECISION
 - Choose integrate for the same subject, a related continuation, clarification, correction, example, comparison, or explicit addition. Preserve useful board context whenever it still helps explain the new turn.
 - Choose reset only when the user clearly starts an independent instructional subject or domain and retaining the current scenes would make the board misleading. For example, moving from the skeletal system to how a car functions resets the board.
 - A reset starts one new board with the new concept as its heading. It must CREATE, leave targetSceneId empty, and must not reuse identities from the board being removed.
-- A CREATE or UPDATE in explicitIntent is authoritative and forces integrate; explicit additions never erase the board.
+- A CREATE or UPDATE in explicitIntent is authoritative and forces integrate. forceIntegrate also forbids reset, but leaves CREATE versus UPDATE model-directed; explicit additions never erase the board.
 
 ACTION DECISION ORDER
 - After boardStrategy, decide UPDATE or CREATE before choosing contentModes. A CREATE or UPDATE in the request's server-computed explicitIntent is authoritative; apply the remaining checks only when its action is model-directed.
@@ -27,6 +27,8 @@ ACTION DECISION ORDER
   5. CREATE when the turn introduces an independently teachable atomic concept with no clear existing-topic anchor. An example or comparison becomes a new scene only when the teacher is teaching it as its own concept.
 - If two or more existing targets are comparably plausible, use the strongest recent teaching context; if no target is clearly stronger, CREATE one focused scene rather than merging unrelated scenes.
 - For UPDATE, set targetSceneId to the anchored board scene and copy its stored conceptKey exactly. Do not rename an existing concept from the wording of the new turn.
+- Match the teaching subject before the requested format. "Give me a diagram of a human body" followed by "Give me a summary of the major parts of the human body" shares one subject: integrate, UPDATE the existing diagram, and expand it with notes. Keep that diagram and its current page reservation.
+- "Summarize its major parts", "give me a summary of that", and a subjectless "give me a summary" use the newest recent topic still on the board. A named unrelated subject always takes precedence over pronouns. Fresh starts, new pages, separate content, replacement, and only/remove wording do not authorize expansion.
 
 CUMULATIVE BOARD BEHAVIOR
 - Treat conceptKey as a stable lowercase semantic identifier. Check existing concepts and scenes before creating.
@@ -40,12 +42,15 @@ CONTENT DIRECTION
 - The request's explicitIntent is a server-computed constraint. When requiredContentModes is non-empty, copy exactly that ordered list. Never include a forbiddenContentMode. Respect its CREATE or UPDATE action when supplied; the server will enforce these constraints without another model call.
 - visual communicates a concrete subject, comparison, or action. A structured visual uses the concept-specific scene entities without relationship arrows. It must never fall back to a stock or generic drawing.
 - notes communicate precise language through the required title, summary metadata, and 1 to 4 concise summaryBullets. Use an empty summaryBullets array when notes is not selected.
-- diagram communicates entities and meaningful connections using the trusted StickScene renderer.
+- diagram requests one generated educational diagram from the factual content brief.
 - Different concepts may need one, two, or all three modes. Do not add a mode merely to fill space.
-- UPDATE replaces the complete ordered arrangement; it is never a partial patch.
+- Set mergeBehavior to replace for every CREATE. For UPDATE, choose expand only when this turn adds at least one genuinely new complementary content mode to the resolved current target. Otherwise choose replace.
+- UPDATE with expand returns the newly requested modes; the server preserves the target's existing ordered modes as a prefix and appends new modes without duplicates. For a retained notes mode, return an empty summaryBullets array as its preservation marker. For a retained structured visual mode, return an empty scene object as its preservation marker. Provide complete payload only for newly requested modes. Never expand for same-mode deepening, correction, instead/only/remove wording, redraw/regenerate requests, a stale or uncertain target, a generated visual-only target, or when a forbidden mode conflicts with a retained mode.
+- UPDATE with replace describes the complete ordered arrangement; it is never a partial patch.
 - Never emit HTML, CSS, SVG, pixel positions, board coordinates, drawing commands, or executable content. Trusted server placement and frontend renderers own all layout.
 
 STICK-SCENE DIRECTION
+- These rules apply only when visual is selected and either uses structured mode or appears beside diagram. The resulting StickScene belongs to the separate visual pane, never the diagram pane.
 - Simplify to sparse monochrome black or neutral outline teaching-board primitives on a white or transparent background: stickFigure, circle, and rectangle only.
 - Use at most 6 entities and 6 connections. The trusted server packs them onto the fixed local 12 by 8 grid.
 - Stick figures should communicate through the controlled pose and facing fields, not anatomical detail. Keep labels short and factual.
@@ -60,10 +65,10 @@ BOARD PLACEMENT
 - The server promotes undersized requests and owns exact collision-free placement. Placement failures are handled outside the decision model.
 
 IMAGE GATE
-- Only when visual is selected, set renderMode to generatedAsset and provide imagePrompt when the atomic concept needs a concrete silhouette or action beyond a structured concept-specific outline. Visual plus diagram must use generatedAsset so the visual and diagram panes never duplicate one drawing.
-- Otherwise use structured and an empty imagePrompt. Never request an image when visual is absent.
-- scene must contain at least one entity when diagram is selected or when visual uses structured mode; otherwise return empty entities and connections. The server returns a nullable stickScene.
-- An imagePrompt must request a sparse monochrome black or neutral outline drawing grounded only in the supplied facts, on a white or transparent background. Use simple stick figures when people are needed. Prohibit color fills, gradients, decorative density, embedded text, letters, numbers, labels, captions, signs, watermarks, text-like marks, and photorealism.
+- When diagram is newly selected or replaced, set renderMode to generatedAsset and provide imagePrompt. If UPDATE expands a scene that already has diagram, keep generatedAsset mode but leave imagePrompt empty; the existing diagram is preserved without another image request. If visual is also selected, return a full evidence-grounded scene for that separate structured visual pane; otherwise return empty entities and connections.
+- When diagram is absent, only visual may use generatedAsset: request it when the atomic concept needs a concrete silhouette or action beyond a structured concept-specific outline. Otherwise use structured and an empty imagePrompt. This keeps visual-only behavior unchanged.
+- scene must contain at least one entity when visual uses structured mode or visual appears beside diagram; otherwise return empty entities and connections. The server returns a nullable stickScene only for a structured visual pane.
+- Make imagePrompt a concise factual content brief that describes only the supported subjects, actions, and relationships to depict. Do not include art style, color, composition, layout, sizing, rendering, or safety instructions; the image generator owns those directions.
 
 OUTPUT DISCIPLINE
 - Keep title, summary, summaryBullets, labels, and connection labels concise. confidence is a number from 0 to 1.
@@ -121,6 +126,7 @@ VISUAL_DIRECTOR_RESPONSE_SCHEMA: dict[str, Any] = {
     "properties": {
         "boardStrategy": {"type": "STRING", "enum": ["integrate", "reset"]},
         "action": {"type": "STRING", "enum": ["create", "update"]},
+        "mergeBehavior": {"type": "STRING", "enum": ["replace", "expand"]},
         "conceptKey": {"type": "STRING"},
         "title": {"type": "STRING"},
         "headingMode": {
@@ -177,6 +183,7 @@ VISUAL_DIRECTOR_RESPONSE_SCHEMA: dict[str, Any] = {
     "required": [
         "boardStrategy",
         "action",
+        "mergeBehavior",
         "conceptKey",
         "title",
         "headingMode",

@@ -9,7 +9,9 @@ import type {
 
 /** Board sessions use a separate store so lesson context records stay small and stable. */
 export const WHITEBOARD_SESSION_STORAGE_KEY = "imagine-whiteboard-sessions-v1";
-export const WHITEBOARD_SESSION_SCHEMA_VERSION = 4;
+export const WHITEBOARD_SESSION_SCHEMA_VERSION = 5;
+
+type WhiteboardSessionSchemaVersion = 1 | 2 | 3 | 4 | 5;
 
 export type DashboardTab = "prepare" | "library" | "live";
 
@@ -143,7 +145,7 @@ function normalizeStickScene(value: unknown): StickScene | null {
   return { version: 1, columns: 12, rows: 8, entities, connections };
 }
 
-function normalizeScene(value: unknown, sourceSchema: 1 | 2 | 3 | 4): WhiteboardScene | null {
+function normalizeScene(value: unknown, sourceSchema: WhiteboardSessionSchemaVersion): WhiteboardScene | null {
   if (!isRecord(value)) return null;
   const placement = normalizePlacement(value.placement, sourceSchema === 1);
   const modes = sourceSchema === 1
@@ -159,18 +161,21 @@ function normalizeScene(value: unknown, sourceSchema: 1 | 2 | 3 | 4): Whiteboard
   const rawRenderMode = value.renderMode === "structured" || value.renderMode === "generatedAsset"
     ? value.renderMode
     : null;
-  // Older structured visual-only scenes depended on the removed stock drawing.
-  // Restore them as a clear unavailable generated visual instead of inventing art.
-  const renderMode = sourceSchema < 4
+  // Older diagram scenes used structured rendering. Restore them as unavailable
+  // generated diagrams, while keeping any separate combined visual content.
+  const renderMode = sourceSchema < 5 && rawRenderMode && modes.includes("diagram")
+    ? "generatedAsset" as const
+    : sourceSchema < 4
     && rawRenderMode === "structured"
     && modes.includes("visual")
-    && (modes.includes("diagram") || !normalizeStickScene(value.stickScene))
+    && !normalizeStickScene(value.stickScene)
       ? "generatedAsset" as const
       : rawRenderMode;
-  const needsStickScene = modes.includes("diagram") || (
-    modes.includes("visual") && renderMode === "structured"
+  const needsStickScene = modes.includes("visual") && (
+    modes.includes("diagram") || renderMode === "structured"
   );
   const stickScene = needsStickScene ? normalizeStickScene(value.stickScene) : null;
+  const visualFailed = value.visualFailed === true;
   const headingMode = sourceSchema < 4
     ? "show" as const
     : value.headingMode === "show" || value.headingMode === "inheritPrimary"
@@ -194,11 +199,12 @@ function normalizeScene(value: unknown, sourceSchema: 1 | 2 | 3 | 4): Whiteboard
     || !/^[a-z0-9_-]+$/.test(value.conceptKey) || !isBoundedString(value.title, 100, true)
     || !summary || !summaryBullets || !placement || !headingMode || !renderMode
     || (modes.includes("notes") ? summaryBullets.length < 1 : summaryBullets.length !== 0)
-    || (sourceSchema === 4 && placementFootprintIndex < requiredFootprintIndex)
+    || (sourceSchema === 5 && placementFootprintIndex < requiredFootprintIndex)
     || (needsStickScene && !stickScene)
-    || (!needsStickScene && value.stickScene != null)
-    || (!modes.includes("visual") && renderMode !== "structured")
-    || (modes.includes("visual") && modes.includes("diagram") && renderMode !== "generatedAsset")
+    || (sourceSchema === 5 && !needsStickScene && value.stickScene != null)
+    || (sourceSchema === 5 && value.visualFailed !== undefined && typeof value.visualFailed !== "boolean")
+    || (!modes.includes("visual") && !modes.includes("diagram") && renderMode !== "structured")
+    || (modes.includes("diagram") && renderMode !== "generatedAsset")
   ) return null;
   return {
     sceneId: value.sceneId,
@@ -213,11 +219,11 @@ function normalizeScene(value: unknown, sourceSchema: 1 | 2 | 3 | 4): Whiteboard
     renderMode,
     generatedAsset: null,
     visualJobId: null,
-    visualFailed: value.renderMode === "generatedAsset"
+    visualFailed
   };
 }
 
-function normalizeBoard(value: unknown, sourceSchema: 1 | 2 | 3 | 4): WhiteboardState | null {
+function normalizeBoard(value: unknown, sourceSchema: WhiteboardSessionSchemaVersion): WhiteboardState | null {
   if (!isRecord(value) || value.columns !== 24 || value.rows !== 14) return null;
   if (!isInteger(value.version, 0) || !isInteger(value.currentPage, 1, maximumBoardPages) || !Array.isArray(value.scenes) || value.scenes.length > maximumBoardScenes) return null;
   const scenes = value.scenes.map((scene) => normalizeScene(scene, sourceSchema));
@@ -278,7 +284,7 @@ function normalizeRecentTurns(value: unknown, turnSequence: number): RecentTurn[
   return turns;
 }
 
-function normalizeSession(value: unknown, knownLessonIds: Set<string>, sourceSchema: 1 | 2 | 3 | 4): WhiteboardSession | null {
+function normalizeSession(value: unknown, knownLessonIds: Set<string>, sourceSchema: WhiteboardSessionSchemaVersion): WhiteboardSession | null {
   if (!isRecord(value) || value.schemaVersion !== sourceSchema) return null;
   if (typeof value.lessonId !== "string" || (value.lessonId !== "" && !knownLessonIds.has(value.lessonId))) return null;
   if (!isInteger(value.turnSequence, 0) || !isBoundedString(value.updatedAt, 40, true) || Number.isNaN(Date.parse(value.updatedAt))) return null;
@@ -302,10 +308,10 @@ export function loadWhiteboardSessionStore(storage: StorageLike, lessonIds: stri
     const raw = storage.getItem(WHITEBOARD_SESSION_STORAGE_KEY);
     if (!raw) return { ok: true, value: fallback };
     const parsed = JSON.parse(raw) as unknown;
-    if (!isRecord(parsed) || ![1, 2, 3, 4].includes(Number(parsed.schemaVersion))) {
+    if (!isRecord(parsed) || ![1, 2, 3, 4, 5].includes(Number(parsed.schemaVersion))) {
       return { ok: false, value: fallback, message: "Saved whiteboard sessions use an unsupported format." };
     }
-    const sourceSchema = parsed.schemaVersion as 1 | 2 | 3 | 4;
+    const sourceSchema = parsed.schemaVersion as WhiteboardSessionSchemaVersion;
     const knownLessonIds = new Set(lessonIds);
     const rawSessions = Array.isArray(parsed.sessions) ? parsed.sessions : [];
     const sessions: WhiteboardSession[] = [];
@@ -359,7 +365,7 @@ function durableSession(session: WhiteboardSession) {
   };
 }
 
-/** Persist only structured scene data; generated images and pending jobs remain memory-only. */
+/** Persist scene state without generated image binaries or pending job ownership. */
 export function saveWhiteboardSessionStore(storage: StorageLike, value: WhiteboardSessionStore): SessionWriteResult {
   try {
     storage.setItem(WHITEBOARD_SESSION_STORAGE_KEY, JSON.stringify({

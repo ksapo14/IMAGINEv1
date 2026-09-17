@@ -1,7 +1,7 @@
 import json
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from pydantic import ValidationError
 
@@ -10,12 +10,26 @@ from backend.main import GenerateRequest, GenerateResponse, SlidingWindowRateLim
 from backend.services.gemini_pipeline import GeminiProviderError
 
 
+def accepted_stick_scene() -> dict[str, object]:
+    return {
+        "version": 1,
+        "columns": 12,
+        "rows": 8,
+        "entities": [
+            {"id": "mass-a", "type": "circle", "x": 0, "y": 0, "width": 2, "height": 2, "label": "A", "pose": "neutral", "facing": "front"},
+            {"id": "mass-b", "type": "circle", "x": 4, "y": 0, "width": 2, "height": 2, "label": "B", "pose": "neutral", "facing": "front"},
+        ],
+        "connections": [{"id": "attracts", "fromId": "mass-a", "toId": "mass-b", "label": "attracts", "direction": "both"}],
+    }
+
+
 def accepted_result() -> dict[str, object]:
     return {
         "boardVersion": 1,
         "turnSequence": 1,
         "boardStrategy": "integrate",
         "action": "create",
+        "mergeBehavior": "replace",
         "conceptKey": "gravity",
         "title": "Gravity",
         "headingMode": "show",
@@ -27,19 +41,10 @@ def accepted_result() -> dict[str, object]:
         "targetSceneId": None,
         "requestedFootprint": "medium",
         "placement": {"page": 1, "column": 0, "row": 0, "width": 12, "height": 6},
-        "stickScene": {
-            "version": 1,
-            "columns": 12,
-            "rows": 8,
-            "entities": [
-                {"id": "mass-a", "type": "circle", "x": 0, "y": 0, "width": 2, "height": 2, "label": "A", "pose": "neutral", "facing": "front"},
-                {"id": "mass-b", "type": "circle", "x": 4, "y": 0, "width": 2, "height": 2, "label": "B", "pose": "neutral", "facing": "front"},
-            ],
-            "connections": [{"id": "attracts", "fromId": "mass-a", "toId": "mass-b", "label": "attracts", "direction": "both"}],
-        },
-        "renderMode": "structured",
+        "stickScene": None,
+        "renderMode": "generatedAsset",
         "generatedAsset": None,
-        "visualJobId": None,
+        "visualJobId": "job-existing",
         "warning": None,
         "_imageRequest": None,
     }
@@ -86,7 +91,7 @@ class BackendContractTests(unittest.TestCase):
             }]})
 
     def test_response_rejects_mode_dependency_mismatches(self) -> None:
-        base = {**accepted_result(), "summaryBullets": ["Gravity attracts masses."], "contentModes": ["notes"], "requestedFootprint": "small", "placement": {"page": 1, "column": 0, "row": 0, "width": 8, "height": 5}, "stickScene": None}
+        base = {**accepted_result(), "summaryBullets": ["Gravity attracts masses."], "contentModes": ["notes"], "requestedFootprint": "small", "placement": {"page": 1, "column": 0, "row": 0, "width": 8, "height": 5}, "stickScene": None, "renderMode": "structured", "visualJobId": None}
         GenerateResponse(**base)
         with self.assertRaises(ValidationError):
             GenerateResponse(**{**base, "contentModes": ["notes", "notes"]})
@@ -102,6 +107,58 @@ class BackendContractTests(unittest.TestCase):
     def test_response_rejects_removed_hold_action(self) -> None:
         with self.assertRaises(ValidationError):
             GenerateResponse(**{**accepted_result(), "action": "hold"})
+
+    def test_expand_marker_is_bounded_to_an_integrated_diagram_update(self) -> None:
+        marker = {
+            **accepted_result(),
+            "action": "update",
+            "mergeBehavior": "expand",
+            "targetSceneId": "scene-1",
+            "contentModes": ["diagram", "notes"],
+            "summaryBullets": ["Gravity attracts every mass."],
+            "visualJobId": None,
+        }
+        GenerateResponse(**marker)
+        GenerateResponse.model_validate(
+            {**marker, "_imageRequest": None},
+            context={"allow_internal_image_request": True},
+        )
+        with self.assertRaises(ValidationError):
+            GenerateResponse(**{**accepted_result(), "mergeBehavior": "expand"})
+        with self.assertRaises(ValidationError):
+            GenerateResponse(**{**marker, "boardStrategy": "reset"})
+        # The same public shape can represent notes -> new diagram internally;
+        # the resolved pipeline distinguishes it by supplying one image request.
+        GenerateResponse.model_validate(
+            {**marker, "_imageRequest": {"imagePrompt": "Draw gravity.", "visualAlt": "Gravity"}},
+            context={"allow_internal_image_request": True},
+        )
+        with self.assertRaises(ValidationError):
+            GenerateResponse.model_validate(
+                {**marker, "_imageRequest": {"imagePrompt": "", "visualAlt": "Gravity"}},
+                context={"allow_internal_image_request": True},
+            )
+
+        retained_notes = {
+            **marker,
+            "contentModes": ["notes", "diagram"],
+            "summaryBullets": [],
+            "visualJobId": "job-new-diagram",
+        }
+        GenerateResponse(**retained_notes)
+        retained_visual = {
+            **marker,
+            "contentModes": ["visual", "notes"],
+            "summaryBullets": ["Gravity attracts masses."],
+            "stickScene": None,
+            "renderMode": "structured",
+            "visualJobId": None,
+        }
+        GenerateResponse(**retained_visual)
+        with self.assertRaises(ValidationError):
+            GenerateResponse(**{**retained_notes, "mergeBehavior": "replace"})
+        with self.assertRaises(ValidationError):
+            GenerateResponse(**{**retained_visual, "mergeBehavior": "replace"})
 
     def test_response_enforces_reset_action_and_page_invariants(self) -> None:
         reset = {**accepted_result(), "boardStrategy": "reset"}
@@ -119,9 +176,14 @@ class BackendContractTests(unittest.TestCase):
             GenerateResponse(**{**reset, "headingMode": "inheritPrimary"})
 
     def test_response_rejects_malformed_stick_scene_graphs(self) -> None:
-        base = accepted_result()
-        valid_scene = base["stickScene"]
-        assert isinstance(valid_scene, dict)
+        valid_scene = accepted_stick_scene()
+        base = {
+            **accepted_result(),
+            "contentModes": ["visual", "diagram"],
+            "requestedFootprint": "full",
+            "placement": {"page": 1, "column": 0, "row": 0, "width": 24, "height": 10},
+            "stickScene": valid_scene,
+        }
         corruptions = {
             "unsafe entity id": {**valid_scene, "entities": [{**valid_scene["entities"][0], "id": "bad id"}, valid_scene["entities"][1]]},
             "duplicate entity id": {**valid_scene, "entities": [valid_scene["entities"][0], {**valid_scene["entities"][1], "id": "mass-a"}]},
@@ -154,6 +216,7 @@ class BackendContractTests(unittest.TestCase):
             "placement": {"page": 1, "column": 0, "row": 0, "width": 12, "height": 6},
             "stickScene": None,
             "renderMode": "generatedAsset",
+            "visualJobId": None,
         }
         valid_asset = {
             "dataUrl": "data:image/png;base64,aW1hZ2U=",
@@ -168,6 +231,14 @@ class BackendContractTests(unittest.TestCase):
         }
         GenerateResponse.model_validate(
             {**visual, "_imageRequest": valid_image_request},
+            context={"allow_internal_image_request": True},
+        )
+        GenerateResponse.model_validate(
+            {
+                **accepted_result(),
+                "visualJobId": None,
+                "_imageRequest": valid_image_request,
+            },
             context={"allow_internal_image_request": True},
         )
         invalid_internal_requests = {
@@ -207,6 +278,8 @@ class BackendContractTests(unittest.TestCase):
             "contentModes": ["visual"],
             "summaryBullets": [],
             "renderMode": "structured",
+            "visualJobId": None,
+            "stickScene": accepted_stick_scene(),
         }
         GenerateResponse(**structured_visual)
         with self.assertRaises(ValidationError):
@@ -215,7 +288,21 @@ class BackendContractTests(unittest.TestCase):
                 "contentModes": ["visual", "diagram"],
                 "requestedFootprint": "full",
                 "placement": {"page": 1, "column": 0, "row": 0, "width": 24, "height": 10},
+                "renderMode": "structured",
+                "visualJobId": None,
             })
+
+    def test_response_requires_generated_diagram_without_stick_fallback(self) -> None:
+        diagram = accepted_result()
+        GenerateResponse(**diagram)
+        with self.assertRaisesRegex(ValidationError, "generated diagram asset"):
+            GenerateResponse(**{
+                **diagram,
+                "renderMode": "structured",
+                "visualJobId": None,
+            })
+        with self.assertRaisesRegex(ValidationError, "structured visual pane"):
+            GenerateResponse(**{**diagram, "stickScene": accepted_stick_scene()})
 
     def test_rate_limiter_reopens_and_prunes_after_window(self) -> None:
         now = [100.0]
@@ -258,6 +345,22 @@ class BackendContractTests(unittest.TestCase):
         for path in config_paths:
             with self.subTest(path=path):
                 self.assertNotIn(obsolete_key, path.read_text(encoding="utf-8"))
+
+    def test_backend_compose_passes_optional_gemini_fallback_models_through(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        compose = (root / "docker-compose.yml").read_text(encoding="utf-8")
+        backend = compose.split("  frontend:", 1)[0]
+        environment = backend.split("    environment:", 1)[1].split("    ports:", 1)[0]
+
+        # A valueless Compose mapping inherits nonblank or explicitly blank host
+        # values and removes the container variable when the host value is unset.
+        for variable in (
+            "GEMINI_TEXT_FALLBACK_MODEL",
+            "GEMINI_IMAGE_FALLBACK_MODEL",
+        ):
+            with self.subTest(variable=variable):
+                self.assertIn(f"      {variable}:\n", environment)
+                self.assertNotIn(f"{variable}: ${{", environment)
 
     def test_environment_secrets_are_ignored_but_the_example_stays_public(self) -> None:
         root = Path(__file__).resolve().parents[1]
@@ -310,6 +413,7 @@ class VisualJobLifecycleTests(unittest.IsolatedAsyncioTestCase):
             "placement": {"page": 1, "column": 0, "row": 0, "width": 12, "height": 6},
             "stickScene": None,
             "renderMode": "generatedAsset",
+            "visualJobId": None,
             "_imageRequest": {"imagePrompt": "A teacher points.", "visualAlt": "Teacher points"},
         }
         GenerateResponse.model_validate(
@@ -325,17 +429,68 @@ class VisualJobLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(captured), 1)
         captured[0].close()
 
-    async def test_image_failure_keeps_structured_fallback_decision_valid(self) -> None:
+    async def test_diagram_schedules_exactly_one_diagram_kind_job(self) -> None:
+        result = {
+            **accepted_result(),
+            "visualJobId": None,
+            "_imageRequest": {
+                "imagePrompt": "Mass A attracts mass B.",
+                "visualAlt": "Two masses attract each other",
+            },
+        }
+        GenerateResponse.model_validate(
+            result,
+            context={"allow_internal_image_request": True},
+        )
+        run_job = Mock(return_value=None)
+        with (
+            patch.object(backend_main, "run_visual_job", new=run_job),
+            patch.object(backend_main, "track_visual_task") as track,
+        ):
+            await backend_main.schedule_visual_generation(result)
+
+        job_id = result["visualJobId"]
+        run_job.assert_called_once_with(
+            job_id,
+            "scene-1",
+            "Mass A attracts mass B.",
+            "Two masses attract each other",
+            "diagram",
+        )
+        track.assert_called_once_with(None)
+        self.assertEqual(len(backend_main.visual_jobs), 1)
+
+    async def test_visual_image_failure_keeps_structured_content_available(self) -> None:
         with patch.object(
             backend_main.gemini_pipeline,
             "generate_visual",
             new=AsyncMock(return_value=None),
-        ):
+        ) as generate_visual:
             await backend_main.run_visual_job("job", "scene", "prompt", "alt")
+        generate_visual.assert_awaited_once_with(
+            "image", "prompt", "alt", "visual"
+        )
         job = backend_main.visual_jobs["job"]
         self.assertEqual(job["status"], "failed")
         self.assertIsNone(job["generatedAsset"])
         self.assertNotIn("prompt", str(job["warning"]))
+
+    async def test_diagram_job_passes_strict_kind_to_pipeline(self) -> None:
+        with patch.object(
+            backend_main.gemini_pipeline,
+            "generate_visual",
+            new=AsyncMock(return_value=None),
+        ) as generate_visual:
+            await backend_main.run_visual_job(
+                "diagram-job", "scene", "prompt", "alt", "diagram"
+            )
+        generate_visual.assert_awaited_once_with(
+            "image", "prompt", "alt", "diagram"
+        )
+        self.assertEqual(
+            backend_main.visual_jobs["diagram-job"]["warning"],
+            "The diagram could not be generated.",
+        )
 
     def test_visual_state_sweep_expires_terminal_jobs(self) -> None:
         backend_main.visual_jobs.update({

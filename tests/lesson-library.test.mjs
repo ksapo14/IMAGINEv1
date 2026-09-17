@@ -4,8 +4,9 @@ import { FRONTEND_ONLY_NOTICE, isFrontendOnlyDeployment } from "../lib/deploymen
 import { LESSON_LIBRARY_KEY, loadLessonLibrary, saveLessonLibrary } from "../lib/lesson-library.ts";
 import { streamGeneration, validateGenerateResponse } from "../lib/generation-stream.ts";
 import { consumeWakeCommand, dequeueLiveTurn, enqueueLiveTurn, IDLE_WAKE_COMMAND_STATE, isDuplicateFinalizedSpeech } from "../lib/live-session.ts";
-import { appendRecentTurn, applyBoardDecision, cancelRemovedVisualJobs, cancelSupersededVisualJob, EMPTY_WHITEBOARD, getBoardDigest, getConceptMemory, MAX_BOARD_SCENES, patchGeneratedAsset, sceneOwnsVisualJob, settlePendingVisualJobs } from "../lib/whiteboard-session.ts";
-import { createEmptyWhiteboardSession, loadWhiteboardSessionStore, saveWhiteboardSessionStore, WHITEBOARD_SESSION_STORAGE_KEY } from "../lib/whiteboard-session-storage.ts";
+import { createSummaryTypingPlan, createSummaryTypingSession, getChangedSummaryBulletIndexes, renderSummaryTypingFrame } from "../lib/summary-typing.ts";
+import { appendRecentTurn, applyBoardDecision, cancelRemovedVisualJobs, cancelSupersededVisualJob, EMPTY_WHITEBOARD, getBoardDigest, getConceptMemory, MAX_BOARD_SCENES, patchGeneratedAsset, sceneOwnsVisualJob, settlePendingVisualJobs, shouldAnimateDiagramNotesExpansion } from "../lib/whiteboard-session.ts";
+import { createEmptyWhiteboardSession, loadWhiteboardSessionStore, saveWhiteboardSessionStore, WHITEBOARD_SESSION_SCHEMA_VERSION, WHITEBOARD_SESSION_STORAGE_KEY } from "../lib/whiteboard-session-storage.ts";
 import { getSiteOrigin } from "../lib/site-origin.ts";
 import { resolveVercelFrontendOnly } from "../scripts/vercel-build.mjs";
 
@@ -32,6 +33,52 @@ class MemoryStorage {
   setItem(key, value) { this.values.set(key, value); }
 }
 
+test("summary typing reveals changed Unicode bullets sequentially at the bounded reading pace", () => {
+  const bullets = ["Stable bullet.", "A 👩🏽‍🔬 joins e\u0301nergy.", "Third bullet."];
+  const changedIndexes = getChangedSummaryBulletIndexes(
+    ["Stable bullet.", "Older wording.", "Third bullet."],
+    bullets
+  );
+  const plan = createSummaryTypingPlan(bullets, changedIndexes);
+
+  assert.deepEqual(changedIndexes, [1]);
+  assert.equal(plan.frames.length, 1);
+  assert.equal(plan.frames[0].graphemes.includes("👩🏽‍🔬"), true);
+  assert.equal(plan.frames[0].graphemes.includes("é"), true);
+  assert.ok(plan.durationSeconds >= 0.16);
+  assert.ok(plan.durationSeconds <= 9.6);
+  assert.deepEqual(renderSummaryTypingFrame(plan, 2), [{ index: 1, text: "A " }]);
+  assert.deepEqual(renderSummaryTypingFrame(plan, plan.totalGraphemes), [{ index: 1, text: bullets[1] }]);
+
+  const multiBulletPlan = createSummaryTypingPlan(["🙂 first", "second"], [1, 0]);
+  const firstBulletLength = multiBulletPlan.frames[0].graphemes.length;
+  assert.deepEqual(renderSummaryTypingFrame(multiBulletPlan, firstBulletLength + 1), [
+    { index: 0, text: "🙂 first" },
+    { index: 1, text: "s" }
+  ]);
+});
+
+test("summary typing sessions cancel stale writes and a new revision starts cleanly", () => {
+  const plan = createSummaryTypingPlan(["First", "Second"], [0, 1]);
+  const session = createSummaryTypingSession(plan);
+  assert.deepEqual(session.render(2), [
+    { index: 0, text: "Fi" },
+    { index: 1, text: "" }
+  ]);
+  assert.deepEqual(session.complete(), [
+    { index: 0, text: "First" },
+    { index: 1, text: "Second" }
+  ]);
+  session.cancel();
+  assert.deepEqual(session.render(plan.totalGraphemes), []);
+
+  const nextRevision = createSummaryTypingSession(plan);
+  assert.deepEqual(nextRevision.render(1), [
+    { index: 0, text: "F" },
+    { index: 1, text: "" }
+  ]);
+});
+
 const stickScene = {
   version: 1,
   columns: 12,
@@ -46,6 +93,7 @@ function decision(overrides = {}) {
     turnSequence: 1,
     boardStrategy: "integrate",
     action: "create",
+    mergeBehavior: "replace",
     conceptKey: "cell-energy",
     title: "Cell energy",
     headingMode: "show",
@@ -66,6 +114,9 @@ function decision(overrides = {}) {
   };
   if (!("summaryBullets" in overrides) && Array.isArray(result.contentModes) && !result.contentModes.includes("notes")) {
     result.summaryBullets = [];
+  }
+  if (!("stickScene" in overrides) && Array.isArray(result.contentModes) && !result.contentModes.includes("visual")) {
+    result.stickScene = null;
   }
   return result;
 }
@@ -156,7 +207,83 @@ test("whiteboard sessions round-trip independently for lessons and no-context", 
   assert.equal(restored.value.sessions[0].recentTurns[1].turnSequence, 7);
   assert.equal(restored.value.sessions[0].board.scenes[0].generatedAsset, null);
   assert.equal(restored.value.sessions[0].board.scenes[0].visualJobId, null);
+  assert.equal(restored.value.sessions[0].board.scenes[0].renderMode, "generatedAsset");
+  assert.equal(restored.value.sessions[0].board.scenes[0].visualFailed, false);
   assert.deepEqual(restored.value.sessions[0].board.scenes[0].stickScene, stickScene);
+  assert.equal(WHITEBOARD_SESSION_SCHEMA_VERSION, 5);
+});
+
+test("schema v4 removes diagram fallbacks while preserving combined visual content", () => {
+  const storage = new MemoryStorage();
+  const structuredDiagram = decision({
+    contentModes: ["diagram"],
+    renderMode: "structured",
+    generatedAsset: null,
+    visualJobId: null,
+    stickScene,
+    requestedFootprint: "medium",
+    placement: { page: 1, column: 0, row: 0, width: 12, height: 6 }
+  });
+  const structuredNotesDiagram = decision({
+    sceneId: "scene-2",
+    conceptKey: "cell-notes-diagram",
+    contentModes: ["notes", "diagram"],
+    renderMode: "structured",
+    generatedAsset: null,
+    visualJobId: null,
+    stickScene,
+    requestedFootprint: "medium",
+    placement: { page: 2, column: 0, row: 0, width: 12, height: 6 }
+  });
+  const generatedDiagram = decision({
+    sceneId: "scene-3",
+    conceptKey: "cell-generated-diagram",
+    contentModes: ["diagram"],
+    visualJobId: "diagram-job",
+    stickScene,
+    requestedFootprint: "medium",
+    placement: { page: 3, column: 0, row: 0, width: 12, height: 6 }
+  });
+  const combined = decision({
+    sceneId: "scene-4",
+    conceptKey: "cell-combined",
+    contentModes: ["visual", "diagram"],
+    summaryBullets: [],
+    requestedFootprint: "full",
+    placement: { page: 4, column: 0, row: 0, width: 24, height: 10 }
+  });
+  storage.setItem(WHITEBOARD_SESSION_STORAGE_KEY, JSON.stringify({
+    schemaVersion: 4,
+    navigation: { activeTab: "live", selectedLessonId: "lesson-a" },
+    sessions: [{
+      schemaVersion: 4,
+      lessonId: "lesson-a",
+      board: {
+        version: 4,
+        currentPage: 4,
+        columns: 24,
+        rows: 14,
+        scenes: [structuredDiagram, structuredNotesDiagram, generatedDiagram, combined]
+      },
+      recentTurns: [],
+      turnSequence: 4,
+      updatedAt: "2026-08-21T12:00:00.000Z"
+    }]
+  }));
+
+  const restored = loadWhiteboardSessionStore(storage, ["lesson-a"]);
+  assert.equal(restored.ok, false);
+  assert.deepEqual(
+    restored.value.sessions[0].board.scenes.map((scene) => scene.renderMode),
+    ["generatedAsset", "generatedAsset", "generatedAsset", "generatedAsset"]
+  );
+  for (const diagram of restored.value.sessions[0].board.scenes.slice(0, 3)) {
+    assert.equal(diagram.stickScene, null);
+    assert.equal(diagram.generatedAsset, null);
+    assert.equal(diagram.visualJobId, null);
+    assert.equal(diagram.visualFailed, false);
+  }
+  assert.deepEqual(restored.value.sessions[0].board.scenes[3].stickScene, stickScene);
 });
 
 test("whiteboard schema v1 migrates every scene to all three presentation modes", () => {
@@ -405,7 +532,7 @@ test("semantically invalid sessions are rejected while their valid sibling survi
   }
 });
 
-test("switching away and back settles an orphaned image job as a fallback", () => {
+test("switching away and back settles an orphaned image job as failed", () => {
   const pendingBoard = applyBoardDecision(EMPTY_WHITEBOARD, decision({
     renderMode: "generatedAsset", visualJobId: "job-pending"
   }));
@@ -616,6 +743,56 @@ test("stream validation rejects conditional mode and footprint violations", () =
   );
 });
 
+test("stream validation accepts generated diagrams and preserves visual-only rendering", () => {
+  for (const contentModes of [["diagram"], ["notes", "diagram"]]) {
+    const validated = validateGenerateResponse(decision({ contentModes }));
+    assert.equal(validated.renderMode, "generatedAsset");
+    assert.equal(validated.stickScene, null);
+    assert.equal(validated.visualJobId, "job-default");
+  }
+
+  assert.deepEqual(validateGenerateResponse(decision({
+    contentModes: ["visual", "diagram"], summaryBullets: []
+  })).stickScene, stickScene);
+
+  const generatedAsset = {
+    dataUrl: "data:image/png;base64,YWJj",
+    mimeType: "image/png",
+    alt: "Cell energy diagram"
+  };
+  assert.deepEqual(validateGenerateResponse(decision({
+    contentModes: ["diagram"], generatedAsset, visualJobId: null
+  })).generatedAsset, generatedAsset);
+
+  assert.equal(validateGenerateResponse(decision({
+    contentModes: ["visual"],
+    requestedFootprint: "medium",
+    placement: { page: 1, column: 0, row: 0, width: 12, height: 6 },
+    stickScene: null
+  })).renderMode, "generatedAsset");
+  assert.equal(validateGenerateResponse(decision({
+    contentModes: ["visual"],
+    requestedFootprint: "medium",
+    placement: { page: 1, column: 0, row: 0, width: 12, height: 6 },
+    renderMode: "structured",
+    generatedAsset: null,
+    visualJobId: null
+  })).renderMode, "structured");
+
+  assert.throws(() => validateGenerateResponse(decision({
+    contentModes: ["diagram"], renderMode: "structured", visualJobId: null
+  })), /diagram render mode/i);
+  assert.throws(() => validateGenerateResponse(decision({
+    contentModes: ["diagram"], stickScene
+  })), /StickScene dependency/i);
+  assert.throws(() => validateGenerateResponse(decision({
+    contentModes: ["diagram"], generatedAsset
+  })), /incomplete generated visual/i);
+  assert.throws(() => validateGenerateResponse(decision({
+    contentModes: ["diagram"], visualJobId: null
+  })), /incomplete generated visual/i);
+});
+
 test("stream validation rejects the removed hold response action", () => {
   assert.throws(() => validateGenerateResponse(decision({ action: "hold" })), /invalid decision/i);
 });
@@ -644,7 +821,7 @@ test("direct session mutation rejects adversarial scene decisions", () => {
     "invalid confidence": decision({ confidence: 2 }),
     "first scene inherits heading": decision({ headingMode: "inheritPrimary" }),
     "missing diagram": decision({ stickScene: null }),
-    "unselected diagram": decision({ contentModes: ["notes"], requestedFootprint: "small", placement: { page: 1, column: 0, row: 0, width: 8, height: 5 } }),
+    "unselected diagram": decision({ contentModes: ["notes"], stickScene, requestedFootprint: "small", placement: { page: 1, column: 0, row: 0, width: 8, height: 5 } }),
     "invalid diagram": decision({ stickScene: { ...stickScene, entities: [{ ...stickScene.entities[0], type: "triangle" }] } }),
     "unapproved render mode": decision({ renderMode: "html" }),
     "incomplete generated visual": decision({ renderMode: "generatedAsset", visualJobId: null }),
@@ -683,6 +860,140 @@ test("CREATE accumulates and UPDATE applies authoritative validated placement", 
   assert.deepEqual(updated.scenes[0].placement, { page: 4, column: 0, row: 0, width: 24, height: 10 });
   assert.equal(updated.currentPage, 4);
   assert.equal(updated.scenes[0].title, "ATP cycle");
+});
+
+test("EXPAND preserves every retained diagram state and emits one transient animation", () => {
+  const pending = applyBoardDecision(EMPTY_WHITEBOARD, decision({
+    contentModes: ["diagram"],
+    summaryBullets: [],
+    requestedFootprint: "medium",
+    placement: { page: 1, column: 0, row: 0, width: 12, height: 6 },
+    stickScene: null,
+    visualJobId: "job-retained"
+  }));
+  const asset = { dataUrl: "data:image/png;base64,YWJjZA==", mimeType: "image/png", alt: "ATP diagram" };
+  const ready = patchGeneratedAsset(pending, "scene-1", "job-retained", asset);
+  const failed = settlePendingVisualJobs(pending);
+  const unavailable = {
+    ...pending,
+    scenes: pending.scenes.map((scene) => ({ ...scene, visualJobId: null, visualFailed: false }))
+  };
+  const states = [pending, ready, failed, unavailable];
+
+  for (const prior of states) {
+    const expansion = decision({
+      action: "update",
+      mergeBehavior: "expand",
+      boardVersion: 2,
+      turnSequence: 2,
+      sceneId: "scene-1",
+      targetSceneId: "scene-1",
+      contentModes: ["diagram", "notes"],
+      summaryBullets: ["Cells use ATP as transferable chemical energy."],
+      requestedFootprint: "medium",
+      placement: { page: 1, column: 0, row: 0, width: 12, height: 6 },
+      stickScene: null,
+      visualJobId: null,
+      generatedAsset: null
+    });
+    assert.doesNotThrow(() => validateGenerateResponse(expansion));
+    const expanded = applyBoardDecision(prior, expansion);
+    assert.ok(expanded);
+    assert.deepEqual(expanded.scenes[0].contentModes, ["diagram", "notes"]);
+    assert.equal(expanded.scenes[0].generatedAsset, prior.scenes[0].generatedAsset);
+    assert.equal(expanded.scenes[0].visualJobId, prior.scenes[0].visualJobId);
+    assert.equal(expanded.scenes[0].visualFailed, prior.scenes[0].visualFailed);
+    assert.equal(expanded.currentPage, prior.currentPage);
+    assert.deepEqual(expanded.scenes[0].placement, prior.scenes[0].placement);
+    assert.equal(
+      shouldAnimateDiagramNotesExpansion(prior.scenes[0], expanded.scenes[0], expansion),
+      true
+    );
+    if (prior === pending) {
+      // A diagram that finishes after its summary keeps both panes and the page.
+      const completed = patchGeneratedAsset(expanded, "scene-1", "job-retained", asset);
+      assert.ok(completed);
+      assert.deepEqual(completed.scenes[0].contentModes, ["diagram", "notes"]);
+      assert.deepEqual(completed.scenes[0].summaryBullets, expansion.summaryBullets);
+      assert.equal(completed.scenes[0].generatedAsset, asset);
+      assert.equal(completed.currentPage, expanded.currentPage);
+      assert.equal(shouldAnimateDiagramNotesExpansion(expanded.scenes[0], completed.scenes[0], expansion), false);
+    }
+  }
+
+  const sameMode = decision({
+    action: "update", mergeBehavior: "expand", boardVersion: 2,
+    sceneId: "scene-1", targetSceneId: "scene-1",
+    contentModes: ["diagram"], summaryBullets: [], requestedFootprint: "medium",
+    placement: { page: 1, column: 0, row: 0, width: 12, height: 6 }, stickScene: null,
+    generatedAsset: null, visualJobId: null
+  });
+  assert.equal(applyBoardDecision(pending, sameMode), null);
+  assert.equal(applyBoardDecision(pending, { ...sameMode, contentModes: ["notes", "diagram"], summaryBullets: ["New."] }), null);
+  assert.equal(applyBoardDecision(pending, { ...sameMode, contentModes: ["diagram", "notes"], summaryBullets: ["New."], visualJobId: "job-new" }), null);
+});
+
+test("cross-mode EXPAND markers preserve retained notes and structured visuals", () => {
+  const notesBoard = applyBoardDecision(EMPTY_WHITEBOARD, decision({
+    contentModes: ["notes"],
+    requestedFootprint: "small",
+    placement: { page: 1, column: 0, row: 0, width: 8, height: 5 },
+    stickScene: null,
+    renderMode: "structured",
+    generatedAsset: null,
+    visualJobId: null
+  }));
+  const notesToDiagram = decision({
+    action: "update", mergeBehavior: "expand", boardVersion: 2,
+    sceneId: "scene-1", targetSceneId: "scene-1",
+    contentModes: ["notes", "diagram"], summaryBullets: [],
+    requestedFootprint: "medium",
+    placement: { page: 1, column: 0, row: 0, width: 12, height: 6 },
+    stickScene: null, renderMode: "generatedAsset",
+    generatedAsset: null, visualJobId: "job-new-diagram"
+  });
+  const expandedNotes = applyBoardDecision(notesBoard, notesToDiagram);
+  assert.ok(expandedNotes);
+  assert.deepEqual(expandedNotes.scenes[0].summaryBullets, notesBoard.scenes[0].summaryBullets);
+  assert.equal(expandedNotes.scenes[0].visualJobId, "job-new-diagram");
+  assert.equal(applyBoardDecision(notesBoard, {
+    ...notesToDiagram, summaryBullets: ["A rewritten retained note."]
+  }), null);
+
+  const visualBoard = applyBoardDecision(EMPTY_WHITEBOARD, decision({
+    contentModes: ["visual"], summaryBullets: [],
+    requestedFootprint: "medium",
+    placement: { page: 1, column: 0, row: 0, width: 12, height: 6 },
+    renderMode: "structured", generatedAsset: null, visualJobId: null
+  }));
+  const visualToNotes = decision({
+    action: "update", mergeBehavior: "expand", boardVersion: 2,
+    sceneId: "scene-1", targetSceneId: "scene-1",
+    contentModes: ["visual", "notes"], summaryBullets: ["ATP transfers usable energy."],
+    requestedFootprint: "medium",
+    placement: { page: 1, column: 0, row: 0, width: 12, height: 6 },
+    stickScene: null, renderMode: "structured", generatedAsset: null, visualJobId: null
+  });
+  const expandedVisualNotes = applyBoardDecision(visualBoard, visualToNotes);
+  assert.ok(expandedVisualNotes);
+  assert.equal(expandedVisualNotes.scenes[0].stickScene, visualBoard.scenes[0].stickScene);
+
+  const visualToDiagram = {
+    ...visualToNotes,
+    contentModes: ["visual", "diagram"],
+    summaryBullets: [],
+    requestedFootprint: "full",
+    placement: { page: 1, column: 0, row: 0, width: 24, height: 10 },
+    renderMode: "generatedAsset",
+    visualJobId: "job-visual-diagram"
+  };
+  const expandedVisualDiagram = applyBoardDecision(visualBoard, visualToDiagram);
+  assert.ok(expandedVisualDiagram);
+  assert.equal(expandedVisualDiagram.scenes[0].stickScene, visualBoard.scenes[0].stickScene);
+  assert.equal(expandedVisualDiagram.scenes[0].visualJobId, "job-visual-diagram");
+  assert.equal(applyBoardDecision(visualBoard, {
+    ...visualToDiagram, stickScene
+  }), null);
 });
 
 test("the board sends all 48 occupied scenes, rejects another CREATE, and still permits UPDATE", () => {
@@ -785,7 +1096,7 @@ test("stale versions do not mutate the board", () => {
   assert.equal(applyBoardDecision(created, decision({ boardVersion: 4 })), null);
 });
 
-test("recent memory is bounded and image polling patches only the asset state", () => {
+test("recent memory is bounded and only the expected image job can settle", () => {
   let turns = [];
   for (let index = 1; index <= 8; index += 1) turns = appendRecentTurn(turns, decision({ turnSequence: index }), `turn ${index}`);
   assert.equal(turns.length, 6);
@@ -798,8 +1109,17 @@ test("recent memory is bounded and image polling patches only the asset state", 
     sceneId: "scene-1"
   });
   const asset = { dataUrl: "data:image/png;base64,abc", mimeType: "image/png", alt: "ATP" };
-  const patched = patchGeneratedAsset(created, "scene-1", asset);
+  const patched = patchGeneratedAsset(created, "scene-1", "job-1", asset);
   assert.deepEqual(patched.scenes[0].placement, created.scenes[0].placement);
   assert.equal(patched.scenes[0].title, created.scenes[0].title);
   assert.equal(patched.scenes[0].generatedAsset.alt, "ATP");
+
+  const newer = applyBoardDecision(created, decision({
+    action: "update", boardVersion: 2, turnSequence: 2,
+    sceneId: "scene-1", targetSceneId: "scene-1", visualJobId: "job-2"
+  }));
+  const ignored = patchGeneratedAsset(newer, "scene-1", "job-1", asset);
+  assert.equal(ignored, newer);
+  assert.equal(ignored.scenes[0].visualJobId, "job-2");
+  assert.equal(ignored.scenes[0].generatedAsset, null);
 });

@@ -219,6 +219,10 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn("const ownsVisualJob = () =>", canvas_source)
         self.assertGreaterEqual(canvas_source.count("if (!ownsVisualJob()) return;"), 3)
         self.assertIn("cancelSupersededVisualJob(", canvas_source)
+        self.assertIn(
+            "patchGeneratedAsset(currentBoard, sceneId, jobId, asset, failed)",
+            canvas_source,
+        )
         self.assertIn("sessionCache.current.delete(lessonId)", canvas_source)
         self.assertIn('activateLesson(next[0]?.id ?? "", false)', canvas_source)
         self.assertIn("const settledBoard = settlePendingVisualJobs(boardRef.current)", canvas_source)
@@ -229,6 +233,9 @@ class FrontendContractTests(unittest.TestCase):
             encoding="utf-8"
         )
         storage = (ROOT / "lib" / "whiteboard-session-storage.ts").read_text(
+            encoding="utf-8"
+        )
+        stream = (ROOT / "lib" / "generation-stream.ts").read_text(
             encoding="utf-8"
         )
 
@@ -242,24 +249,39 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn("createEmptyWhiteboardSession", canvas_source)
         self.assertIn("activateLesson(event.target.value)", canvas_source)
         self.assertIn("fresh board", canvas_source)
-        self.assertIn("WHITEBOARD_SESSION_SCHEMA_VERSION = 4", storage)
+        self.assertIn("WHITEBOARD_SESSION_SCHEMA_VERSION = 5", storage)
         self.assertIn("sourceSchema === 1", storage)
         self.assertIn("sourceSchema < WHITEBOARD_SESSION_SCHEMA_VERSION", storage)
+        self.assertIn(
+            '!modes.includes("visual") && !modes.includes("diagram")', storage
+        )
+        self.assertIn("generatedAsset: null", storage)
+        self.assertIn("visualJobId: null", storage)
+        self.assertIn("const canGenerateAsset = hasVisual || hasDiagram", stream)
+        self.assertIn(
+            'if (hasDiagram && value.renderMode !== "generatedAsset")', stream
+        )
+        self.assertIn(
+            "Boolean(value.generatedAsset) === Boolean(value.visualJobId)", stream
+        )
 
-    def test_whiteboard_uses_trusted_stick_scene_and_fixed_grid(self) -> None:
+    def test_whiteboard_uses_structured_visuals_and_generated_diagram_loader(self) -> None:
+        canvas = (ROOT / "app" / "canvas" / "page.tsx").read_text(encoding="utf-8")
         board = (ROOT / "components" / "workspace" / "live-whiteboard.tsx").read_text(
             encoding="utf-8"
         )
         scene = (ROOT / "components" / "workspace" / "stick-scene.tsx").read_text(
             encoding="utf-8"
         )
+        styles = (ROOT / "app" / "globals.css").read_text(encoding="utf-8")
 
         self.assertIn("function arrangeScenes", board)
         self.assertIn("function pageTemplate", board)
         self.assertIn('return notesOnly ? "grid-cols-2" : "grid-cols-1"', board)
         self.assertIn("scenes.length === 3 && index === 0", board)
         self.assertIn("min-h-[34rem]", board)
-        self.assertIn("minmax(18rem, 1fr)", board)
+        self.assertIn("grid-cols-1", board)
+        self.assertIn("md:grid-cols-2", board)
         self.assertIn("overflow-auto", board)
         self.assertIn("<StickScene", board)
         self.assertIn('aria-label="Visualization"', board)
@@ -267,6 +289,12 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn('aria-label="Diagram"', board)
         self.assertNotIn("VisualSummary", board)
         self.assertIn("showConnections={false}", board)
+        self.assertIn('const hasDiagram = scene.contentModes.includes("diagram")', board)
+        self.assertIn("!hasDiagram && scene.generatedAsset", board)
+        self.assertIn(
+            'scene.stickScene && (hasDiagram || scene.renderMode === "structured")',
+            board,
+        )
         self.assertIn("scene.contentModes.map", board)
         self.assertIn("mode === \"visual\"", board)
         self.assertIn("mode === \"notes\"", board)
@@ -278,7 +306,26 @@ class FrontendContractTests(unittest.TestCase):
         self.assertNotIn('aria-label="Keywords"', board)
         self.assertIn("scenes.length === 1", board)
         self.assertIn('scene.headingMode === "show"', board)
-        self.assertIn("grayscale contrast-125", board)
+        self.assertIn('className={`w-full object-contain', board)
+        diagram_pane = board[
+            board.index('data-content-mode="diagram"') : board.index("function placementOrder")
+        ]
+        self.assertNotIn("StickScene", diagram_pane)
+        self.assertNotIn("scene.stickScene", diagram_pane)
+        self.assertLess(diagram_pane.index("scene.generatedAsset"), diagram_pane.index("scene.visualJobId"))
+        self.assertLess(diagram_pane.index("scene.visualJobId"), diagram_pane.index("scene.visualFailed"))
+        self.assertLess(diagram_pane.index("scene.visualFailed"), diagram_pane.index("This restored diagram is unavailable"))
+        self.assertIn('role="status" aria-live="polite" aria-atomic="true"', board)
+        self.assertIn('aria-hidden="true" focusable="false"', board)
+        self.assertIn("diagram-drawing-loader__stroke", board)
+        self.assertIn("@keyframes diagram-draw-stroke", styles)
+        self.assertIn("@keyframes diagram-node-pulse", styles)
+        self.assertIn("@media (prefers-reduced-motion: reduce)", styles)
+        self.assertIn("stroke-dashoffset: 0", styles)
+        self.assertIn("animation: none", styles)
+        self.assertNotIn("grayscale", board)
+        self.assertNotIn("contrast-125", board)
+        self.assertNotIn("mix-blend-multiply", board)
         self.assertIn('role="img"', scene)
         self.assertIn("useId()", scene)
         self.assertIn("id={markerId}", scene)
@@ -293,11 +340,52 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn("data-scene-id={scene.sceneId}", board)
         self.assertIn("animationRequest?.revision", board)
         self.assertIn('window.matchMedia("(prefers-reduced-motion: reduce)")', board)
-        self.assertIn("gsap.fromTo", board)
+        self.assertIn("timeline.fromTo", board)
         self.assertNotIn("data-typewriter-char", board)
         self.assertNotIn("TypewriterText", board)
         self.assertIn('data-animation-block="heading"', board)
         self.assertIn('data-animation-block="notes"', board)
+        self.assertIn('kind: "expandDiagramNotes"', canvas)
+        self.assertIn("shouldAnimateDiagramNotesExpansion", canvas)
+        self.assertIn('new Map<number, "running" | "complete">()', board)
+        self.assertIn('animationLifecycle.current.set(animationRequest.revision, "running")', board)
+        self.assertIn('animationLifecycle.current.set(animationRequest.revision, "complete")', board)
+        self.assertIn("animationLifecycle.current.delete(animationRequest.revision)", board)
+        self.assertLess(
+            board.index('data-scene-id="${animationRequest.sceneId}"'),
+            board.index("animationLifecycle.current.set(animationRequest.revision"),
+        )
+        self.assertIn(
+            "dependencies: [animationRequest?.revision]",
+            board,
+        )
+        self.assertIn('data-content-mode="diagram"', board)
+        self.assertIn('data-content-mode="notes"', board)
+        self.assertIn("data-semantic-notes", board)
+        self.assertIn("data-semantic-bullet", board)
+        self.assertIn('aria-hidden="true"', board)
+        self.assertIn("duration: 0.26", board)
+        expansion = board[
+            board.index('if (animationRequest.kind === "expandDiagramNotes")')
+            : board.index("const blocks = animationRequest.blocks")
+        ]
+        self.assertLess(expansion.index("timeline.to(modeGrid"), expansion.index("startTyping(timeline)"))
+        self.assertLess(expansion.index("timeline.fromTo(artwork"), expansion.index("startTyping(timeline)"))
+        self.assertIn('sharesWithNotes ? "max-h-[22rem]" : "max-h-[34rem]"', board)
+        self.assertIn('maxHeight: "34rem"', board)
+        self.assertIn("maxHeight: finalArtworkHeight", board)
+        self.assertIn('clearProps: "maxHeight"', board)
+        self.assertIn("columnGap * (modeList.length - 1)", board)
+        self.assertIn("createSummaryTypingPlan", board)
+        self.assertIn("createSummaryTypingSession", board)
+        self.assertIn("textContent = text", board)
+        self.assertIn("getBoundingClientRect().height", board)
+        self.assertIn("typingBullets.forEach((bullet, index)", board)
+        self.assertIn("semanticBullets[index].getBoundingClientRect().height", board)
+        self.assertIn("data-typing-bullet", board)
+        self.assertIn('className="text-pretty empty:invisible"', board)
+        self.assertIn('window.matchMedia("(min-width: 768px)")', board)
+        self.assertIn("md:grid-cols-2", board)
         self.assertIn("filter: \"blur(7px)\"", board)
         self.assertIn("scene.title}", board)
         self.assertLess(board.index("<h2"), board.index("scene.contentModes.map"))

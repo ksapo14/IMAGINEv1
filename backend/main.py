@@ -164,7 +164,7 @@ def sweep_visual_state_locked(now: float | None = None) -> None:
                 {
                     "status": "failed",
                     "generatedAsset": None,
-                    "warning": "The optional image request expired.",
+                    "warning": "The image request expired before it could finish.",
                     "updatedAt": current_time,
                 }
             )
@@ -271,6 +271,7 @@ class BoardSceneContext(BaseModel):
         min_length=1,
         max_length=3,
     )
+    renderMode: Literal["structured", "generatedAsset"] = "structured"
     placement: BoardPlacement
 
     @model_validator(mode="after")
@@ -406,6 +407,7 @@ class GenerateResponse(BaseModel):
     turnSequence: int = Field(ge=0)
     boardStrategy: Literal["integrate", "reset"]
     action: Literal["create", "update"]
+    mergeBehavior: Literal["replace", "expand"]
     conceptKey: str = Field(max_length=80)
     title: str = Field(max_length=100)
     headingMode: Literal["show", "inheritPrimary"]
@@ -437,10 +439,22 @@ class GenerateResponse(BaseModel):
             and info.context.get("allow_internal_image_request")
         ):
             image_request = value.get("_imageRequest")
+            content_modes = value.get("contentModes")
+            preservation_marker = (
+                value.get("mergeBehavior") == "expand"
+                and value.get("action") == "update"
+                and isinstance(content_modes, list)
+                and "diagram" in content_modes
+                and value.get("renderMode") == "generatedAsset"
+                and value.get("generatedAsset") is None
+                and value.get("visualJobId") is None
+                and image_request is None
+            )
             needs_request = (
                 value.get("renderMode") == "generatedAsset"
                 and value.get("generatedAsset") is None
                 and value.get("visualJobId") is None
+                and not preservation_marker
             )
             if needs_request:
                 if not isinstance(image_request, dict) or set(image_request) != {
@@ -475,6 +489,12 @@ class GenerateResponse(BaseModel):
             or self.headingMode != "show"
         ):
             raise ValueError("RESET must create one headed, untargeted scene on board page 1.")
+        if self.action == "create" and self.mergeBehavior != "replace":
+            raise ValueError("CREATE must replace rather than expand a scene.")
+        if self.mergeBehavior == "expand" and (
+            self.action != "update" or self.boardStrategy != "integrate"
+        ):
+            raise ValueError("EXPAND is valid only for an integrated UPDATE.")
         if (
             not re.fullmatch(r"[a-z0-9_-]+", self.conceptKey)
             or not self.title.strip()
@@ -484,7 +504,13 @@ class GenerateResponse(BaseModel):
         if not self.contentModes or len(set(self.contentModes)) != len(self.contentModes):
             raise ValueError("contentModes must be a unique non-empty ordered list.")
         has_notes = "notes" in self.contentModes
-        if has_notes != bool(self.summaryBullets):
+        retained_notes_marker = (
+            self.mergeBehavior == "expand"
+            and self.action == "update"
+            and has_notes
+            and not self.summaryBullets
+        )
+        if has_notes != bool(self.summaryBullets) and not retained_notes_marker:
             raise ValueError("summaryBullets are required exactly when notes mode is selected.")
         if any(
             not bullet.strip()
@@ -495,14 +521,24 @@ class GenerateResponse(BaseModel):
             raise ValueError("summaryBullets must contain 1 to 4 concise items.")
         has_diagram = "diagram" in self.contentModes
         has_structured_visual = (
-            "visual" in self.contentModes and self.renderMode == "structured"
+            "visual" in self.contentModes
+            and (self.renderMode == "structured" or has_diagram)
         )
-        if (has_diagram or has_structured_visual) != (self.stickScene is not None):
+        retained_visual_marker = (
+            self.mergeBehavior == "expand"
+            and self.action == "update"
+            and has_structured_visual
+            and self.stickScene is None
+        )
+        if (
+            has_structured_visual != (self.stickScene is not None)
+            and not retained_visual_marker
+        ):
             raise ValueError(
-                "stickScene is required for diagrams and structured visuals only."
+                "stickScene is required only for a structured visual pane."
             )
         if self.stickScene is not None and not self.stickScene.entities:
-            raise ValueError("Diagram mode requires a non-empty StickScene.")
+            raise ValueError("Structured visual mode requires a non-empty StickScene.")
         if not re.fullmatch(r"[a-zA-Z0-9_-]+", self.sceneId):
             raise ValueError("sceneId must be a safe bounded identifier.")
         if self.action == "create" and self.targetSceneId is not None:
@@ -519,18 +555,19 @@ class GenerateResponse(BaseModel):
             self.placement.height,
         ) != FOOTPRINTS[effective]:
             raise ValueError("The placement must match the effective content footprint.")
-        if "visual" not in self.contentModes and (
+        owns_image = "visual" in self.contentModes or has_diagram
+        if not owns_image and (
             self.renderMode != "structured"
             or self.generatedAsset is not None
             or self.visualJobId is not None
         ):
-            raise ValueError("Only visual mode may request or retain image work.")
+            raise ValueError("Only visual or diagram mode may request or retain image work.")
         if "visual" in self.contentModes and self.renderMode == "structured" and (
             self.generatedAsset is not None or self.visualJobId is not None
         ):
             raise ValueError("Structured visual mode cannot retain image work.")
-        if {"visual", "diagram"}.issubset(set(self.contentModes)) and self.renderMode != "generatedAsset":
-            raise ValueError("Combined visual and diagram scenes require a generated visual asset.")
+        if has_diagram and self.renderMode != "generatedAsset":
+            raise ValueError("Diagram scenes require a generated diagram asset.")
         if self.visualJobId is not None and (
             len(self.visualJobId) > 80
             or not re.fullmatch(r"[a-zA-Z0-9_-]+", self.visualJobId)
@@ -539,12 +576,19 @@ class GenerateResponse(BaseModel):
         if self.renderMode == "generatedAsset":
             has_asset = self.generatedAsset is not None
             has_job = self.visualJobId is not None
+            preservation_marker = (
+                self.mergeBehavior == "expand"
+                and self.action == "update"
+                and has_diagram
+                and not has_asset
+                and not has_job
+            )
             allow_internal = bool(
                 info.context and info.context.get("allow_internal_image_request")
             )
             if has_asset and has_job:
                 raise ValueError("Generated visual responses cannot contain both an asset and a job.")
-            if not has_asset and not has_job and not allow_internal:
+            if not has_asset and not has_job and not allow_internal and not preservation_marker:
                 raise ValueError("Generated visual responses require one asset or visual job.")
         return self
 
@@ -561,14 +605,16 @@ async def run_visual_job(
     scene_id: str,
     image_prompt: str,
     visual_alt: str,
+    image_kind: Literal["visual", "diagram"] = "visual",
 ) -> None:
-    """Run bounded image work without allowing failure to undo a scene decision."""
+    """Run bounded image work and publish a truthful terminal job state."""
     try:
         async with image_job_semaphore:
             asset = await gemini_pipeline.generate_visual(
                 "image",
                 image_prompt,
                 visual_alt,
+                image_kind,
             )
     except Exception:
         logger.exception("The AI provider failed visual job %s.", job_id)
@@ -576,7 +622,11 @@ async def run_visual_job(
 
     warning = None
     if asset is None:
-        warning = "The structured scene is ready, but its optional image could not be generated."
+        warning = (
+            "The diagram could not be generated."
+            if image_kind == "diagram"
+            else "The visual could not be generated."
+        )
     now = time.monotonic()
     with visual_jobs_lock:
         visual_jobs[job_id] = {
@@ -592,10 +642,12 @@ async def run_visual_job(
 async def schedule_visual_generation(result: dict[str, object]) -> None:
     """Reserve the job after board placement exists and before work is started."""
     image_request = result.pop("_imageRequest", None)
+    content_modes = result.get("contentModes")
     if (
         not isinstance(image_request, dict)
         or not isinstance(result.get("placement"), dict)
-        or "visual" not in result.get("contentModes", [])
+        or not isinstance(content_modes, list)
+        or not ({"visual", "diagram"} & set(content_modes))
     ):
         return
     image_prompt = image_request.get("imagePrompt")
@@ -616,7 +668,12 @@ async def schedule_visual_generation(result: dict[str, object]) -> None:
             "updatedAt": now,
         }
     result["visualJobId"] = job_id
-    track_visual_task(run_visual_job(job_id, scene_id, image_prompt, visual_alt))
+    image_kind: Literal["visual", "diagram"] = (
+        "diagram" if "diagram" in content_modes else "visual"
+    )
+    track_visual_task(
+        run_visual_job(job_id, scene_id, image_prompt, visual_alt, image_kind)
+    )
 
 
 def get_deepgram_api_key() -> str:
@@ -701,7 +758,7 @@ async def generate_content(
     payload: GenerateRequest,
     request: Request,
 ) -> GenerateResponse:
-    """Direct one teaching turn and schedule its optional image fallback."""
+    """Direct one teaching turn and schedule any requested image work."""
     user_input = payload.userInput.strip()
     if not user_input:
         raise HTTPException(status_code=422, detail="Input cannot be empty.")
