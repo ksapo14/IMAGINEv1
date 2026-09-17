@@ -8,6 +8,7 @@ from pydantic import ValidationError
 import backend.main as backend_main
 from backend.main import GenerateRequest, GenerateResponse, SlidingWindowRateLimiter
 from backend.services.gemini_pipeline import GeminiProviderError
+from backend.services.animation_assets import AnimationAssetResolver, sanitize_svg
 
 
 def accepted_stick_scene() -> dict[str, object]:
@@ -50,7 +51,58 @@ def accepted_result() -> dict[str, object]:
     }
 
 
+def accepted_animation_spec() -> dict[str, object]:
+    return {
+        "version": 1,
+        "template": "cycle",
+        "objects": [
+            {"id": "water", "assetKey": "drop", "label": "Water"},
+            {"id": "cloud", "assetKey": "cloud", "label": "Cloud"},
+        ],
+        "relationships": [{"id": "rises", "fromId": "water", "toId": "cloud", "label": "evaporates", "direction": "forward"}],
+        "steps": [
+            {"action": "appear", "targetId": "water"},
+            {"action": "move", "targetId": "water", "direction": "up", "distance": "medium"},
+            {"action": "trace", "targetId": "rises"},
+        ],
+    }
+
+
 class BackendContractTests(unittest.TestCase):
+    def test_animation_recipe_requires_bounded_semantic_motion(self) -> None:
+        animation = {
+            **accepted_result(),
+            "contentModes": ["animation"],
+            "requestedFootprint": "medium",
+            "placement": {"page": 1, "column": 0, "row": 0, "width": 12, "height": 6},
+            "renderMode": "structured",
+            "generatedAsset": None,
+            "visualJobId": None,
+            "animationSpec": accepted_animation_spec(),
+        }
+        GenerateResponse(**animation)
+        invalid_specs = {
+            "missing spec": None,
+            "coordinates": {**accepted_animation_spec(), "objects": [{"id": "water", "assetKey": "drop", "label": "Water", "x": 9}]},
+            "move without distance": {**accepted_animation_spec(), "steps": [{"action": "move", "targetId": "water", "direction": "up"}]},
+            "trace object": {**accepted_animation_spec(), "steps": [{"action": "trace", "targetId": "water"}]},
+            "cross graph ID": {**accepted_animation_spec(), "relationships": [{"id": "water", "fromId": "water", "toId": "cloud", "label": "", "direction": "forward"}]},
+        }
+        for name, spec in invalid_specs.items():
+            with self.subTest(name=name), self.assertRaises(ValidationError):
+                GenerateResponse(**{**animation, "animationSpec": spec})
+        with self.assertRaises(ValidationError):
+            GenerateResponse(**{**animation, "contentModes": ["notes"], "summaryBullets": ["Notes."], "animationSpec": accepted_animation_spec(), "requestedFootprint": "small", "placement": {"page": 1, "column": 0, "row": 0, "width": 8, "height": 5}})
+
+    def test_svg_asset_sanitization_rejects_executable_and_unknown_markup(self) -> None:
+        self.assertIsNotNone(sanitize_svg(b'<svg viewBox="0 0 10 10"><path d="M0 0h10"/></svg>'))
+        for payload in (
+            b'<svg><script>alert(1)</script></svg>',
+            b'<svg><path style="fill:url(https://bad.example)" d="M0 0"/></svg>',
+            b'<svg><use href="https://bad.example"/></svg>',
+        ):
+            with self.subTest(payload=payload):
+                self.assertIsNone(sanitize_svg(payload))
     def test_request_context_has_hard_bounds(self) -> None:
         with self.assertRaises(ValidationError):
             GenerateRequest(userInput="x" * 4001)
@@ -386,6 +438,35 @@ class BackendContractTests(unittest.TestCase):
         finally:
             backend_main.release_transcription_session(client)
             backend_main.release_transcription_session(client)
+
+
+class AnimationAssetResolverTests(unittest.IsolatedAsyncioTestCase):
+    async def test_resolver_caches_exact_allowlisted_assets_and_misses(self) -> None:
+        calls: list[str] = []
+
+        def read_json(url: str, _timeout: float) -> dict[str, object]:
+            calls.append(url)
+            return {"icons": ["lucide:atom", "lucide:unrelated"]}
+
+        def read_svg(url: str, _timeout: float) -> bytes:
+            calls.append(url)
+            return b'<svg viewBox="0 0 10 10"><circle cx="5" cy="5" r="4"/></svg>'
+
+        resolver = AnimationAssetResolver(json_reader=read_json, svg_reader=read_svg)
+        assets, unresolved = await resolver.resolve(["atom"])
+        self.assertEqual(unresolved, [])
+        self.assertEqual(assets[0].icon_id, "lucide:atom")
+        self.assertIn("ISC", assets[0].attribution)
+        self.assertEqual(len(calls), 2)
+        cached, cached_unresolved = await resolver.resolve(["atom"])
+        self.assertEqual(cached, assets)
+        self.assertEqual(cached_unresolved, [])
+        self.assertEqual(len(calls), 2)
+
+        missing, missing_unresolved = await resolver.resolve(["particle"])
+        self.assertEqual(missing, [])
+        self.assertEqual(missing_unresolved, ["particle"])
+        self.assertEqual(len(calls), 4)
 
 
 class VisualJobLifecycleTests(unittest.IsolatedAsyncioTestCase):

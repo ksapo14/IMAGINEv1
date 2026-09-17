@@ -4,7 +4,7 @@ export type WhiteboardAction = "create" | "update";
 export type BoardStrategy = "integrate" | "reset";
 export type MergeBehavior = "replace" | "expand";
 export type RecentTurnAction = WhiteboardAction | "hold";
-export type ContentMode = "visual" | "notes" | "diagram";
+export type ContentMode = "visual" | "notes" | "diagram" | "animation";
 export type HeadingMode = "show" | "inheritPrimary";
 
 export type LessonContext = {
@@ -95,6 +95,47 @@ export type GeneratedAsset = {
   alt: string;
 };
 
+/** A compact, renderer-owned recipe. Model output never contains SVG or timing code. */
+export type AnimationTemplate = "sequence" | "flow" | "cycle" | "comparison" | "motion";
+export type AnimationAction = "appear" | "move" | "rotate" | "highlight" | "trace";
+
+export type AnimationObject = {
+  id: string;
+  assetKey: string;
+  label: string;
+};
+
+export type AnimationRelationship = {
+  id: string;
+  fromId: string;
+  toId: string;
+  label: string;
+  direction: "forward" | "backward" | "both" | "none";
+};
+
+export type AnimationStep = {
+  action: AnimationAction;
+  targetId: string;
+  direction?: "up" | "down" | "left" | "right" | "clockwise" | "counterclockwise";
+  distance?: "short" | "medium" | "long";
+};
+
+export type AnimationSpec = {
+  version: 1;
+  template: AnimationTemplate;
+  objects: AnimationObject[];
+  relationships: AnimationRelationship[];
+  steps: AnimationStep[];
+};
+
+/** Sanitized remote artwork is rendered as an image; it never becomes SVG markup in the DOM. */
+export type ResolvedAnimationAsset = {
+  term: string;
+  iconId: string;
+  dataUrl: string;
+  attribution: string;
+};
+
 export type GenerateRequest = {
   userInput: string;
   mode: "live";
@@ -124,6 +165,8 @@ export type WhiteboardDecision = {
   placement: BoardPlacement;
   /** Structured visual content; generated diagram panes never render this value. */
   stickScene: StickScene | null;
+  /** Present only when animation mode is selected, or null as an expansion preservation marker. */
+  animationSpec: AnimationSpec | null;
   renderMode: "structured" | "generatedAsset";
   generatedAsset: GeneratedAsset | null;
   visualJobId: string | null;
@@ -148,6 +191,7 @@ export type WhiteboardScene = {
   placement: BoardPlacement;
   /** Structured visual content, including the visual half of a combined scene. */
   stickScene: StickScene | null;
+  animationSpec: AnimationSpec | null;
   renderMode: "structured" | "generatedAsset";
   generatedAsset: GeneratedAsset | null;
   visualJobId: string | null;

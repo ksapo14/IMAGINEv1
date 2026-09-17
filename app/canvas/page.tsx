@@ -28,6 +28,7 @@ import type {
 } from "@/components/workspace/types";
 import { FRONTEND_ONLY_NOTICE, isFrontendOnlyDeployment } from "@/lib/deployment-mode";
 import { API_BASE_URL, streamGeneration } from "@/lib/generation-stream";
+import { requestsAnimation } from "@/lib/animation-spec";
 import { loadLessonLibrary, removeLesson, saveLessonLibrary, upsertLesson } from "@/lib/lesson-library";
 import { getChangedSummaryBulletIndexes } from "@/lib/summary-typing";
 import {
@@ -148,6 +149,7 @@ export default function CanvasPage() {
   const [speechStatus, setSpeechStatus] = useState<SpeechStatus>("idle");
   const [wakePhase, setWakePhase] = useState<WakeCommandState["phase"]>("idle");
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isAnimationLoading, setIsAnimationLoading] = useState(false);
 
   const shellRef = useRef<HTMLElement | null>(null);
   const boardRef = useRef(board);
@@ -510,6 +512,7 @@ export default function CanvasPage() {
     generationAbortController.current = controller;
     generationInFlight.current = true;
     setIsGenerating(true);
+    setIsAnimationLoading(requestsAnimation(turn.input));
     setError("");
     setWarning("");
     setNotice("");
@@ -584,6 +587,7 @@ export default function CanvasPage() {
         generationInFlight.current = false;
         generationAbortController.current = null;
         setIsGenerating(false);
+        setIsAnimationLoading(false);
         if (!frontendOnly) {
           const next = dequeueLiveTurn(ordinaryTurnQueue.current);
           if (next) window.queueMicrotask(() => dispatchTurnRef.current?.(next.input, next.sequence));
@@ -625,6 +629,7 @@ export default function CanvasPage() {
     setCapturedInput("");
     setLiveTranscript("");
     setIsGenerating(false);
+    setIsAnimationLoading(false);
     setError("");
     setWarning("");
     setSceneAnimation(null);
@@ -768,14 +773,14 @@ export default function CanvasPage() {
         <StatusBanner error={error} warning={warning || sessionStorageNotice || libraryStorageNotice} notice={notice || speechNotice} />
         {frontendOnly ? <div id="frontend-only-notice" role="status" aria-live="polite" className="fixed left-1/2 top-[132px] z-30 w-[min(calc(100%-32px),720px)] -translate-x-1/2 rounded-xl border border-amber-200 bg-amber-50/95 px-4 py-2 text-center text-sm font-medium text-amber-950 shadow-sm">{FRONTEND_ONLY_NOTICE}</div> : null}
         <section id="live-board" className="min-h-0 flex-1">
-          <LiveWhiteboard board={board} animationRequest={sceneAnimation} />
+          <LiveWhiteboard board={board} animationRequest={sceneAnimation} isAnimationLoading={isAnimationLoading} />
         </section>
 
         <form onSubmit={handleLiveSubmit} aria-describedby={frontendOnly ? "frontend-only-notice" : undefined} className="fixed bottom-[max(0.5rem,env(safe-area-inset-bottom))] left-2 right-2 z-40 mx-auto flex w-[min(820px,calc(100%-1rem))] items-end gap-1.5 rounded-2xl bg-white/75 p-1.5 shadow-[0_18px_60px_rgba(70,60,40,0.16)] backdrop-blur-xl sm:gap-2 sm:p-2">
           <div className="min-w-0 flex-1">
             {(speechStatus !== "idle" || wakePhase !== "idle" || liveTranscript || isGenerating) ? <div id="speech-command-status" role="status" aria-live="polite" className="flex h-6 min-w-0 items-center gap-2 truncate px-3 text-xs text-neutral-600"><span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${wakePhase === "armed" ? "bg-emerald-500" : speechStatus === "listening" ? "bg-amber-500" : "bg-neutral-400"}`} /><span className="truncate">{isGenerating ? "Preparing board update…" : liveTranscript ? `Heard: ${liveTranscript}` : speechStateLabel}</span></div> : null}
             <label htmlFor="workspace-input" className="sr-only">Typed teaching command</label>
-            <Textarea id="workspace-input" aria-describedby={frontendOnly ? "frontend-only-notice" : "speech-command-status"} disabled={frontendOnly} value={capturedInput} onChange={(event) => setCapturedInput(event.target.value)} onKeyDown={handleInputKeyDown} placeholder={frontendOnly ? "Live generation is unavailable on this deployment." : "Teach the next idea…"} maxLength={4000} rows={1} className="min-h-12 w-full resize-none rounded-lg border-0 bg-transparent px-3 py-3 text-base text-black caret-black shadow-none placeholder:text-neutral-600 focus-visible:ring-2 focus-visible:ring-[var(--signal)] disabled:cursor-not-allowed disabled:opacity-70" />
+            <Textarea id="workspace-input" aria-describedby={frontendOnly ? "frontend-only-notice" : "speech-command-status"} disabled={frontendOnly} value={capturedInput} onChange={(event) => setCapturedInput(event.target.value)} onKeyDown={handleInputKeyDown} placeholder={frontendOnly ? "Live generation is unavailable on this deployment." : "Teach the next idea… Try “animate the water cycle”."} maxLength={4000} rows={1} className="min-h-12 w-full resize-none rounded-lg border-0 bg-transparent px-3 py-3 text-base text-black caret-black shadow-none placeholder:text-neutral-600 focus-visible:ring-2 focus-visible:ring-[var(--signal)] disabled:cursor-not-allowed disabled:opacity-70" />
           </div>
           <Button type="submit" disabled={frontendOnly || !capturedInput.trim()} aria-label="Submit typed teaching command" className="h-12 w-11 shrink-0 rounded-lg bg-[var(--signal)] px-0 text-[var(--signal-ink)] hover:bg-[var(--signal)] active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50 sm:w-12">{isGenerating ? <Loader2 className="h-5 w-5 animate-spin motion-reduce:animate-none" /> : <ArrowUp className="h-5 w-5" />}</Button>
           <Button type="button" disabled={frontendOnly} onClick={() => void startTranscription()} aria-label={frontendOnly ? "Microphone unavailable on this frontend-only deployment" : speechStatus === "idle" ? "Start microphone" : "Stop microphone"} className={`h-12 w-11 shrink-0 rounded-lg px-0 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50 sm:w-12 ${speechStatus === "idle" ? "bg-[var(--canvas-text)] text-[var(--canvas-bg)]" : "bg-red-600 text-white"}`}>{speechStatus === "connecting" ? <Loader2 className="h-5 w-5 animate-spin motion-reduce:animate-none" /> : speechStatus === "listening" ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}</Button>

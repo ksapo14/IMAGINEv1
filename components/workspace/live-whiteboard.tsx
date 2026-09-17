@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef } from "react";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
 import { Loader2 } from "lucide-react";
+import { AnimationRequestLoader, AnimationScene } from "@/components/workspace/animation-scene";
 import { getScenePalette, StickScene } from "@/components/workspace/stick-scene";
 import type { ContentMode, WhiteboardScene, WhiteboardState } from "@/components/workspace/types";
 import { createSummaryTypingPlan, createSummaryTypingSession } from "@/lib/summary-typing";
@@ -9,6 +10,7 @@ import { createSummaryTypingPlan, createSummaryTypingSession } from "@/lib/summa
 type LiveWhiteboardProps = {
   board: WhiteboardState;
   animationRequest: SceneAnimationRequest | null;
+  isAnimationLoading?: boolean;
 };
 
 export type SceneAnimationBlock = "heading" | "notes";
@@ -71,6 +73,15 @@ function SceneMode({ mode, scene }: { mode: ContentMode; scene: WhiteboardScene 
         <ul data-typing-layer aria-hidden="true" className="pointer-events-none absolute inset-x-4 top-4 hidden list-disc space-y-3 pl-6 text-[clamp(1rem,1.35vw,1.3rem)] leading-relaxed sm:inset-x-6 sm:top-6">
           {scene.summaryBullets.map((bullet, index) => <li key={`${index}-${bullet}`} data-typing-bullet className="text-pretty empty:invisible" />)}
         </ul>
+      </section>
+    );
+  }
+  if (mode === "animation") {
+    return (
+      <section data-content-mode="animation" aria-label="Animation" className="min-h-80 min-w-0 p-3 sm:min-h-96 sm:p-5">
+        {scene.animationSpec
+          ? <AnimationScene spec={scene.animationSpec} title={scene.title} />
+          : <p role="status" className="grid min-h-56 place-items-center text-center text-sm text-neutral-600">This restored animation is unavailable. Generate it again to replay it.</p>}
       </section>
     );
   }
@@ -198,7 +209,7 @@ function appendSummaryTyping(timeline: gsap.core.Timeline, typing: PreparedSumma
 }
 
 /** Render persisted placement semantics through readable 1–4 scene page templates. */
-export function LiveWhiteboard({ board, animationRequest }: LiveWhiteboardProps) {
+export function LiveWhiteboard({ board, animationRequest, isAnimationLoading = false }: LiveWhiteboardProps) {
   const boardElement = useRef<HTMLDivElement | null>(null);
   const animationLifecycle = useRef(new Map<number, "running" | "complete">());
   const activeAnimation = useRef<{
@@ -383,10 +394,13 @@ export function LiveWhiteboard({ board, animationRequest }: LiveWhiteboardProps)
               </h2>
             </header>
           ) : null}
+          {isAnimationLoading ? <div data-animation-request-loader className="col-span-full rounded-xl border border-dashed border-neutral-300 bg-white/70"><AnimationRequestLoader /></div> : null}
           {scenes.map((scene, index) => {
             const palette = getScenePalette(scene.conceptKey);
             const isHero = scenes.length === 1 || (scenes.length === 3 && index === 0);
-            const modeColumns = scene.contentModes.length === 3
+            const modeColumns = scene.contentModes.length === 4
+              ? "md:grid-cols-2"
+              : scene.contentModes.length === 3
               ? "md:grid-cols-2 xl:grid-cols-3"
               : scene.contentModes.length === 2 ? "md:grid-cols-2" : "";
             return (

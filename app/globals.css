@@ -163,6 +163,22 @@ select:focus-visible {
   color: #525252;
 }
 
+/* A compact local cue shown while the single text decision selects an SVG recipe. */
+.animation-drawing-loader {
+  color: #525252;
+}
+
+.animation-drawing-loader path,
+.animation-drawing-loader circle {
+  stroke-dasharray: 180;
+  animation: animation-loader-draw 1.25s ease-in-out infinite alternate;
+}
+
+@keyframes animation-loader-draw {
+  from { stroke-dashoffset: 90; opacity: 0.38; }
+  to { stroke-dashoffset: 0; opacity: 1; }
+}
+
 .diagram-drawing-loader__stroke {
   stroke-dasharray: 1;
   stroke-dashoffset: 1;
@@ -204,7 +220,9 @@ select:focus-visible {
   }
 
   .diagram-drawing-loader__stroke,
-  .diagram-drawing-loader__node {
+  .diagram-drawing-loader__node,
+  .animation-drawing-loader path,
+  .animation-drawing-loader circle {
     animation: none;
     opacity: 1;
     stroke-dashoffset: 0;

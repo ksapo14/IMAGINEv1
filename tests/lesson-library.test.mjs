@@ -3,6 +3,8 @@ import test from "node:test";
 import { FRONTEND_ONLY_NOTICE, isFrontendOnlyDeployment } from "../lib/deployment-mode.ts";
 import { LESSON_LIBRARY_KEY, loadLessonLibrary, saveLessonLibrary } from "../lib/lesson-library.ts";
 import { streamGeneration, validateGenerateResponse } from "../lib/generation-stream.ts";
+import { animationAssetTermsKey, createRemoteAnimationAssetResolver, isRemoteAnimationAssetResolutionPending } from "../lib/animation-asset-resolver.ts";
+import { animationObjectPositions, clampAnimationMove, isValidAnimationSpec, requestsAnimation, shouldPlayAnimation, shouldResolveRemoteAnimationAssets } from "../lib/animation-spec.ts";
 import { consumeWakeCommand, dequeueLiveTurn, enqueueLiveTurn, IDLE_WAKE_COMMAND_STATE, isDuplicateFinalizedSpeech } from "../lib/live-session.ts";
 import { createSummaryTypingPlan, createSummaryTypingSession, getChangedSummaryBulletIndexes, renderSummaryTypingFrame } from "../lib/summary-typing.ts";
 import { appendRecentTurn, applyBoardDecision, cancelRemovedVisualJobs, cancelSupersededVisualJob, EMPTY_WHITEBOARD, getBoardDigest, getConceptMemory, MAX_BOARD_SCENES, patchGeneratedAsset, sceneOwnsVisualJob, settlePendingVisualJobs, shouldAnimateDiagramNotesExpansion } from "../lib/whiteboard-session.ts";
@@ -87,6 +89,21 @@ const stickScene = {
   connections: []
 };
 
+const animationSpec = {
+  version: 1,
+  template: "cycle",
+  objects: [
+    { id: "water", assetKey: "drop", label: "Water" },
+    { id: "cloud", assetKey: "cloud", label: "Cloud" }
+  ],
+  relationships: [{ id: "rise", fromId: "water", toId: "cloud", label: "evaporates", direction: "forward" }],
+  steps: [
+    { action: "appear", targetId: "water" },
+    { action: "move", targetId: "water", direction: "up", distance: "medium" },
+    { action: "trace", targetId: "rise" }
+  ]
+};
+
 function decision(overrides = {}) {
   const result = {
     boardVersion: 1,
@@ -106,6 +123,7 @@ function decision(overrides = {}) {
     requestedFootprint: "full",
     placement: { page: 1, column: 0, row: 0, width: 24, height: 10 },
     stickScene,
+    animationSpec: null,
     renderMode: "generatedAsset",
     generatedAsset: null,
     visualJobId: "job-default",
@@ -210,7 +228,7 @@ test("whiteboard sessions round-trip independently for lessons and no-context", 
   assert.equal(restored.value.sessions[0].board.scenes[0].renderMode, "generatedAsset");
   assert.equal(restored.value.sessions[0].board.scenes[0].visualFailed, false);
   assert.deepEqual(restored.value.sessions[0].board.scenes[0].stickScene, stickScene);
-  assert.equal(WHITEBOARD_SESSION_SCHEMA_VERSION, 5);
+  assert.equal(WHITEBOARD_SESSION_SCHEMA_VERSION, 6);
 });
 
 test("schema v4 removes diagram fallbacks while preserving combined visual content", () => {
@@ -719,6 +737,243 @@ test("stream falls back to the buffered endpoint", async () => {
     assert.equal(urls[0].endsWith("/api/generate/stream"), true);
     assert.equal(urls[1].endsWith("/api/generate"), true);
   } finally { globalThis.fetch = originalFetch; }
+});
+
+test("animation recipes validate, preserve exact state on expansion, and restore from schema v6", () => {
+  const animated = decision({
+    contentModes: ["animation"],
+    summaryBullets: [],
+    requestedFootprint: "medium",
+    placement: { page: 1, column: 0, row: 0, width: 12, height: 6 },
+    stickScene: null,
+    animationSpec,
+    renderMode: "structured",
+    generatedAsset: null,
+    visualJobId: null
+  });
+  assert.equal(isValidAnimationSpec(animationSpec), true);
+  assert.equal(isValidAnimationSpec({ ...animationSpec, steps: [{ action: "move", targetId: "water", direction: "up" }] }), false);
+  assert.equal(isValidAnimationSpec({ ...animationSpec, objects: [{ ...animationSpec.objects[0], x: 9 }] }), false);
+  assert.equal(isValidAnimationSpec({ ...animationSpec, steps: [{ ...animationSpec.steps[0], duration: 3 }] }), false);
+  assert.throws(() => validateGenerateResponse({ ...animated, animationSpec: null }), /animation dependency/i);
+  assert.throws(() => validateGenerateResponse({ ...animated, animationSpec: { ...animationSpec, relationships: [{ ...animationSpec.relationships[0], id: "water" }] } }), /animation dependency/i);
+
+  const board = applyBoardDecision(EMPTY_WHITEBOARD, animated);
+  assert.ok(board);
+  const expansion = decision({
+    boardVersion: 2,
+    turnSequence: 2,
+    action: "update",
+    mergeBehavior: "expand",
+    sceneId: "scene-1",
+    targetSceneId: "scene-1",
+    contentModes: ["animation", "notes"],
+    summaryBullets: ["Water rises as vapor."],
+    requestedFootprint: "medium",
+    placement: { page: 1, column: 0, row: 0, width: 12, height: 6 },
+    stickScene: null,
+    animationSpec: null,
+    renderMode: "structured",
+    generatedAsset: null,
+    visualJobId: null
+  });
+  const expanded = applyBoardDecision(board, expansion);
+  assert.ok(expanded);
+  assert.equal(expanded.scenes[0].animationSpec, animationSpec);
+
+  const storage = new MemoryStorage();
+  const session = { lessonId: "", board: expanded, recentTurns: [], turnSequence: 2, updatedAt: "2026-09-14T00:00:00.000Z" };
+  assert.deepEqual(saveWhiteboardSessionStore(storage, { activeTab: "live", selectedLessonId: "", sessions: [session] }), { ok: true });
+  const restored = loadWhiteboardSessionStore(storage, []);
+  assert.equal(restored.ok, true);
+  assert.deepEqual(restored.value.sessions[0].board.scenes[0].animationSpec, animationSpec);
+});
+
+test("all graphical mode pairs reserve a full 24 by 10 scene in either order", () => {
+  const graphicalPairs = [
+    ["visual", "diagram"],
+    ["visual", "animation"],
+    ["diagram", "animation"],
+  ];
+  for (const pair of graphicalPairs) {
+    for (const contentModes of [pair, [...pair].reverse()]) {
+      const hasVisual = contentModes.includes("visual");
+      const hasDiagram = contentModes.includes("diagram");
+      const hasAnimation = contentModes.includes("animation");
+      const complete = decision({
+        contentModes,
+        requestedFootprint: "full",
+        placement: { page: 1, column: 0, row: 0, width: 24, height: 10 },
+        stickScene: hasVisual ? stickScene : null,
+        animationSpec: hasAnimation ? animationSpec : null,
+        renderMode: hasDiagram ? "generatedAsset" : "structured",
+        generatedAsset: null,
+        visualJobId: hasDiagram ? "job-pair" : null,
+      });
+      const accepted = validateGenerateResponse(complete);
+      assert.deepEqual(accepted.placement, { page: 1, column: 0, row: 0, width: 24, height: 10 }, contentModes.join(" + "));
+      assert.throws(() => validateGenerateResponse({
+        ...complete,
+        requestedFootprint: "medium",
+        placement: { page: 1, column: 0, row: 0, width: 12, height: 6 },
+      }), /undersized/i, contentModes.join(" + "));
+    }
+  }
+});
+
+test("schema v6 rejects undersized graphical pairs while retaining their full-scene form", () => {
+  const graphicalPairs = [
+    ["visual", "diagram"],
+    ["visual", "animation"],
+    ["diagram", "animation"],
+  ];
+  for (const pair of graphicalPairs) {
+    for (const contentModes of [pair, [...pair].reverse()]) {
+      const hasVisual = contentModes.includes("visual");
+      const hasDiagram = contentModes.includes("diagram");
+      const hasAnimation = contentModes.includes("animation");
+      const scene = decision({
+        contentModes,
+        requestedFootprint: "full",
+        placement: { page: 1, column: 0, row: 0, width: 24, height: 10 },
+        stickScene: hasVisual ? stickScene : null,
+        animationSpec: hasAnimation ? animationSpec : null,
+        renderMode: hasDiagram ? "generatedAsset" : "structured",
+        generatedAsset: null,
+        visualJobId: hasDiagram ? "job-pair" : null,
+      });
+      const session = {
+        ...createEmptyWhiteboardSession("lesson-a", "2026-09-16T12:00:00.000Z"),
+        schemaVersion: WHITEBOARD_SESSION_SCHEMA_VERSION,
+        board: { version: 1, currentPage: 1, columns: 24, rows: 14, scenes: [scene] },
+        turnSequence: 1,
+      };
+      const storage = new MemoryStorage();
+      storage.setItem(WHITEBOARD_SESSION_STORAGE_KEY, JSON.stringify({
+        schemaVersion: WHITEBOARD_SESSION_SCHEMA_VERSION,
+        navigation: { activeTab: "live", selectedLessonId: "lesson-a" },
+        sessions: [session],
+      }));
+      const restored = loadWhiteboardSessionStore(storage, ["lesson-a"]);
+      assert.equal(restored.ok, true, contentModes.join(" + "));
+      assert.deepEqual(restored.value.sessions[0].board.scenes[0].placement, {
+        page: 1, column: 0, row: 0, width: 24, height: 10,
+      }, contentModes.join(" + "));
+
+      const undersized = structuredClone(session);
+      undersized.board.scenes[0].placement = { page: 1, column: 0, row: 0, width: 12, height: 6 };
+      storage.setItem(WHITEBOARD_SESSION_STORAGE_KEY, JSON.stringify({
+        schemaVersion: WHITEBOARD_SESSION_SCHEMA_VERSION,
+        navigation: { activeTab: "live", selectedLessonId: "lesson-a" },
+        sessions: [undersized],
+      }));
+      const rejected = loadWhiteboardSessionStore(storage, ["lesson-a"]);
+      assert.equal(rejected.ok, false, contentModes.join(" + "));
+      assert.equal(rejected.value.sessions.length, 0, contentModes.join(" + "));
+    }
+  }
+});
+
+test("remote animation asset failures settle into labeled-shape fallback without retrying", async () => {
+  const failures = [
+    () => new Response("", { status: 429 }),
+    () => new Response("", { status: 500 }),
+    () => new Response(JSON.stringify({ assets: [] }), { status: 200 }),
+    () => new Response(JSON.stringify({ assets: [{ term: "atom" }] }), { status: 200 }),
+    () => Promise.reject(new DOMException("timed out", "TimeoutError")),
+  ];
+  for (const response of failures) {
+    let now = 0;
+    let calls = 0;
+    const resolver = createRemoteAnimationAssetResolver({
+      endpoint: "/api/animation/assets/resolve",
+      now: () => now,
+      fetchAssets: async () => {
+        calls += 1;
+        return response();
+      },
+    });
+    const signal = new AbortController().signal;
+    assert.equal((await resolver.resolve(["atom"], signal)).size, 0);
+    await resolver.resolve(["atom"], signal);
+    assert.equal(calls, 1);
+    now += 5 * 60 * 1000 + 1;
+    assert.equal(
+      isRemoteAnimationAssetResolutionPending(true, ["atom"], animationAssetTermsKey(["atom"])),
+      false,
+    );
+    await resolver.resolve(["atom"], signal);
+    assert.equal(calls, 2);
+  }
+});
+
+test("cancelling one animation pane does not cancel a shared asset request", async () => {
+  let completeRequest;
+  let calls = 0;
+  const pendingResponse = new Promise((resolve) => { completeRequest = resolve; });
+  const resolver = createRemoteAnimationAssetResolver({
+    endpoint: "/api/animation/assets/resolve",
+    fetchAssets: async () => {
+      calls += 1;
+      return pendingResponse;
+    },
+  });
+  const cancelledPane = new AbortController();
+  const activePane = new AbortController();
+  const cancelled = resolver.resolve(["atom"], cancelledPane.signal);
+  const active = resolver.resolve(["atom"], activePane.signal);
+  await Promise.resolve();
+  assert.equal(calls, 1);
+  cancelledPane.abort();
+  await cancelled;
+  completeRequest(new Response(JSON.stringify({
+    assets: [{
+      term: "atom",
+      iconId: "lucide:atom",
+      dataUrl: "data:image/svg+xml;base64,PHN2Zy8+",
+      attribution: "Lucide Icons",
+    }],
+  }), { status: 200 }));
+  assert.equal((await active).get("atom")?.iconId, "lucide:atom");
+  assert.equal(calls, 1);
+});
+
+test("animation loader intent, asset policy, and six-object SVG layout stay bounded", () => {
+  const promptCases = {
+    "Animate evaporation.": true,
+    "Skip notes then animate evaporation.": true,
+    "Remove animation.": false,
+    "Explain evaporation without animation.": false,
+    "Animate evaporation, but no animation.": false,
+    "No animation, but animate condensation.": false,
+    "Not only animation, but notes.": true,
+    "Animation of evaporation.": true,
+    "Show a clear animation of a cycle.": true,
+  };
+  for (const [prompt, expected] of Object.entries(promptCases)) assert.equal(requestsAnimation(prompt), expected, prompt);
+  assert.equal(shouldResolveRemoteAnimationAssets(true, ["atom"]), false);
+  assert.equal(shouldResolveRemoteAnimationAssets(false, []), false);
+  assert.equal(shouldResolveRemoteAnimationAssets(false, ["atom"]), true);
+  assert.equal(shouldPlayAnimation(true, true, false, false), true);
+  assert.equal(shouldPlayAnimation(false, true, false, false), false);
+  assert.equal(shouldPlayAnimation(true, false, false, false), false);
+  assert.equal(shouldPlayAnimation(true, true, true, false), false);
+  assert.equal(shouldPlayAnimation(true, true, false, true), false);
+
+  for (const template of ["sequence", "flow", "cycle", "comparison", "motion"]) {
+    const points = animationObjectPositions(template, 6);
+    assert.equal(points.length, 6);
+    for (let index = 0; index < points.length; index += 1) {
+      for (let other = index + 1; other < points.length; other += 1) {
+        assert.ok(Math.hypot(points[index].x - points[other].x, points[index].y - points[other].y) >= 20, `${template} objects ${index}/${other} overlap`);
+      }
+      for (const direction of ["up", "down", "left", "right"]) {
+        const offset = clampAnimationMove(points[index], direction, "long");
+        assert.ok(points[index].x + offset.x >= 12 && points[index].x + offset.x <= 88, `${template} ${direction} x clips`);
+        assert.ok(points[index].y + offset.y >= 12 && points[index].y + offset.y <= 84, `${template} ${direction} y clips`);
+      }
+    }
+  }
 });
 
 test("stream validation rejects conditional mode and footprint violations", () => {

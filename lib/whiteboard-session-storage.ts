@@ -6,12 +6,13 @@ import type {
   WhiteboardScene,
   WhiteboardState
 } from "@/components/workspace/types";
+import { isValidAnimationSpec } from "./animation-spec.ts";
 
 /** Board sessions use a separate store so lesson context records stay small and stable. */
 export const WHITEBOARD_SESSION_STORAGE_KEY = "imagine-whiteboard-sessions-v1";
-export const WHITEBOARD_SESSION_SCHEMA_VERSION = 5;
+export const WHITEBOARD_SESSION_SCHEMA_VERSION = 6;
 
-type WhiteboardSessionSchemaVersion = 1 | 2 | 3 | 4 | 5;
+type WhiteboardSessionSchemaVersion = 1 | 2 | 3 | 4 | 5 | 6;
 
 export type DashboardTab = "prepare" | "library" | "live";
 
@@ -39,16 +40,16 @@ const entityTypes = new Set(["stickFigure", "circle", "rectangle"]);
 const poses = new Set(["neutral", "pointing", "walking", "holding", "raisedArms"]);
 const facings = new Set(["left", "right", "front"]);
 const directions = new Set(["forward", "backward", "both", "none"]);
-const contentModes = new Set<ContentMode>(["visual", "notes", "diagram"]);
+const contentModes = new Set<ContentMode>(["visual", "notes", "diagram", "animation"]);
 const presentationFootprints = new Set(["8x5", "12x6", "16x7", "24x10"]);
 const presentationFootprintOrder = ["8x5", "12x6", "16x7", "24x10"];
 const maximumBoardScenes = 48;
 const maximumBoardPages = maximumBoardScenes;
 
 function minimumFootprintIndex(modes: ContentMode[]) {
-  return modes.length === 3 || (modes.includes("visual") && modes.includes("diagram"))
+  return modes.length >= 3 || ["visual", "diagram", "animation"].filter((mode) => modes.includes(mode as ContentMode)).length >= 2
     ? 3
-    : modes.length === 2 || modes.includes("diagram") || modes[0] === "visual"
+    : modes.length === 2 || modes.includes("diagram") || modes.includes("animation") || modes[0] === "visual"
       ? 1
       : 0;
 }
@@ -152,7 +153,7 @@ function normalizeScene(value: unknown, sourceSchema: WhiteboardSessionSchemaVer
     ? ["visual", "notes", "diagram"] as ContentMode[]
     : Array.isArray(value.contentModes)
       && value.contentModes.length >= 1
-      && value.contentModes.length <= 3
+      && value.contentModes.length <= 4
       && value.contentModes.every((mode) => contentModes.has(mode as ContentMode))
       && new Set(value.contentModes).size === value.contentModes.length
       ? value.contentModes as ContentMode[]
@@ -174,6 +175,9 @@ function normalizeScene(value: unknown, sourceSchema: WhiteboardSessionSchemaVer
   const needsStickScene = modes.includes("visual") && (
     modes.includes("diagram") || renderMode === "structured"
   );
+  const animationSpec = modes.includes("animation") && sourceSchema >= 6
+    ? isValidAnimationSpec(value.animationSpec) ? value.animationSpec : null
+    : null;
   const stickScene = needsStickScene ? normalizeStickScene(value.stickScene) : null;
   const visualFailed = value.visualFailed === true;
   const headingMode = sourceSchema < 4
@@ -199,10 +203,11 @@ function normalizeScene(value: unknown, sourceSchema: WhiteboardSessionSchemaVer
     || !/^[a-z0-9_-]+$/.test(value.conceptKey) || !isBoundedString(value.title, 100, true)
     || !summary || !summaryBullets || !placement || !headingMode || !renderMode
     || (modes.includes("notes") ? summaryBullets.length < 1 : summaryBullets.length !== 0)
-    || (sourceSchema === 5 && placementFootprintIndex < requiredFootprintIndex)
+    || (sourceSchema >= 5 && placementFootprintIndex < requiredFootprintIndex)
     || (needsStickScene && !stickScene)
-    || (sourceSchema === 5 && !needsStickScene && value.stickScene != null)
-    || (sourceSchema === 5 && value.visualFailed !== undefined && typeof value.visualFailed !== "boolean")
+    || (sourceSchema >= 5 && !needsStickScene && value.stickScene != null)
+    || (sourceSchema >= 5 && value.visualFailed !== undefined && typeof value.visualFailed !== "boolean")
+    || (modes.includes("animation") !== (animationSpec !== null))
     || (!modes.includes("visual") && !modes.includes("diagram") && renderMode !== "structured")
     || (modes.includes("diagram") && renderMode !== "generatedAsset")
   ) return null;
@@ -216,6 +221,7 @@ function normalizeScene(value: unknown, sourceSchema: WhiteboardSessionSchemaVer
     contentModes: modes,
     placement,
     stickScene,
+    animationSpec,
     renderMode,
     generatedAsset: null,
     visualJobId: null,
@@ -308,7 +314,7 @@ export function loadWhiteboardSessionStore(storage: StorageLike, lessonIds: stri
     const raw = storage.getItem(WHITEBOARD_SESSION_STORAGE_KEY);
     if (!raw) return { ok: true, value: fallback };
     const parsed = JSON.parse(raw) as unknown;
-    if (!isRecord(parsed) || ![1, 2, 3, 4, 5].includes(Number(parsed.schemaVersion))) {
+    if (!isRecord(parsed) || ![1, 2, 3, 4, 5, 6].includes(Number(parsed.schemaVersion))) {
       return { ok: false, value: fallback, message: "Saved whiteboard sessions use an unsupported format." };
     }
     const sourceSchema = parsed.schemaVersion as WhiteboardSessionSchemaVersion;

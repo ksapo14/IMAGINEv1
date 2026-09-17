@@ -92,6 +92,7 @@ export function applyBoardDecision(board: WhiteboardState, decision: GenerateRes
     contentModes: [...decision.contentModes],
     placement: decision.placement,
     stickScene: decision.stickScene,
+    animationSpec: decision.animationSpec,
     renderMode: decision.renderMode,
     generatedAsset: decision.generatedAsset,
     visualJobId: decision.visualJobId
@@ -149,6 +150,16 @@ export function applyBoardDecision(board: WhiteboardState, decision: GenerateRes
       && (scene.contentModes.includes("diagram") || scene.renderMode === "structured")
       && scene.stickScene === null
     ) {
+      return null;
+    }
+
+    const retainedAnimation = previous.contentModes.includes("animation");
+    if (retainedAnimation) {
+      // A null recipe is a deliberate marker: client state keeps the exact
+      // prior scene and its playback state without asking the model again.
+      if (scene.animationSpec !== null || previous.animationSpec === null) return null;
+      scene = { ...scene, animationSpec: previous.animationSpec };
+    } else if (scene.contentModes.includes("animation") && scene.animationSpec === null) {
       return null;
     }
 

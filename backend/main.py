@@ -17,7 +17,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.websockets import WebSocket, WebSocketDisconnect
-from pydantic import BaseModel, Field, ValidationInfo, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, model_validator
 import websockets
 from dotenv import load_dotenv
 
@@ -41,6 +41,7 @@ DEFAULT_ALLOWED_ORIGIN_REGEX = (
     r"172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+"
     r")(:\d+)?$"
 )
+from .services.animation_assets import AnimationAssetResolver
 from .services.whiteboard_grid import FOOTPRINTS, promote_footprint
 allowed_origin_regex = (
     os.getenv("CORS_ALLOW_ORIGIN_REGEX", "").strip()
@@ -108,12 +109,14 @@ class SlidingWindowRateLimiter:
 
 generation_rate_limiter = SlidingWindowRateLimiter(limit=50)
 visual_status_rate_limiter = SlidingWindowRateLimiter(limit=480)
+animation_asset_rate_limiter = SlidingWindowRateLimiter(limit=120)
 transcription_status_rate_limiter = SlidingWindowRateLimiter(limit=50)
 transcription_connection_rate_limiter = SlidingWindowRateLimiter(limit=50)
 visual_jobs: dict[str, dict[str, object]] = {}
 visual_jobs_lock = Lock()
 visual_tasks: set[asyncio.Task[None]] = set()
 image_job_semaphore = asyncio.Semaphore(2)
+animation_asset_resolver = AnimationAssetResolver()
 transcription_sessions: defaultdict[str, int] = defaultdict(int)
 transcription_sessions_lock = Lock()
 
@@ -267,9 +270,9 @@ class BoardSceneContext(BaseModel):
     conceptKey: str = Field(default="", max_length=80)
     title: str = Field(default="", max_length=120)
     headingMode: Literal["show", "inheritPrimary"] = "show"
-    contentModes: list[Literal["visual", "notes", "diagram"]] = Field(
+    contentModes: list[Literal["visual", "notes", "diagram", "animation"]] = Field(
         min_length=1,
-        max_length=3,
+        max_length=4,
     )
     renderMode: Literal["structured", "generatedAsset"] = "structured"
     placement: BoardPlacement
@@ -402,6 +405,110 @@ class GeneratedAsset(BaseModel):
         return self
 
 
+class AnimationObject(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(min_length=1, max_length=40)
+    assetKey: str = Field(min_length=1, max_length=48)
+    label: str = Field(min_length=1, max_length=32)
+
+    @model_validator(mode="after")
+    def validate_identity(self) -> "AnimationObject":
+        if not re.fullmatch(r"[a-zA-Z0-9_-]+", self.id):
+            raise ValueError("Animation object IDs must be safe identifiers.")
+        if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", self.assetKey):
+            raise ValueError("Animation asset keys must be bounded slugs.")
+        if not self.label.strip() or self.label != self.label.strip():
+            raise ValueError("Animation labels must be trimmed.")
+        return self
+
+
+class AnimationRelationship(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(min_length=1, max_length=40)
+    fromId: str = Field(min_length=1, max_length=40)
+    toId: str = Field(min_length=1, max_length=40)
+    label: str = Field(default="", max_length=28)
+    direction: Literal["forward", "backward", "both", "none"]
+
+    @model_validator(mode="after")
+    def validate_identity(self) -> "AnimationRelationship":
+        if any(not re.fullmatch(r"[a-zA-Z0-9_-]+", identifier) for identifier in (self.id, self.fromId, self.toId)):
+            raise ValueError("Animation relationship IDs must be safe identifiers.")
+        if self.label != self.label.strip():
+            raise ValueError("Animation relationship labels must be trimmed.")
+        return self
+
+
+class AnimationStep(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    action: Literal["appear", "move", "rotate", "highlight", "trace"]
+    targetId: str = Field(min_length=1, max_length=40)
+    direction: Literal["up", "down", "left", "right", "clockwise", "counterclockwise"] | None = None
+    distance: Literal["short", "medium", "long"] | None = None
+
+    @model_validator(mode="after")
+    def validate_step(self) -> "AnimationStep":
+        if not re.fullmatch(r"[a-zA-Z0-9_-]+", self.targetId):
+            raise ValueError("Animation targets must be safe identifiers.")
+        if self.action == "move" and (self.direction not in {"up", "down", "left", "right"} or self.distance is None):
+            raise ValueError("Animation moves require a cardinal direction and distance.")
+        if self.action == "rotate" and (self.direction not in {"clockwise", "counterclockwise"} or self.distance is not None):
+            raise ValueError("Animation rotations require one rotation direction only.")
+        if self.action in {"appear", "highlight", "trace"} and (self.direction is not None or self.distance is not None):
+            raise ValueError("This animation action does not accept motion parameters.")
+        return self
+
+
+class AnimationSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    version: Literal[1]
+    template: Literal["sequence", "flow", "cycle", "comparison", "motion"]
+    objects: list[AnimationObject] = Field(min_length=1, max_length=6)
+    relationships: list[AnimationRelationship] = Field(default_factory=list, max_length=6)
+    steps: list[AnimationStep] = Field(min_length=1, max_length=6)
+
+    @model_validator(mode="after")
+    def validate_graph(self) -> "AnimationSpec":
+        object_ids = [item.id for item in self.objects]
+        relationship_ids = [item.id for item in self.relationships]
+        if len(set([*object_ids, *relationship_ids])) != len(object_ids) + len(relationship_ids):
+            raise ValueError("Animation IDs must be unique.")
+        object_id_set = set(object_ids)
+        for relationship in self.relationships:
+            if relationship.fromId == relationship.toId or relationship.fromId not in object_id_set or relationship.toId not in object_id_set:
+                raise ValueError("Animation relationships must reference two objects.")
+        for step in self.steps:
+            valid_targets = set(relationship_ids) if step.action == "trace" else object_id_set
+            if step.targetId not in valid_targets:
+                raise ValueError("Animation steps must target a retained object or relationship.")
+        return self
+
+
+class AnimationAssetResolveRequest(BaseModel):
+    terms: list[str] = Field(min_length=1, max_length=6)
+
+    @model_validator(mode="after")
+    def validate_terms(self) -> "AnimationAssetResolveRequest":
+        if len(set(self.terms)) != len(self.terms) or any(
+            not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", term) or len(term) > 48
+            for term in self.terms
+        ):
+            raise ValueError("Animation asset terms must be unique bounded slugs.")
+        return self
+
+
+class ResolvedAnimationAsset(BaseModel):
+    term: str = Field(min_length=1, max_length=48)
+    iconId: str = Field(min_length=1, max_length=80)
+    dataUrl: str = Field(min_length=1, max_length=100_000)
+    attribution: str = Field(min_length=1, max_length=160)
+
+
+class AnimationAssetResolveResponse(BaseModel):
+    assets: list[ResolvedAnimationAsset] = Field(max_length=6)
+    unresolved: list[str] = Field(max_length=6)
+
+
 class GenerateResponse(BaseModel):
     boardVersion: int = Field(ge=0)
     turnSequence: int = Field(ge=0)
@@ -413,13 +520,14 @@ class GenerateResponse(BaseModel):
     headingMode: Literal["show", "inheritPrimary"]
     summaryBullets: list[str] = Field(max_length=4)
     summary: str = Field(max_length=320)
-    contentModes: list[Literal["visual", "notes", "diagram"]] = Field(max_length=3)
+    contentModes: list[Literal["visual", "notes", "diagram", "animation"]] = Field(max_length=4)
     confidence: float = Field(ge=0, le=1)
     sceneId: str = Field(min_length=1, max_length=80)
     targetSceneId: str | None = Field(max_length=80)
     requestedFootprint: Literal["small", "medium", "wide", "full"]
     placement: BoardPlacement
     stickScene: StickScene | None
+    animationSpec: AnimationSpec | None = None
     renderMode: Literal["structured", "generatedAsset"]
     generatedAsset: GeneratedAsset | None = None
     visualJobId: str | None = None
@@ -520,6 +628,15 @@ class GenerateResponse(BaseModel):
         ):
             raise ValueError("summaryBullets must contain 1 to 4 concise items.")
         has_diagram = "diagram" in self.contentModes
+        has_animation = "animation" in self.contentModes
+        retained_animation_marker = (
+            self.mergeBehavior == "expand"
+            and self.action == "update"
+            and has_animation
+            and self.animationSpec is None
+        )
+        if has_animation != (self.animationSpec is not None) and not retained_animation_marker:
+            raise ValueError("animationSpec is required only for an animation pane.")
         has_structured_visual = (
             "visual" in self.contentModes
             and (self.renderMode == "structured" or has_diagram)
@@ -908,6 +1025,33 @@ def visual_job_status(job_id: str, request: Request) -> VisualJobResponse:
     if job_snapshot is None:
         raise HTTPException(status_code=404, detail="Visual job was not found.")
     return VisualJobResponse(**job_snapshot)
+
+
+@app.post("/api/animation/assets/resolve", response_model=AnimationAssetResolveResponse)
+async def resolve_animation_assets(
+    payload: AnimationAssetResolveRequest,
+    request: Request,
+) -> AnimationAssetResolveResponse:
+    """Resolve only approved Iconify collections; slow or missing icons remain optional."""
+    client_key = request.client.host if request.client else "unknown"
+    if not animation_asset_rate_limiter.allow(client_key):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many animation asset requests. Please wait and try again.",
+        )
+    assets, unresolved = await animation_asset_resolver.resolve(payload.terms)
+    return AnimationAssetResolveResponse(
+        assets=[
+            ResolvedAnimationAsset(
+                term=asset.term,
+                iconId=asset.icon_id,
+                dataUrl=asset.data_url,
+                attribution=asset.attribution,
+            )
+            for asset in assets
+        ],
+        unresolved=unresolved,
+    )
 
 
 @app.get("/api/transcribe/status")

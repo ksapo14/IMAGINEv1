@@ -73,6 +73,33 @@ def director_decision(action: str = "create") -> dict[str, object]:
     }
 
 
+def animation_decision() -> dict[str, object]:
+    decision = director_decision()
+    decision.update({
+        "contentModes": ["animation", "notes"],
+        "summaryBullets": ["Water rises as vapor.", "It returns as rain."],
+        "requestedFootprint": "medium",
+        "renderMode": "structured",
+        "imagePrompt": "",
+        "scene": {"entities": [], "connections": []},
+        "animationSpec": {
+            "version": 1,
+            "template": "cycle",
+            "objects": [
+                {"id": "water", "assetKey": "drop", "label": "Water"},
+                {"id": "cloud", "assetKey": "cloud", "label": "Cloud"},
+            ],
+            "relationships": [{"id": "rise", "fromId": "water", "toId": "cloud", "label": "evaporates", "direction": "forward"}],
+            "steps": [
+                {"action": "appear", "targetId": "water"},
+                {"action": "move", "targetId": "water", "direction": "up", "distance": "medium"},
+                {"action": "trace", "targetId": "rise"},
+            ],
+        },
+    })
+    return decision
+
+
 def gemini_text(value: dict[str, object] | str) -> dict[str, object]:
     text = value if isinstance(value, str) else json.dumps(value)
     return {"candidates": [{"content": {"parts": [{"text": text}]}}]}
@@ -216,6 +243,82 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((result["placement"]["width"], result["placement"]["height"]), (8, 5))
         self.assertIsNone(result["stickScene"])
         self.assertIsNone(result["_imageRequest"])
+
+    async def test_animation_keyword_uses_one_text_decision_without_raster_work(self) -> None:
+        transport = StubTransport([gemini_text(animation_decision())])
+        result = await self.pipeline(transport).generate("Animate the water cycle.")
+        self.assertEqual(len(transport.requests), 1)
+        self.assertEqual(result["contentModes"], ["animation"])
+        self.assertEqual(result["renderMode"], "structured")
+        self.assertIsNone(result["_imageRequest"])
+        self.assertEqual(result["animationSpec"]["template"], "cycle")
+        request_body = json.loads(transport.requests[0][0].data)
+        instruction = request_body["systemInstruction"]["parts"][0]["text"]
+        self.assertIn("REUSE FIRST, MINIMAL OUTPUT", instruction)
+        self.assertIn("Local animation assets", instruction)
+
+    async def test_animated_diagram_is_animation_only_until_a_raster_is_separately_requested(self) -> None:
+        for prompt in (
+            "Show an animated diagram of evaporation.",
+            "Animate a diagram of evaporation.",
+            "Animate the diagram of evaporation.",
+        ):
+            with self.subTest(prompt=prompt):
+                intent = classify_whiteboard_intent(prompt)
+                self.assertEqual(intent.required_modes, ("animation",))
+                result = await self.pipeline(StubTransport([gemini_text(animation_decision())])).generate(prompt)
+                self.assertEqual(result["contentModes"], ["animation"])
+
+        separate = classify_whiteboard_intent(
+            "Animate a diagram of evaporation and add a separate static diagram of condensation."
+        )
+        self.assertEqual(separate.required_modes, ("animation", "diagram"))
+
+    async def test_animation_intent_preserves_order_and_negation(self) -> None:
+        expectations = {
+            "Animation and notes about evaporation.": (("animation", "notes"), ()),
+            "Notes, then animate evaporation.": (("notes", "animation"), ()),
+            "Skip notes then animate evaporation.": (("animation",), ("notes",)),
+            "Remove animation.": ((), ("animation",)),
+            "Explain evaporation without animation.": ((), ("animation",)),
+            "Animation and a separate diagram of evaporation.": (("animation", "diagram"), ()),
+        }
+        for prompt, (required, forbidden) in expectations.items():
+            with self.subTest(prompt=prompt):
+                intent = classify_whiteboard_intent(prompt)
+                self.assertEqual(intent.required_modes, required)
+                self.assertEqual(intent.forbidden_modes, forbidden)
+
+    async def test_each_graphical_pair_promotes_to_a_full_page_in_both_orders(self) -> None:
+        graphical_pairs = (
+            ("visual", "diagram"),
+            ("visual", "animation"),
+            ("diagram", "animation"),
+        )
+        for pair in graphical_pairs:
+            for content_modes in (pair, tuple(reversed(pair))):
+                with self.subTest(content_modes=content_modes):
+                    raw = director_decision()
+                    raw.update({
+                        "contentModes": list(content_modes),
+                        "summaryBullets": [],
+                        "requestedFootprint": "medium",
+                        "animationSpec": animation_decision()["animationSpec"] if "animation" in content_modes else None,
+                        "renderMode": "generatedAsset" if "diagram" in content_modes else "structured",
+                        "imagePrompt": "A water cycle diagram." if "diagram" in content_modes else "",
+                        "scene": director_decision()["scene"] if "visual" in content_modes else {"entities": [], "connections": []},
+                    })
+                    prompt = " and then ".join(
+                        "animate the water cycle" if mode == "animation" else f"show a {mode} of the water cycle"
+                        for mode in content_modes
+                    )
+                    result = await self.pipeline(StubTransport([gemini_text(raw)])).generate(prompt)
+                    self.assertEqual(result["contentModes"], list(content_modes))
+                    self.assertEqual(result["requestedFootprint"], "full")
+                    self.assertEqual(
+                        (result["placement"]["width"], result["placement"]["height"]),
+                        (24, 10),
+                    )
 
     async def test_related_summary_expands_despite_model_reset_create_and_renamed_key(self) -> None:
         for prompt in (
@@ -1719,6 +1822,7 @@ class GeminiPipelineTests(unittest.IsolatedAsyncioTestCase):
             "when diagram is newly selected or replaced",
             "the existing diagram is preserved without another image request",
             "full evidence-grounded scene", "separate structured visual pane",
+            "every pair among visual, diagram, and animation are full and page-exclusive",
             "otherwise return empty entities and connections",
         ):
             self.assertIn(phrase, prompt_text)

@@ -1,4 +1,5 @@
 import type { GenerateRequest, GenerateResponse } from "@/components/workspace/types";
+import { isValidAnimationSpec } from "./animation-spec.ts";
 import { FRONTEND_ONLY_NOTICE, isFrontendOnlyDeployment } from "./deployment-mode.ts";
 
 type StreamEvent =
@@ -20,7 +21,7 @@ export function getApiBaseUrl() {
 
 export const API_BASE_URL = getApiBaseUrl();
 
-const contentModeNames = new Set(["visual", "notes", "diagram"]);
+const contentModeNames = new Set(["visual", "notes", "diagram", "animation"]);
 const footprints = {
   small: [8, 5],
   medium: [12, 6],
@@ -128,7 +129,7 @@ export function validateGenerateResponse(value: unknown): GenerateResponse {
     || (value.warning !== null && !isBoundedString(value.warning, 360))
   ) throw new Error("The live generation stream returned invalid decision metadata.");
   const modes: unknown[] = Array.isArray(value.contentModes) ? value.contentModes : [];
-  const validModes = Array.isArray(value.contentModes) && modes.length <= 3
+  const validModes = Array.isArray(value.contentModes) && modes.length <= 4
     && modes.every((mode) => typeof mode === "string" && contentModeNames.has(mode))
     && new Set(modes).size === modes.length;
   if (!validModes) throw new Error("The live generation stream returned invalid content modes.");
@@ -186,14 +187,23 @@ export function validateGenerateResponse(value: unknown): GenerateResponse {
   ) throw new Error("The live generation stream returned an invalid reset decision.");
   const hasVisual = modes.includes("visual");
   const hasDiagram = modes.includes("diagram");
-  const minimum = modes.length === 3 || (hasVisual && hasDiagram)
+  const hasAnimation = modes.includes("animation");
+  const minimum = modes.length >= 3 || [hasVisual, hasDiagram, hasAnimation].filter(Boolean).length >= 2
     ? "full"
-    : modes.length === 2 || hasDiagram || (modes.length === 1 && hasVisual)
+    : modes.length === 2 || hasDiagram || hasAnimation || (modes.length === 1 && hasVisual)
       ? "medium"
       : "small";
   const order = ["small", "medium", "wide", "full"];
   if (order.indexOf(footprint) < order.indexOf(minimum)) {
     throw new Error("The live generation stream returned an undersized scene.");
+  }
+  const animationSpec = "animationSpec" in value ? value.animationSpec : null;
+  const retainsAnimation = value.mergeBehavior === "expand"
+    && value.action === "update"
+    && hasAnimation
+    && animationSpec === null;
+  if (hasAnimation ? !isValidAnimationSpec(animationSpec) && !retainsAnimation : animationSpec !== null) {
+    throw new Error("The live generation stream returned an invalid animation dependency.");
   }
   const scene = value.stickScene;
   const hasValidStickScene = isValidStickScene(scene);
@@ -239,7 +249,7 @@ export function validateGenerateResponse(value: unknown): GenerateResponse {
   ) {
     throw new Error("The live generation stream returned an incomplete generated visual.");
   }
-  return value as GenerateResponse;
+  return { ...value, animationSpec } as GenerateResponse;
 }
 
 /** Avoid reflecting provider URLs, credentials, or oversized diagnostics into the UI. */

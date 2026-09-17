@@ -249,7 +249,7 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn("createEmptyWhiteboardSession", canvas_source)
         self.assertIn("activateLesson(event.target.value)", canvas_source)
         self.assertIn("fresh board", canvas_source)
-        self.assertIn("WHITEBOARD_SESSION_SCHEMA_VERSION = 5", storage)
+        self.assertIn("WHITEBOARD_SESSION_SCHEMA_VERSION = 6", storage)
         self.assertIn("sourceSchema === 1", storage)
         self.assertIn("sourceSchema < WHITEBOARD_SESSION_SCHEMA_VERSION", storage)
         self.assertIn(

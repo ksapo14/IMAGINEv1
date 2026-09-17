@@ -131,9 +131,9 @@ def promote_footprint(requested_footprint: str, content_modes: list[str]) -> str
         raise ValueError("At least one content mode is required.")
     mode_set = set(content_modes)
     minimum = "full" if (
-        len(content_modes) == 3 or {"visual", "diagram"}.issubset(mode_set)
+        len(content_modes) >= 3 or len({"visual", "diagram", "animation"} & mode_set) >= 2
     ) else (
-        "medium" if len(content_modes) == 2 or "diagram" in mode_set or content_modes == ["visual"]
+        "medium" if len(content_modes) == 2 or "diagram" in mode_set or "animation" in mode_set or content_modes == ["visual"]
         else "small"
     )
     return FOOTPRINT_ORDER[max(

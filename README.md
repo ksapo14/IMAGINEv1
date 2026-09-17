@@ -27,8 +27,9 @@ Live teaching turn
   -> send lesson + recent turns + concepts + board digest
   -> one Live Assistant text call returns CREATE or UPDATE
   -> server assigns deterministic, non-overlapping board placement
-  -> trusted React renders the selected visual, notes, and/or diagram modes
+  -> trusted React renders the selected visual, notes, diagram, and/or animation modes
   -> diagram modes show a drawing loader while one raster-diagram job runs
+  -> animation modes immediately show an SVG loader, then replay a local GSAP recipe
   -> visual-only modes schedule an image only when the concept needs one
 ```
 
@@ -69,8 +70,9 @@ Each board page uses a fixed 24-column by 14-row grid. The server owns placement
 and searches the bounded pages for a compact exact 8x5, 12x6, or 16x7 footprint
 so scenes do not overlap. A page containing one scene expands that scene only at
 render time; once a sibling exists, both use their unchanged stored placements.
-Each CREATE or UPDATE carries an ordered, unique subset of visual, notes, and
-diagram modes. Explicit diagram and summary/notes cues select exactly those
+Each CREATE or UPDATE carries an ordered, unique subset of visual, notes,
+diagram, and animation modes. Explicit diagram, animation/animate/in-motion,
+and summary/notes cues select exactly those
 artifacts in cue order, while negation excludes the named artifact; ordinary
 prompts remain model-directed to the smallest useful subset.
 Related requests for a complementary mode can expand the resolved scene: its
@@ -92,9 +94,15 @@ retained only for the separate visual pane. Raster diagrams and optional generat
 separate server-owned instructions, restrained accessible color, balanced
 composition, generous spacing, and content-aware connector routing while
 remaining evidence-only, text-free, and non-photorealistic.
-Whiteboard sessions use storage schema v5. Legacy v1/v2 note scenes derive
+Animation recipes contain only a selected template, up to six labeled assets,
+relationships, and semantic motion steps. The renderer owns SVG geometry and
+GSAP timing, so “animate the water cycle” uses one text decision and no image
+generation. It uses bundled Lucide assets first, then a 1.5-second, allowlisted
+Iconify lookup for a missing exact asset key, before falling back to a labeled
+shape. The asset response is sanitized and used only as an image data URL.
+Whiteboard sessions use storage schema v6. Legacy v1/v2 note scenes derive
 bullets from their summary sentences. Earlier schemas promote undersized mode
-footprints to the v5 minimums and discard diagram-only StickScene fallbacks
+footprints to the current minimums and discard diagram-only StickScene fallbacks
 while preserving combined structured visual content.
 
 ## Local setup
@@ -204,6 +212,10 @@ production project URL, and finally `http://localhost:3000`.
   and evidence-only, no-text, non-photorealistic boundaries. Failure is shown
   honestly in the diagram pane without substituting a legacy graph; other
   selected board content remains available.
+- Animation-only and animation-plus-notes scenes never schedule image work.
+  Recipe playback, replay, pause, and speed controls make no provider calls;
+  playback pauses while the pane is hidden or off screen and respects reduced
+  motion.
 - User input is limited to 4,000 characters. Lesson source is limited to 3,600
   characters. Recent-turn context contains at most six turns and 2,400 combined
   characters.

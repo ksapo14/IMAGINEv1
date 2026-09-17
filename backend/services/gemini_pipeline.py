@@ -47,6 +47,11 @@ MAX_IMAGE_BASE64_CHARACTERS = 20_000_000
 MAX_BOARD_SCENES = 48
 SUPPORTED_IMAGE_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
 GENERATION_MODES = {"live", "prepare"}
+ANIMATION_ASSET_CATALOG = (
+    "Local animation assets: circle, square, triangle, arrow, person, sun, cloud, "
+    "drop, leaf, flame, gear, book, globe, box, play. Use another short lowercase "
+    "slug only when none fit; the renderer will attempt one bounded icon lookup then use a labeled shape."
+)
 IMAGE_GENERATOR_SYSTEM_INSTRUCTION = """You are Imagine's educational image generator. Create one clear raster visual from the factual content brief in the user message.
 
 EVIDENCE AND SAFETY
@@ -211,12 +216,93 @@ def _bounded_summary_bullets(value: Any) -> list[str]:
 
 def _content_modes(value: Any) -> list[str]:
     """Accept only a non-empty ordered subset with no repeated modes."""
-    if not isinstance(value, list) or not 1 <= len(value) <= 3:
+    if not isinstance(value, list) or not 1 <= len(value) <= 4:
         raise GeminiProviderError("The AI provider returned invalid content modes.")
-    allowed = {"visual", "notes", "diagram"}
+    allowed = {"visual", "notes", "diagram", "animation"}
     if any(mode not in allowed for mode in value) or len(set(value)) != len(value):
         raise GeminiProviderError("The AI provider returned invalid content modes.")
     return list(value)
+
+
+def _normalized_animation_spec(value: Any) -> dict[str, Any]:
+    """Keep model output declarative so browser code owns all SVG geometry and timing."""
+    if not isinstance(value, dict) or value.get("version") != 1:
+        raise GeminiProviderError("The AI provider returned an invalid animation recipe.")
+    template = value.get("template")
+    if template not in {"sequence", "flow", "cycle", "comparison", "motion"}:
+        raise GeminiProviderError("The AI provider returned an invalid animation template.")
+    raw_objects = value.get("objects")
+    raw_relationships = value.get("relationships")
+    raw_steps = value.get("steps")
+    if (
+        not isinstance(raw_objects, list) or not 1 <= len(raw_objects) <= 6
+        or not isinstance(raw_relationships, list) or len(raw_relationships) > 6
+        or not isinstance(raw_steps, list) or not 1 <= len(raw_steps) <= 6
+    ):
+        raise GeminiProviderError("The AI provider returned an incomplete animation recipe.")
+    objects: list[dict[str, str]] = []
+    object_ids: set[str] = set()
+    for item in raw_objects:
+        if not isinstance(item, dict):
+            raise GeminiProviderError("The AI provider returned invalid animation objects.")
+        identifier = _clean_string(item.get("id"), 40)
+        asset_key = _clean_string(item.get("assetKey"), 48).lower()
+        label = _clean_string(item.get("label"), 32)
+        if (
+            not re.fullmatch(r"[a-zA-Z0-9_-]+", identifier or "")
+            or identifier in object_ids
+            or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", asset_key or "")
+            or not label
+        ):
+            raise GeminiProviderError("The AI provider returned invalid animation objects.")
+        object_ids.add(identifier)
+        objects.append({"id": identifier, "assetKey": asset_key, "label": label})
+    relationships: list[dict[str, str]] = []
+    relationship_ids: set[str] = set()
+    for item in raw_relationships:
+        if not isinstance(item, dict):
+            raise GeminiProviderError("The AI provider returned invalid animation relationships.")
+        identifier = _clean_string(item.get("id"), 40)
+        from_id = _clean_string(item.get("fromId"), 40)
+        to_id = _clean_string(item.get("toId"), 40)
+        label = _clean_string(item.get("label"), 28)
+        direction = item.get("direction")
+        if (
+            not re.fullmatch(r"[a-zA-Z0-9_-]+", identifier or "")
+            or identifier in relationship_ids
+            or from_id == to_id or from_id not in object_ids or to_id not in object_ids
+            or direction not in {"forward", "backward", "both", "none"}
+        ):
+            raise GeminiProviderError("The AI provider returned invalid animation relationships.")
+        relationship_ids.add(identifier)
+        relationships.append({"id": identifier, "fromId": from_id, "toId": to_id, "label": label, "direction": direction})
+    steps: list[dict[str, str]] = []
+    for item in raw_steps:
+        if not isinstance(item, dict):
+            raise GeminiProviderError("The AI provider returned invalid animation steps.")
+        action = item.get("action")
+        target_id = _clean_string(item.get("targetId"), 40)
+        direction = item.get("direction")
+        distance = item.get("distance")
+        if action == "move":
+            valid = target_id in object_ids and direction in {"up", "down", "left", "right"} and distance in {"short", "medium", "long"}
+        elif action == "rotate":
+            valid = target_id in object_ids and direction in {"clockwise", "counterclockwise"} and distance is None
+        elif action == "trace":
+            valid = target_id in relationship_ids and direction is None and distance is None
+        elif action in {"appear", "highlight"}:
+            valid = target_id in object_ids and direction is None and distance is None
+        else:
+            valid = False
+        if not valid:
+            raise GeminiProviderError("The AI provider returned invalid animation steps.")
+        step = {"action": action, "targetId": target_id}
+        if direction is not None:
+            step["direction"] = direction
+        if distance is not None:
+            step["distance"] = distance
+        steps.append(step)
+    return {"version": 1, "template": template, "objects": objects, "relationships": relationships, "steps": steps}
 
 
 def _bounded_context(context: Any) -> dict[str, Any]:
@@ -288,7 +374,7 @@ def _bounded_context(context: Any) -> dict[str, Any]:
                 else "show",
                 "contentModes": [
                     mode for mode in raw.get("contentModes", [])
-                    if mode in {"visual", "notes", "diagram"}
+                    if mode in {"visual", "notes", "diagram", "animation"}
                 ] if isinstance(raw.get("contentModes"), list) else [],
                 "renderMode": (
                     raw.get("renderMode")
@@ -454,9 +540,14 @@ class GeminiPipeline:
         context: dict[str, Any],
         explicit_intent: WhiteboardIntent,
     ) -> dict[str, Any]:
+        system_instruction = VISUAL_DIRECTOR_SYSTEM_INSTRUCTION
+        if "animation" in explicit_intent.required_modes:
+            # This small catalog avoids sending SVG source or a broad icon index
+            # in the one model request that already produces the board decision.
+            system_instruction = f"{system_instruction}\n\n{ANIMATION_ASSET_CATALOG}"
         payload = {
             "systemInstruction": {
-                "parts": [{"text": VISUAL_DIRECTOR_SYSTEM_INSTRUCTION}]
+                "parts": [{"text": system_instruction}]
             },
             "contents": [
                 {
@@ -679,7 +770,7 @@ class GeminiPipeline:
         target_modes = (
             [
                 mode for mode in target_scene.get("contentModes", [])
-                if mode in {"visual", "notes", "diagram"}
+                if mode in {"visual", "notes", "diagram", "animation"}
             ]
             if target_scene and isinstance(target_scene.get("contentModes"), list)
             else []
@@ -802,6 +893,7 @@ class GeminiPipeline:
         preserves_structured_visual = (
             merge_behavior == "expand" and "visual" in target_modes
         )
+        preserves_animation = merge_behavior == "expand" and "animation" in target_modes
         if has_diagram:
             # An expanded diagram keeps its prior asset/job state on the client;
             # a new or replaced diagram requests exactly one raster job.
@@ -823,6 +915,15 @@ class GeminiPipeline:
                 raise GeminiProviderError("Structured visual mode cannot request an image.")
         else:
             raise GeminiProviderError("The AI provider returned an invalid render mode.")
+        has_animation = "animation" in content_modes
+        if has_animation and preserves_animation:
+            # The null marker preserves the exact existing recipe and keeps
+            # playback local when an expansion only adds a complementary pane.
+            animation_spec = None
+        elif has_animation:
+            animation_spec = _normalized_animation_spec(raw.get("animationSpec"))
+        else:
+            animation_spec = None
         raw_scene = raw.get("scene")
         has_visual = "visual" in content_modes
         requires_stick_scene = has_visual and (
@@ -860,6 +961,7 @@ class GeminiPipeline:
             "requestedFootprint": requested,
             "placement": placement,
             "stickScene": stick_scene,
+            "animationSpec": animation_spec,
             "renderMode": render_mode,
             "generatedAsset": None,
             "visualJobId": None,

@@ -18,6 +18,10 @@ CONTENT_MODE_PATTERNS = {
         r"\b(?:diagrams?|flow\s*charts?|mind\s*maps?|process\s*maps?)\b",
         re.IGNORECASE,
     ),
+    "animation": re.compile(
+        r"\b(?:animations?|animate(?:d)?|in\s+motion)\b",
+        re.IGNORECASE,
+    ),
 }
 NEGATION_PATTERN = re.compile(
     r"(?:\b(?:no|not|without|avoid|avoiding|skip|omit|exclude)\b|"
@@ -68,7 +72,7 @@ ADDITIVE_PATTERNS = (
     ),
     re.compile(
         r"\b(?:another|additional|new)\s+"
-        r"(?:diagram|summary|note|visual|section|compartment|scene|block|example|topic)\b",
+        r"(?:diagram|summary|note|visual|animation|section|compartment|scene|block|example|topic)\b",
         re.IGNORECASE,
     ),
     re.compile(
@@ -93,7 +97,7 @@ SUBJECT_FILLER_WORDS = frozenset(
     "give show make create draw provide tell explain describe summarize summarise "
     "add append include also now next then its it this that these those their "
     "main major key basic parts part overview brief concise short detailed "
-    "how works work is are does do s".split()
+    "how works work is are does do animate animated animation motion s".split()
 )
 GENERIC_SUBJECT_WORDS = frozenset("topic concept system process example section".split())
 
@@ -211,6 +215,15 @@ def _is_negated(text: str, cue_start: int) -> bool:
     return latest_removal > latest_positive
 
 
+def _is_animated_format_compound(text: str, cue_start: int) -> bool:
+    """Treat "animated diagram" and "animate a diagram" as one animation request."""
+    return re.search(
+        r"\b(?:animated|animate(?:\s+(?:a|an|the))?)\s+$",
+        text[max(0, cue_start - 32):cue_start],
+        re.IGNORECASE,
+    ) is not None
+
+
 def classify_whiteboard_intent(user_input: str) -> WhiteboardIntent:
     """Classify only explicit cues; ordinary teaching language stays model-directed."""
     text = user_input[:4000]
@@ -218,6 +231,8 @@ def classify_whiteboard_intent(user_input: str) -> WhiteboardIntent:
     negative_cues: list[tuple[int, str]] = []
     for mode, pattern in CONTENT_MODE_PATTERNS.items():
         for match in pattern.finditer(text):
+            if mode in {"visual", "diagram"} and _is_animated_format_compound(text, match.start()):
+                continue
             target = negative_cues if _is_negated(text, match.start()) else positive_cues
             target.append((match.start(), mode))
 

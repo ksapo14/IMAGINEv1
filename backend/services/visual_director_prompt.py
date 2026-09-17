@@ -10,6 +10,13 @@ EVIDENCE AND GROUNDING
 - Never invent facts, relationships, quotations, measurements, or labels that the evidence does not support.
 - Select exactly one atomic concept. Do not combine separate ideas merely to fill a scene.
 
+ANIMATION — REUSE FIRST, MINIMAL OUTPUT
+- Select animation only when the request explicitly asks to animate, use motion, or make an animation. It is a schematic SVG teaching pane, never a video or raster-generation request.
+- Reuse one of the trusted templates: sequence, flow, cycle, comparison, or motion. Reuse the compact local asset catalog supplied with an animation request before naming any other assetKey.
+- animationSpec is a compact declarative recipe: 1 to 6 labeled objects, up to 6 relationships, and 1 to 6 meaningful steps. Use only appear, move, rotate, highlight, or trace. Do not describe frames, timing, coordinates, SVG markup, JavaScript, GSAP, layout, or image/video generation.
+- A move needs a cardinal direction and short, medium, or long distance. A rotate needs clockwise or counterclockwise. A trace targets a relationship. Other actions target an object and have no direction or distance.
+- Include animationSpec only when animation is selected. On UPDATE expand that retains animation, return animationSpec as null so the client preserves the exact existing recipe and playback without new generation.
+
 BOARD STRATEGY DECISION
 - Decide boardStrategy before deciding CREATE or UPDATE. Use integrate by default, especially when the transition is ambiguous.
 - Choose integrate for the same subject, a related continuation, clarification, correction, example, comparison, or explicit addition. Preserve useful board context whenever it still helps explain the new turn.
@@ -38,11 +45,13 @@ CUMULATIVE BOARD BEHAVIOR
 - Treat the first retained board scene as the primary heading. On CREATE, use headingMode show only when the title is a distinct, specific subtopic; use inheritPrimary when the title repeats or paraphrases the primary heading. A reset or the first scene on a board must show its heading. UPDATE must copy the target scene's existing headingMode.
 
 CONTENT DIRECTION
-- Every CREATE or UPDATE must choose the smallest useful ordered contentModes subset from visual, notes, and diagram. Use each selected mode once and order the modes in the teaching sequence that best explains the concept.
+- Every CREATE or UPDATE must choose the smallest useful ordered contentModes subset from visual, notes, diagram, and animation. Use each selected mode once and order the modes in the teaching sequence that best explains the concept.
+- The existing visual, notes, and diagram modes retain their current responsibilities; animation adds only reusable motion when the teacher explicitly requests it.
 - The request's explicitIntent is a server-computed constraint. When requiredContentModes is non-empty, copy exactly that ordered list. Never include a forbiddenContentMode. Respect its CREATE or UPDATE action when supplied; the server will enforce these constraints without another model call.
 - visual communicates a concrete subject, comparison, or action. A structured visual uses the concept-specific scene entities without relationship arrows. It must never fall back to a stock or generic drawing.
 - notes communicate precise language through the required title, summary metadata, and 1 to 4 concise summaryBullets. Use an empty summaryBullets array when notes is not selected.
 - diagram requests one generated educational diagram from the factual content brief.
+- animation requests one reusable SVG and GSAP explanation. Animation alone, or paired only with notes, must keep renderMode structured and imagePrompt empty.
 - Different concepts may need one, two, or all three modes. Do not add a mode merely to fill space.
 - Set mergeBehavior to replace for every CREATE. For UPDATE, choose expand only when this turn adds at least one genuinely new complementary content mode to the resolved current target. Otherwise choose replace.
 - UPDATE with expand returns the newly requested modes; the server preserves the target's existing ordered modes as a prefix and appends new modes without duplicates. For a retained notes mode, return an empty summaryBullets array as its preservation marker. For a retained structured visual mode, return an empty scene object as its preservation marker. Provide complete payload only for newly requested modes. Never expand for same-mode deepening, correction, instead/only/remove wording, redraw/regenerate requests, a stale or uncertain target, a generated visual-only target, or when a forbidden mode conflicts with a retained mode.
@@ -61,7 +70,7 @@ STICK-SCENE DIRECTION
 
 BOARD PLACEMENT
 - Request one footprint: small (8x5), medium (12x6), wide (16x7), or full (24x10).
-- Minimums are: notes-only is small; visual-only, diagram-only, visual plus notes, or notes plus diagram is medium; visual plus diagram or all three modes is full and page-exclusive. Request larger only when the explanation needs it.
+- Minimums are: notes-only is small; visual-only, diagram-only, animation-only, visual plus notes, notes plus diagram, or animation plus notes is medium; three or more modes and every pair among visual, diagram, and animation are full and page-exclusive. Request larger only when the explanation needs it.
 - The server promotes undersized requests and owns exact collision-free placement. Placement failures are handled outside the decision model.
 
 IMAGE GATE
@@ -120,6 +129,51 @@ CONNECTION_SCHEMA: dict[str, Any] = {
     "required": ["id", "fromId", "toId", "label", "direction"],
 }
 
+ANIMATION_OBJECT_SCHEMA: dict[str, Any] = {
+    "type": "OBJECT",
+    "properties": {
+        "id": {"type": "STRING", "maxLength": 40},
+        "assetKey": {"type": "STRING", "maxLength": 48},
+        "label": {"type": "STRING", "maxLength": 32},
+    },
+    "required": ["id", "assetKey", "label"],
+}
+
+ANIMATION_RELATIONSHIP_SCHEMA: dict[str, Any] = {
+    "type": "OBJECT",
+    "properties": {
+        "id": {"type": "STRING", "maxLength": 40},
+        "fromId": {"type": "STRING", "maxLength": 40},
+        "toId": {"type": "STRING", "maxLength": 40},
+        "label": {"type": "STRING", "maxLength": 28},
+        "direction": {"type": "STRING", "enum": ["forward", "backward", "both", "none"]},
+    },
+    "required": ["id", "fromId", "toId", "label", "direction"],
+}
+
+ANIMATION_STEP_SCHEMA: dict[str, Any] = {
+    "type": "OBJECT",
+    "properties": {
+        "action": {"type": "STRING", "enum": ["appear", "move", "rotate", "highlight", "trace"]},
+        "targetId": {"type": "STRING", "maxLength": 40},
+        "direction": {"type": "STRING", "enum": ["up", "down", "left", "right", "clockwise", "counterclockwise"]},
+        "distance": {"type": "STRING", "enum": ["short", "medium", "long"]},
+    },
+    "required": ["action", "targetId"],
+}
+
+ANIMATION_SPEC_SCHEMA: dict[str, Any] = {
+    "type": "OBJECT",
+    "properties": {
+        "version": {"type": "INTEGER", "enum": [1]},
+        "template": {"type": "STRING", "enum": ["sequence", "flow", "cycle", "comparison", "motion"]},
+        "objects": {"type": "ARRAY", "items": ANIMATION_OBJECT_SCHEMA, "minItems": 1, "maxItems": 6},
+        "relationships": {"type": "ARRAY", "items": ANIMATION_RELATIONSHIP_SCHEMA, "maxItems": 6},
+        "steps": {"type": "ARRAY", "items": ANIMATION_STEP_SCHEMA, "minItems": 1, "maxItems": 6},
+    },
+    "required": ["version", "template", "objects", "relationships", "steps"],
+}
+
 
 VISUAL_DIRECTOR_RESPONSE_SCHEMA: dict[str, Any] = {
     "type": "OBJECT",
@@ -143,10 +197,10 @@ VISUAL_DIRECTOR_RESPONSE_SCHEMA: dict[str, Any] = {
             "type": "ARRAY",
             "items": {
                 "type": "STRING",
-                "enum": ["visual", "notes", "diagram"],
+                "enum": ["visual", "notes", "diagram", "animation"],
             },
             "minItems": 1,
-            "maxItems": 3,
+            "maxItems": 4,
         },
         "confidence": {"type": "NUMBER", "minimum": 0, "maximum": 1},
         "targetSceneId": {"type": "STRING"},
@@ -163,6 +217,7 @@ VISUAL_DIRECTOR_RESPONSE_SCHEMA: dict[str, Any] = {
             "enum": ["structured", "generatedAsset"],
         },
         "imagePrompt": {"type": "STRING"},
+        "animationSpec": {**ANIMATION_SPEC_SCHEMA, "nullable": True},
         "scene": {
             "type": "OBJECT",
             "properties": {
