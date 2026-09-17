@@ -1,0 +1,82 @@
+{
+  ".env.example": {
+    "baselineSource": ".env.example",
+    "workingSha256": "52686eb405699b097b415030ada6a75e6a040e1d6848a76b85dc4d4dd5b3c728"
+  },
+  "README.md": {
+    "baselineSource": "output\\animation-agent-loop\\baseline\\README.md.baseline",
+    "workingSha256": "159fe1e5d805cacd93cf57cdf93b17e08626e5404f58b1726b56e3ac62aea8b5"
+  },
+  "app/canvas/page.tsx": {
+    "baselineSource": "output\\animation-agent-loop\\baseline\\app\\canvas\\page.tsx.baseline",
+    "workingSha256": "0c7680ed7caa522febb7087b0365cc1db3cc5486680d341b5a0f52ec4ef9efc9"
+  },
+  "app/globals.css": {
+    "baselineSource": "output\\animation-agent-loop\\baseline\\app\\globals.css.baseline",
+    "workingSha256": "cda3c8b1e3d5f6b36ec3bbea476ad554d60fbb1a7e43f3d4b188cf66c5e97f96"
+  },
+  "backend/main.py": {
+    "baselineSource": "output\\animation-agent-loop\\baseline\\backend\\main.py.baseline",
+    "workingSha256": "8a26f99c32e22e55551992e035d2c269c6ecc7b3f32ec594e678371b304b9731"
+  },
+  "backend/services/gemini_pipeline.py": {
+    "baselineSource": "output\\animation-agent-loop\\baseline\\backend\\services\\gemini_pipeline.py.baseline",
+    "workingSha256": "e173e42960971b98549f48c4a98b170aeb159971e51e4983177b61cda1104778"
+  },
+  "backend/services/visual_director_prompt.py": {
+    "baselineSource": "output\\animation-agent-loop\\baseline\\backend\\services\\visual_director_prompt.py.baseline",
+    "workingSha256": "92b8bea6824c1518ad834936a9842358c1f2fa069b787d757a8bc75d3388c78e"
+  },
+  "backend/services/whiteboard_grid.py": {
+    "baselineSource": "output\\animation-agent-loop\\baseline\\backend\\services\\whiteboard_grid.py.baseline",
+    "workingSha256": "29c8f4c60894d233fabae0915661d869117a522637fbe494a6b80ad50853dacd"
+  },
+  "backend/services/whiteboard_intent.py": {
+    "baselineSource": "output\\animation-agent-loop\\baseline\\backend\\services\\whiteboard_intent.py.baseline",
+    "workingSha256": "e829b226731652b0f27ec4f6d89deb6cce7a75233cbea39cc498ab473947efff"
+  },
+  "components/workspace/live-whiteboard.tsx": {
+    "baselineSource": "output\\animation-agent-loop\\baseline\\components\\workspace\\live-whiteboard.tsx.baseline",
+    "workingSha256": "e8ca6620aebb08f89c26ccc3cfed093fc9b8655fd69dea351e378ba3c12767b6"
+  },
+  "components/workspace/types.ts": {
+    "baselineSource": "output\\animation-agent-loop\\baseline\\components\\workspace\\types.ts.baseline",
+    "workingSha256": "55046b3ab1dcfd43979972ec82f55f4d611ec5bd8b49926954a135c43cab4ca8"
+  },
+  "docker-compose.yml": {
+    "baselineSource": "docker-compose.yml",
+    "workingSha256": "647ed225042f4c370b32d6997616aa6b1deecfc65e0d921ad681baae5113c432"
+  },
+  "lib/generation-stream.ts": {
+    "baselineSource": "output\\animation-agent-loop\\baseline\\lib\\generation-stream.ts.baseline",
+    "workingSha256": "3a77e324e7a5376177cc161f9a51a83d1aafaa21af4ece4f1e55691b0fd57a40"
+  },
+  "lib/whiteboard-session-storage.ts": {
+    "baselineSource": "output\\animation-agent-loop\\baseline\\lib\\whiteboard-session-storage.ts.baseline",
+    "workingSha256": "87c850297833d82b9332089a35b25f27db23fe170930ba179937576506c644e7"
+  },
+  "lib/whiteboard-session.ts": {
+    "baselineSource": "output\\animation-agent-loop\\baseline\\lib\\whiteboard-session.ts.baseline",
+    "workingSha256": "b84c5d28a08a9fa1ad02a62a2880652ea2dd656496257697aee46fd60feb23ac"
+  },
+  "tests/lesson-library.test.mjs": {
+    "baselineSource": "output\\animation-agent-loop\\baseline\\tests\\lesson-library.test.mjs.baseline",
+    "workingSha256": "9911a799717da19ab071ab452ff8dd152404e7e00de0c07dde0075a1c47efb84"
+  },
+  "tests/test_backend_contract.py": {
+    "baselineSource": "output\\animation-agent-loop\\baseline\\tests\\test_backend_contract.py.baseline",
+    "workingSha256": "31eec768edb81a2a4e7e8e9af6d9faff79c11a6d16865e635ac5c53f7e80280b"
+  },
+  "tests/test_frontend_contract.py": {
+    "baselineSource": "output\\animation-agent-loop\\baseline\\tests\\test_frontend_contract.py.baseline",
+    "workingSha256": "aade5776774651734e77fc20b9f1fd28f61393da856b0491e9abcd3dd96cc741"
+  },
+  "tests/test_gemini_pipeline.py": {
+    "baselineSource": "output\\animation-agent-loop\\baseline\\tests\\test_gemini_pipeline.py.baseline",
+    "workingSha256": "e99c0a58ae5a5cf4bb2805e739a13f85b0d689496787760a14e7d96464f0ed85"
+  },
+  "lib/summary-typing.ts": {
+    "baselineSource": "output\\animation-agent-loop\\baseline\\lib\\summary-typing.ts.baseline",
+    "workingSha256": "041011f1c703346924d9fcb249a54f1de5f09450d7fcf53ff2b25c9f0b7cd245"
+  }
+}

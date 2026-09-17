@@ -15,6 +15,21 @@ const clearVerbPattern = /\bclear\b/gi;
 const positiveModeVerbPattern = /\b(?:add|append|include|show|use|create|make|give|provide|keep|retain)\b/gi;
 
 export type AnimationPoint = { x: number; y: number };
+export type AnimationLabelLayout = { lines: string[]; maxLineLength: number };
+export type AnimationRelationshipGeometry = {
+  start: AnimationPoint;
+  end: AnimationPoint;
+  label: AnimationPoint;
+};
+export type AnimationMotionPlanStep = {
+  step: AnimationSpec["steps"][number];
+  move?: { from: AnimationPoint; to: AnimationPoint };
+  rotation?: { from: number; to: number };
+};
+
+const animationLabelLineLength = 8;
+export const ANIMATION_LABEL_CHARACTER_WIDTH = 2;
+export const ANIMATION_LABEL_LINE_HEIGHT = 3.4;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -91,17 +106,19 @@ function compactGrid(count: number, snake = false): AnimationPoint[] {
     const row = Math.floor(index / 3);
     const rawColumn = index % 3;
     const column = snake && row % 2 ? 2 - rawColumn : rawColumn;
-    return { x: 20 + column * 30, y: 32 + row * 36 };
+    return { x: 20 + column * 30, y: 28 + row * 40 };
   });
 }
 
-/** Place up to six 16-unit objects without overlap inside the 100-unit SVG canvas. */
+/** Place up to six 16-unit objects with room below each icon for a wrapped label. */
 export function animationObjectPositions(template: AnimationSpec["template"], count: number): AnimationPoint[] {
   if (count <= 1) return [{ x: 50, y: 50 }];
+  // Six objects need the same two-row layout in every template so their labels fit.
+  if (count > 4) return compactGrid(count, template === "sequence");
   const linear = Array.from({ length: count }, (_, index) => ({ x: 16 + index * (68 / (count - 1)), y: 50 }));
   if (template === "cycle") return Array.from({ length: count }, (_, index) => {
     const angle = -Math.PI / 2 + (index * Math.PI * 2) / count;
-    return { x: 50 + Math.cos(angle) * 32, y: 50 + Math.sin(angle) * 30 };
+    return { x: 50 + Math.cos(angle) * 32, y: 50 + Math.sin(angle) * 20 };
   });
   if (template === "comparison") {
     const rows = Math.ceil(count / 2);
@@ -109,13 +126,12 @@ export function animationObjectPositions(template: AnimationSpec["template"], co
     const gapY = rows === 1 ? 0 : rows === 2 ? 36 : 28;
     return Array.from({ length: count }, (_, index) => ({ x: index % 2 ? 72 : 28, y: startY + Math.floor(index / 2) * gapY }));
   }
-  if (count > 4) return compactGrid(count, template === "sequence");
   if (template === "motion") return linear.map((point, index) => ({ ...point, y: index % 2 ? 62 : 38 }));
   if (template === "sequence") return linear.map((point, index) => ({ ...point, y: index % 2 ? 62 : 38 }));
   return linear;
 }
 
-/** Keep directed GSAP movement inside the icon and label-safe drawing margins. */
+/** Keep directed GSAP movement inside the drawing area reserved for icons and labels. */
 export function clampAnimationMove(
   point: AnimationPoint,
   direction: "up" | "down" | "left" | "right",
@@ -127,9 +143,77 @@ export function clampAnimationMove(
     y: direction === "up" ? -amount : direction === "down" ? amount : 0,
   };
   return {
-    x: Math.max(12 - point.x, Math.min(88 - point.x, requested.x)),
-    y: Math.max(12 - point.y, Math.min(84 - point.y, requested.y)),
+    x: direction === "left" || direction === "right"
+      ? Math.max(14 - point.x, Math.min(86 - point.x, requested.x))
+      : 0,
+    y: direction === "up" || direction === "down"
+      ? Math.max(12 - point.y, Math.min(70 - point.y, requested.y))
+      : 0,
   };
+}
+
+/** Split a bounded label into fixed-width lines so any valid label has at most four rows. */
+export function animationLabelLayout(label: string): AnimationLabelLayout {
+  const characters = Array.from(label.trim().replace(/\s+/g, " "));
+  const lines: string[] = [];
+  for (let start = 0; start < characters.length; start += animationLabelLineLength) {
+    lines.push(characters.slice(start, start + animationLabelLineLength).join(""));
+  }
+  return { lines, maxLineLength: Math.max(0, ...lines.map((line) => Array.from(line).length)) };
+}
+
+/** Calculate connector endpoints and the label anchor from the current object positions. */
+export function animationRelationshipGeometry(
+  from: AnimationPoint,
+  to: AnimationPoint,
+  labelLayout: AnimationLabelLayout,
+): AnimationRelationshipGeometry {
+  const deltaX = to.x - from.x;
+  const deltaY = to.y - from.y;
+  const distance = Math.hypot(deltaX, deltaY) || 1;
+  const offset = Math.min(9, Math.max(2, (distance - 4) / 2));
+  const labelHalfWidth = Math.max(4, labelLayout.maxLineLength);
+  const labelHeight = Math.max(0, labelLayout.lines.length - 1) * ANIMATION_LABEL_LINE_HEIGHT;
+  const midpointY = (from.y + to.y) / 2 - 3 - labelHeight / 2;
+  return {
+    start: { x: from.x + (deltaX / distance) * offset, y: from.y + (deltaY / distance) * offset },
+    end: { x: to.x - (deltaX / distance) * offset, y: to.y - (deltaY / distance) * offset },
+    label: {
+      x: Math.max(labelHalfWidth, Math.min(100 - labelHalfWidth, (from.x + to.x) / 2)),
+      y: Math.max(4, Math.min(96 - labelHeight, midpointY)),
+    },
+  };
+}
+
+/** Compile declarative steps against mutable scene state so repeated actions accumulate. */
+export function compileAnimationMotionPlan(
+  spec: AnimationSpec,
+  initialPositions: readonly AnimationPoint[],
+): AnimationMotionPlanStep[] {
+  const positions = new Map(spec.objects.map((object, index) => [object.id, { ...(initialPositions[index] ?? { x: 50, y: 50 }) }]));
+  const rotations = new Map(spec.objects.map((object) => [object.id, 0]));
+  return spec.steps.map((step) => {
+    const direction = step.direction;
+    const distance = step.distance;
+    if (step.action === "move"
+      && (direction === "up" || direction === "down" || direction === "left" || direction === "right")
+      && (distance === "short" || distance === "medium" || distance === "long")) {
+      const current = positions.get(step.targetId);
+      if (current) {
+        const offset = clampAnimationMove(current, direction, distance);
+        const to = { x: current.x + offset.x, y: current.y + offset.y };
+        positions.set(step.targetId, to);
+        return { step, move: { from: { ...current }, to } };
+      }
+    }
+    if (step.action === "rotate" && (step.direction === "clockwise" || step.direction === "counterclockwise")) {
+      const from = rotations.get(step.targetId) ?? 0;
+      const to = from + (step.direction === "counterclockwise" ? -120 : 120);
+      rotations.set(step.targetId, to);
+      return { step, rotation: { from, to } };
+    }
+    return { step };
+  });
 }
 
 /** Validate a declarative animation recipe before it reaches the SVG renderer. */

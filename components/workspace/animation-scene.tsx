@@ -10,7 +10,16 @@ import {
   createRemoteAnimationAssetResolver,
   isRemoteAnimationAssetResolutionPending,
 } from "@/lib/animation-asset-resolver";
-import { animationObjectPositions, clampAnimationMove, shouldPlayAnimation, shouldResolveRemoteAnimationAssets } from "@/lib/animation-spec";
+import {
+  ANIMATION_LABEL_CHARACTER_WIDTH,
+  ANIMATION_LABEL_LINE_HEIGHT,
+  animationLabelLayout,
+  animationObjectPositions,
+  animationRelationshipGeometry,
+  compileAnimationMotionPlan,
+  shouldPlayAnimation,
+  shouldResolveRemoteAnimationAssets,
+} from "@/lib/animation-spec";
 import { isFrontendOnlyDeployment } from "@/lib/deployment-mode";
 import { API_BASE_URL } from "@/lib/generation-stream";
 
@@ -49,6 +58,9 @@ export function AnimationScene({ spec, title }: { spec: AnimationSpec; title: st
   const frontendOnly = isFrontendOnlyDeployment();
   const positions = useMemo(() => animationObjectPositions(spec.template, spec.objects.length), [spec.template, spec.objects.length]);
   const positionById = useMemo(() => new Map(spec.objects.map((object, index) => [object.id, positions[index]])), [positions, spec.objects]);
+  const objectLabelLayouts = useMemo(() => new Map(spec.objects.map((object) => [object.id, animationLabelLayout(object.label)])), [spec.objects]);
+  const relationshipLabelLayouts = useMemo(() => new Map(spec.relationships.map((relationship) => [relationship.id, animationLabelLayout(relationship.label)])), [spec.relationships]);
+  const motionPlan = useMemo(() => compileAnimationMotionPlan(spec, positions), [positions, spec]);
   const remoteTerms = useMemo(() => [...new Set(spec.objects.map((item) => item.assetKey).filter((key) => !LOCAL_ASSETS[key]))], [spec.objects]);
   const remoteTermsKey = animationAssetTermsKey(remoteTerms);
   const canResolveRemoteAssets = shouldResolveRemoteAnimationAssets(frontendOnly, remoteTerms);
@@ -108,35 +120,80 @@ export function AnimationScene({ spec, title }: { spec: AnimationSpec; title: st
       || (typeof document !== "undefined" && document.hidden)
     ) return;
     const scope = root.current;
+    const initialPositions = new Map(spec.objects.map((object, index) => [object.id, { ...(positions[index] ?? { x: 50, y: 50 }) }]));
+    const currentPositions = new Map(spec.objects.map((object, index) => [object.id, { ...(positions[index] ?? { x: 50, y: 50 }) }]));
+    // Movement changes SVG attributes, so connectors and their labels always follow their objects.
+    const syncSceneGeometry = () => {
+      for (const object of spec.objects) {
+        const point = currentPositions.get(object.id);
+        const node = scope.querySelector<SVGGElement>(`[data-animation-node="${object.id}"]`);
+        if (point && node) node.setAttribute("transform", `translate(${point.x} ${point.y})`);
+      }
+      for (const relationship of spec.relationships) {
+        const from = currentPositions.get(relationship.fromId);
+        const to = currentPositions.get(relationship.toId);
+        const line = scope.querySelector<SVGLineElement>(`[data-animation-relationship-line="${relationship.id}"]`);
+        if (!from || !to || !line) continue;
+        const geometry = animationRelationshipGeometry(
+          from,
+          to,
+          relationshipLabelLayouts.get(relationship.id) ?? animationLabelLayout(""),
+        );
+        line.setAttribute("x1", String(geometry.start.x));
+        line.setAttribute("y1", String(geometry.start.y));
+        line.setAttribute("x2", String(geometry.end.x));
+        line.setAttribute("y2", String(geometry.end.y));
+        const label = scope.querySelector<SVGGElement>(`[data-animation-relationship-label="${relationship.id}"]`);
+        if (label) label.setAttribute("transform", `translate(${geometry.label.x} ${geometry.label.y})`);
+      }
+    };
     const recipe = gsap.timeline({ repeat: -1, repeatDelay: 0.7, paused: !shouldPlay });
     recipe.timeScale(speed);
-    spec.steps.forEach((step, index) => {
+    // Run at the beginning of each loop after GSAP rewinds the scene-local position state.
+    recipe.call(syncSceneGeometry, [], 0).eventCallback("onRepeat", syncSceneGeometry);
+    motionPlan.forEach(({ step, move, rotation }, index) => {
       const target = step.action === "trace"
         ? scope.querySelector(`[data-animation-relationship="${step.targetId}"]`)
-        : scope.querySelector(`[data-animation-object="${step.targetId}"]`);
+        : step.action === "rotate"
+          ? scope.querySelector(`[data-animation-icon="${step.targetId}"]`)
+          : scope.querySelector(`[data-animation-object="${step.targetId}"]`);
       if (!target) return;
-      const at = index === 0 ? 0 : ">-0.05";
+      // Declarative steps are discrete instructions; never let two position tweens compete.
+      const at = index === 0 ? 0 : ">";
       if (step.action === "appear") recipe.fromTo(target, { autoAlpha: 0, scale: 0.78 }, { autoAlpha: 1, scale: 1, duration: 0.42, ease: "back.out(1.7)" }, at);
-      if (step.action === "move") {
-        const point = positionById.get(step.targetId);
-        if (!point || (step.direction !== "up" && step.direction !== "down" && step.direction !== "left" && step.direction !== "right")
-          || (step.distance !== "short" && step.distance !== "medium" && step.distance !== "long")) return;
-        const { x, y } = clampAnimationMove(point, step.direction, step.distance);
-        recipe.to(target, { x, y, duration: 0.55, ease: "power1.inOut" }, at);
+      if (step.action === "move" && move) {
+        const point = currentPositions.get(step.targetId);
+        if (!point) return;
+        recipe.to(point, {
+          x: move.to.x,
+          y: move.to.y,
+          duration: 0.55,
+          ease: "power1.inOut",
+          onStart: () => {
+            Object.assign(point, move.from);
+            syncSceneGeometry();
+          },
+          onUpdate: syncSceneGeometry,
+        }, at);
       }
-      if (step.action === "rotate") recipe.to(target, { rotation: step.direction === "counterclockwise" ? -120 : 120, duration: 0.65, transformOrigin: "50% 50%", ease: "power1.inOut" }, at);
+      if (step.action === "rotate" && rotation) recipe.to(target, { rotation: rotation.to, duration: 0.65, transformOrigin: "50% 50%", ease: "power1.inOut" }, at);
       if (step.action === "highlight") recipe.to(target, { scale: 1.14, duration: 0.32, yoyo: true, repeat: 1, transformOrigin: "50% 50%", ease: "power1.inOut" }, at);
       if (step.action === "trace") recipe.fromTo(target, { strokeDasharray: 180, strokeDashoffset: 180, opacity: 0.4 }, { strokeDashoffset: 0, opacity: 1, duration: 0.6, ease: "power1.out" }, at);
     });
     timeline.current = recipe;
     return () => {
       recipe.kill();
-      gsap.set(scope.querySelectorAll("[data-animation-object], [data-animation-relationship]"), {
+      for (const [id, initial] of initialPositions) {
+        const current = currentPositions.get(id);
+        if (current) Object.assign(current, initial);
+      }
+      syncSceneGeometry();
+      gsap.set(scope.querySelectorAll("[data-animation-object], [data-animation-icon], [data-animation-relationship]"), {
         clearProps: "transform,opacity,visibility,strokeDasharray,strokeDashoffset",
       });
       if (timeline.current === recipe) timeline.current = null;
     };
-  }, { scope: root, dependencies: [spec, positionById, reducedMotion, documentVisible, sceneLoading], revertOnUpdate: true });
+  }, { scope: root, dependencies: [spec, positions, motionPlan, relationshipLabelLayouts, reducedMotion, documentVisible, sceneLoading], revertOnUpdate: true });
 
   useEffect(() => {
     const current = timeline.current;
@@ -154,24 +211,21 @@ export function AnimationScene({ spec, title }: { spec: AnimationSpec; title: st
           const from = positionById.get(relationship.fromId);
           const to = positionById.get(relationship.toId);
           if (!from || !to) return null;
-          const deltaX = to.x - from.x;
-          const deltaY = to.y - from.y;
-          const distance = Math.hypot(deltaX, deltaY) || 1;
-          const offset = Math.min(9, Math.max(2, (distance - 4) / 2));
-          const start = { x: from.x + (deltaX / distance) * offset, y: from.y + (deltaY / distance) * offset };
-          const end = { x: to.x - (deltaX / distance) * offset, y: to.y - (deltaY / distance) * offset };
+          const labelLayout = relationshipLabelLayouts.get(relationship.id) ?? animationLabelLayout("");
+          const geometry = animationRelationshipGeometry(from, to, labelLayout);
           return <g key={relationship.id} data-animation-relationship={relationship.id}>
-            <line x1={start.x} y1={start.y} x2={end.x} y2={end.y} markerEnd={relationship.direction === "forward" || relationship.direction === "both" ? `url(#${markerId})` : undefined} markerStart={relationship.direction === "backward" || relationship.direction === "both" ? `url(#${markerId})` : undefined} />
-            {relationship.label ? <text x={(from.x + to.x) / 2} y={(from.y + to.y) / 2 - 3} textAnchor="middle" fill="currentColor" stroke="white" strokeWidth="0.8" paintOrder="stroke" fontSize="3.2" fontWeight="650">{relationship.label}</text> : null}
+            <line data-animation-relationship-line={relationship.id} x1={geometry.start.x} y1={geometry.start.y} x2={geometry.end.x} y2={geometry.end.y} markerEnd={relationship.direction === "forward" || relationship.direction === "both" ? `url(#${markerId})` : undefined} markerStart={relationship.direction === "backward" || relationship.direction === "both" ? `url(#${markerId})` : undefined} />
+            {relationship.label ? <g data-animation-relationship-label={relationship.id} transform={`translate(${geometry.label.x} ${geometry.label.y})`}><text aria-label={relationship.label} textAnchor="middle" fill="currentColor" stroke="white" strokeWidth="0.8" paintOrder="stroke" fontSize="3.2" fontWeight="650">{labelLayout.lines.map((line, lineIndex) => <tspan key={`${relationship.id}-${lineIndex}`} x="0" y={lineIndex * ANIMATION_LABEL_LINE_HEIGHT} textLength={Array.from(line).length * ANIMATION_LABEL_CHARACTER_WIDTH} lengthAdjust="spacingAndGlyphs">{line}</tspan>)}</text></g> : null}
           </g>;
         })}
         {spec.objects.map((object, index) => {
           const point = positions[index];
           const LocalIcon = LOCAL_ASSETS[object.assetKey];
           const remote = assets.get(object.assetKey);
-          return <g key={object.id} transform={`translate(${point.x} ${point.y})`}><g data-animation-object={object.id}>
-            {LocalIcon ? <LocalIcon x="-8" y="-8" width="16" height="16" strokeWidth="1.8" /> : remote ? <image href={remote.dataUrl} x="-8" y="-8" width="16" height="16" preserveAspectRatio="xMidYMid meet" /> : <><circle r="7.5" /><path d="M-3 0h6M0-3v6" /></>}
-            <text x="0" y="13" textAnchor="middle" fill="currentColor" stroke="white" strokeWidth="0.9" paintOrder="stroke" fontSize="3.4" fontWeight="650">{object.label}</text>
+          const labelLayout = objectLabelLayouts.get(object.id) ?? animationLabelLayout("");
+          return <g key={object.id} data-animation-node={object.id} transform={`translate(${point.x} ${point.y})`}><g data-animation-object={object.id}>
+            <g data-animation-icon={object.id}>{LocalIcon ? <LocalIcon x="-8" y="-8" width="16" height="16" strokeWidth="1.8" /> : remote ? <image href={remote.dataUrl} x="-8" y="-8" width="16" height="16" preserveAspectRatio="xMidYMid meet" /> : <><circle r="7.5" /><path d="M-3 0h6M0-3v6" /></>}</g>
+            <text aria-label={object.label} textAnchor="middle" fill="currentColor" stroke="white" strokeWidth="0.9" paintOrder="stroke" fontSize="3.4" fontWeight="650">{labelLayout.lines.map((line, lineIndex) => <tspan key={`${object.id}-${lineIndex}`} x="0" y={13 + lineIndex * ANIMATION_LABEL_LINE_HEIGHT} textLength={Array.from(line).length * ANIMATION_LABEL_CHARACTER_WIDTH} lengthAdjust="spacingAndGlyphs">{line}</tspan>)}</text>
           </g></g>;
         })}
       </g>

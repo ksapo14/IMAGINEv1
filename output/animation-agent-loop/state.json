@@ -1,0 +1,42 @@
+{
+  "implemented": "Correction1 independent PASS: frontend49/tsc/diff, plain-object GSAP repeat/reset probe, helper/component integration. Prior backend160/build PASS; lint unchanged pre-existing.",
+  "review": "Correction1 independently verified; final reviewer re-review running.",
+  "implementationAttempts": 1,
+  "baseline": "backend153, frontend41, tsc and build passed; lint pre-existing failure",
+  "objective": "Implement accepted reusable SVG+GSAP animations",
+  "verificationRepairCycles": 2,
+  "reviewCorrectionCycles": 1,
+  "status": "REVIEWING",
+  "acceptanceCriteria": [
+    "Explicit animation intent produces one compact validated SVG+GSAP recipe in the existing text stage, with no animation-only raster generation.",
+    "Reuse-first minimal-token system prompt, local SVGs and bounded cached Iconify fallback, loading state completes on failure.",
+    "Looping playback, controls, reduced-motion static mode, visibility suspension and teardown.",
+    "Persist schema v6 recipes; restore v1-v5; exact-spec preservation on integrated expansion.",
+    "All graphical mode pairs and three/four modes use full 24x10 placement; animation-only/+notes medium.",
+    "Network-free tests, type check and build pass; report pre-existing lint failure; independently review final diff."
+  ],
+  "currentPlan": [
+    "Finish independent verification.",
+    "Repair reproduced failures and add behavior regressions.",
+    "Re-run affected checks, then independent review.",
+    "Inspect scope and report results and limitations."
+  ],
+  "completedSteps": [
+    "Repository exploration and accepted contract.",
+    "Baseline checks and snapshot.",
+    "Initial implementation and self-checks.",
+    "Focused repair cycle 1 completed with behavior regressions.",
+    "Independent verification passed after cycle2.",
+    "User-requested pre-animation commit on main and separate committed animation branch created."
+  ],
+  "openIssues": [
+    "Await final independent re-review, then commit the three-file correction on feature branch.",
+    "Browser visual playback/live provider latency remain unmeasured."
+  ],
+  "checkpoints": {
+    "animationBranch": "codex/svg-gsap-animations",
+    "verification": "Main matches saved pre-feature baseline; feature files unchanged during git operations.",
+    "main": "83dfe61",
+    "animationCommit": "39202fc"
+  }
+}

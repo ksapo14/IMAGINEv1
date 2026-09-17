@@ -4,7 +4,7 @@ import { FRONTEND_ONLY_NOTICE, isFrontendOnlyDeployment } from "../lib/deploymen
 import { LESSON_LIBRARY_KEY, loadLessonLibrary, saveLessonLibrary } from "../lib/lesson-library.ts";
 import { streamGeneration, validateGenerateResponse } from "../lib/generation-stream.ts";
 import { animationAssetTermsKey, createRemoteAnimationAssetResolver, isRemoteAnimationAssetResolutionPending } from "../lib/animation-asset-resolver.ts";
-import { animationObjectPositions, clampAnimationMove, isValidAnimationSpec, requestsAnimation, shouldPlayAnimation, shouldResolveRemoteAnimationAssets } from "../lib/animation-spec.ts";
+import { ANIMATION_LABEL_LINE_HEIGHT, animationLabelLayout, animationObjectPositions, animationRelationshipGeometry, clampAnimationMove, compileAnimationMotionPlan, isValidAnimationSpec, requestsAnimation, shouldPlayAnimation, shouldResolveRemoteAnimationAssets } from "../lib/animation-spec.ts";
 import { consumeWakeCommand, dequeueLiveTurn, enqueueLiveTurn, IDLE_WAKE_COMMAND_STATE, isDuplicateFinalizedSpeech } from "../lib/live-session.ts";
 import { createSummaryTypingPlan, createSummaryTypingSession, getChangedSummaryBulletIndexes, renderSummaryTypingFrame } from "../lib/summary-typing.ts";
 import { appendRecentTurn, applyBoardDecision, cancelRemovedVisualJobs, cancelSupersededVisualJob, EMPTY_WHITEBOARD, getBoardDigest, getConceptMemory, MAX_BOARD_SCENES, patchGeneratedAsset, sceneOwnsVisualJob, settlePendingVisualJobs, shouldAnimateDiagramNotesExpansion } from "../lib/whiteboard-session.ts";
@@ -960,20 +960,108 @@ test("animation loader intent, asset policy, and six-object SVG layout stay boun
   assert.equal(shouldPlayAnimation(true, true, true, false), false);
   assert.equal(shouldPlayAnimation(true, true, false, true), false);
 
+  const mixedMaximumLabel = "a abcdefghi b abcdefghi c dddddd";
+  const mixedLayout = animationLabelLayout(mixedMaximumLabel);
+  assert.equal(mixedMaximumLabel.length, 32);
+  assert.equal(mixedLayout.lines.join(""), mixedMaximumLabel);
+  assert.equal(mixedLayout.lines.length, 4);
+  assert.ok(mixedLayout.lines.every((line) => line.length <= 8));
+  const emojiLabel = "😀".repeat(16);
+  const emojiLayout = animationLabelLayout(emojiLabel);
+  assert.equal(emojiLabel.length, 32);
+  assert.equal(emojiLayout.lines.join(""), emojiLabel);
+  assert.ok(emojiLayout.lines.every((line) => Array.from(line).length <= 8));
+
   for (const template of ["sequence", "flow", "cycle", "comparison", "motion"]) {
     const points = animationObjectPositions(template, 6);
+    const objectLayout = animationLabelLayout("O".repeat(32));
+    const relationshipLayout = animationLabelLayout("R".repeat(28));
     assert.equal(points.length, 6);
+    assert.equal(objectLayout.lines.join(""), "O".repeat(32));
+    assert.equal(relationshipLayout.lines.join(""), "R".repeat(28));
+    assert.ok(objectLayout.lines.every((line) => line.length <= 8), `${template} object label line is too wide`);
+    assert.ok(relationshipLayout.lines.every((line) => line.length <= 8), `${template} relationship label line is too wide`);
     for (let index = 0; index < points.length; index += 1) {
       for (let other = index + 1; other < points.length; other += 1) {
         assert.ok(Math.hypot(points[index].x - points[other].x, points[index].y - points[other].y) >= 20, `${template} objects ${index}/${other} overlap`);
       }
+      assert.ok(points[index].x >= objectLayout.maxLineLength && points[index].x <= 100 - objectLayout.maxLineLength, `${template} object label clips horizontally`);
+      assert.ok(points[index].y + 13 + (objectLayout.lines.length - 1) * ANIMATION_LABEL_LINE_HEIGHT <= 96, `${template} object label clips below the canvas`);
       for (const direction of ["up", "down", "left", "right"]) {
         const offset = clampAnimationMove(points[index], direction, "long");
         assert.ok(points[index].x + offset.x >= 12 && points[index].x + offset.x <= 88, `${template} ${direction} x clips`);
         assert.ok(points[index].y + offset.y >= 12 && points[index].y + offset.y <= 84, `${template} ${direction} y clips`);
       }
     }
+    const geometry = animationRelationshipGeometry(points[0], points[1], relationshipLayout);
+    assert.ok(geometry.label.x >= relationshipLayout.maxLineLength && geometry.label.x <= 100 - relationshipLayout.maxLineLength, `${template} relationship label clips horizontally`);
+    assert.ok(geometry.label.y >= 4 && geometry.label.y + (relationshipLayout.lines.length - 1) * ANIMATION_LABEL_LINE_HEIGHT <= 96, `${template} relationship label clips vertically`);
   }
+});
+
+test("animation layouts and directional moves stay label-safe for every supported object count", () => {
+  const labelLayout = animationLabelLayout("a abcdefghi b abcdefghi c dddddd");
+  for (const template of ["sequence", "flow", "cycle", "comparison", "motion"]) {
+    for (let count = 1; count <= 6; count += 1) {
+      const points = animationObjectPositions(template, count);
+      for (const point of points) {
+        assert.ok(point.x >= labelLayout.maxLineLength && point.x <= 100 - labelLayout.maxLineLength, `${template}/${count} initial label clips horizontally`);
+        assert.ok(point.y >= 12 && point.y + 13 + (labelLayout.lines.length - 1) * ANIMATION_LABEL_LINE_HEIGHT <= 96, `${template}/${count} initial label clips vertically`);
+        for (const direction of ["up", "down", "left", "right"]) {
+          const offset = clampAnimationMove(point, direction, "long");
+          const moved = { x: point.x + offset.x, y: point.y + offset.y };
+          if (direction === "up" || direction === "down") assert.equal(moved.x, point.x, `${template}/${count} ${direction} changed x`);
+          if (direction === "left" || direction === "right") assert.equal(moved.y, point.y, `${template}/${count} ${direction} changed y`);
+          assert.ok(moved.x >= 14 && moved.x <= 86, `${template}/${count} ${direction} leaves x bounds`);
+          assert.ok(moved.y >= 12 && moved.y <= 70, `${template}/${count} ${direction} leaves y bounds`);
+        }
+      }
+    }
+  }
+});
+
+test("animation motion accumulates positions and rotations while connector geometry follows the moved node", () => {
+  const moveSpec = {
+    ...animationSpec,
+    template: "flow",
+    steps: [
+      { action: "move", targetId: "water", direction: "right", distance: "short" },
+      { action: "move", targetId: "water", direction: "right", distance: "short" },
+      { action: "move", targetId: "water", direction: "up", distance: "medium" },
+      { action: "trace", targetId: "rise" },
+    ],
+  };
+  const positions = animationObjectPositions(moveSpec.template, moveSpec.objects.length);
+  const motion = compileAnimationMotionPlan(moveSpec, positions);
+  const moves = motion.filter((entry) => entry.move).map((entry) => entry.move);
+  assert.deepEqual(moves, [
+    { from: { x: 16, y: 50 }, to: { x: 23, y: 50 } },
+    { from: { x: 23, y: 50 }, to: { x: 30, y: 50 } },
+    { from: { x: 30, y: 50 }, to: { x: 30, y: 37 } },
+  ]);
+  assert.equal(motion.at(-1)?.step.action, "trace");
+
+  const originalGeometry = animationRelationshipGeometry(positions[0], positions[1], animationLabelLayout("evaporates"));
+  const movedGeometry = animationRelationshipGeometry(moves.at(-1).to, positions[1], animationLabelLayout("evaporates"));
+  assert.notDeepEqual(movedGeometry.start, originalGeometry.start);
+  assert.notDeepEqual(movedGeometry.end, originalGeometry.end);
+  assert.notDeepEqual(movedGeometry.label, originalGeometry.label);
+
+  const rotationSpec = {
+    ...animationSpec,
+    steps: [
+      { action: "rotate", targetId: "water", direction: "clockwise" },
+      { action: "rotate", targetId: "water", direction: "clockwise" },
+      { action: "rotate", targetId: "water", direction: "counterclockwise" },
+    ],
+  };
+  const rotations = compileAnimationMotionPlan(rotationSpec, animationObjectPositions(rotationSpec.template, rotationSpec.objects.length))
+    .map((entry) => entry.rotation);
+  assert.deepEqual(rotations, [
+    { from: 0, to: 120 },
+    { from: 120, to: 240 },
+    { from: 240, to: 120 },
+  ]);
 });
 
 test("stream validation rejects conditional mode and footprint violations", () => {
