@@ -1,0 +1,109 @@
+.surface { width:1440px; height:810px; position:relative; flex:none; overflow:hidden; background:#fff; color:#000; font-family:Poppins,-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif; -webkit-font-smoothing:antialiased; }
+
+.brandHint { position:absolute; top:34px; left:92px; font-size:11px; letter-spacing:.18em; color:#8F8B80; text-transform:uppercase; }
+
+.surface {
+    --ink:#000;
+    --stone:#8F8B80;
+    --sand:#C6C0B2;
+    --line:#E4E1D9;
+    --faint:#F0EEE8;
+  }
+
+.surface :global(*) {box-sizing:border-box;margin:0;padding:0}
+
+.surface :global(.slide) {
+    position:absolute;inset:0;
+    padding:86px 92px 92px;
+    display:none;
+    flex-direction:column;
+  }
+
+.surface :global(.slide.on) {display:flex}
+
+.surface :global(.eyebrow) {
+    font-size:11px;font-weight:500;letter-spacing:.28em;text-transform:uppercase;
+    color:var(--stone);
+  }
+
+.surface :global(h1) {font-size:64px;font-weight:500;letter-spacing:-.028em;line-height:1.02}
+
+.surface :global(h2) {font-size:40px;font-weight:500;letter-spacing:-.022em;line-height:1.1}
+
+.surface :global(h3) {font-size:23px;font-weight:500;letter-spacing:-.012em;line-height:1.25}
+
+.surface :global(p), .surface :global(li) {font-size:18px;font-weight:300;line-height:1.55;letter-spacing:-.004em}
+
+.surface :global(.lede) {font-size:22px;font-weight:300;line-height:1.5}
+
+.surface :global(.tiny) {font-size:13px;font-weight:300;color:var(--stone);letter-spacing:.01em}
+
+.surface :global(.num) {font-size:80px;font-weight:500;letter-spacing:-.045em;line-height:1;font-variant-numeric:tabular-nums}
+
+.surface :global(.num-sm) {font-size:44px;font-weight:500;letter-spacing:-.035em;line-height:1;font-variant-numeric:tabular-nums}
+
+.surface :global(strong) {font-weight:500}
+
+.surface :global(em) {font-style:normal;border-bottom:1.5px solid var(--ink);padding-bottom:1px}
+
+.surface :global(.ph) {
+    display:inline-block;font-size:12px;font-weight:400;letter-spacing:.1em;
+    text-transform:uppercase;color:var(--stone);
+    border:1px dashed var(--sand);border-radius:2px;padding:4px 9px;
+    background:#fff;
+  }
+
+.surface :global(.rv) {opacity:0;transform:translateY(9px);transition:opacity .62s cubic-bezier(.2,.7,.2,1),transform .62s cubic-bezier(.2,.7,.2,1)}
+
+.surface :global(.rv.in) {opacity:1;transform:none}
+
+.surface :global(svg) {overflow:visible}
+
+.surface :global(.s) {fill:none;stroke:var(--ink);stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+
+.surface :global(.s-thin) {stroke-width:1.1}
+
+.surface :global(.s-hair) {stroke-width:.9;stroke:var(--sand)}
+
+.surface :global(.s-stone) {stroke:var(--stone)}
+
+.surface :global(.s-dash) {stroke-dasharray:5 5;stroke:var(--sand)}
+
+.surface :global(.fillink) {fill:var(--ink);opacity:0;transition:opacity .5s ease}
+
+.surface :global(.fillink.in) {opacity:1}
+
+.surface :global(.pen) {fill:var(--ink)}
+
+.surface :global(.tam-tab) {
+    border:none;background:none;cursor:pointer;font-family:inherit;
+    font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--stone);
+    padding:0 16px 7px 0;border-bottom:1.5px solid transparent;transition:color .2s,border-color .2s;
+  }
+
+.surface :global(.tam-tab:hover) {color:var(--ink)}
+
+.surface :global(.tam-tab.on) {color:var(--ink);border-bottom-color:var(--ink)}
+
+.surface :global(#tam-expand) {
+    align-self:flex-start;margin-top:20px;padding:0 0 4px;
+    border:none;border-bottom:1.5px solid var(--ink);background:none;cursor:pointer;
+    font-family:inherit;font-size:19px;font-weight:400;color:var(--ink);
+    letter-spacing:-.01em;transition:opacity .2s,letter-spacing .2s;
+  }
+
+.surface :global(#tam-expand:hover) {opacity:.55;letter-spacing:.01em}
+
+.surface :global(#tam-expand span) {font-size:15px;margin-left:8px;color:var(--stone)}
+
+.surface :global(.head) {margin-bottom:6px}
+
+.surface :global(.body) {flex:1;display:flex;min-height:0}
+
+.surface :global(.col) {display:flex;flex-direction:column}
+
+.surface :global(.foot) {padding-top:14px}
+
+.surface :global(.rule) {height:1px;background:var(--faint);width:100%}
+
+@media (prefers-reduced-motion: reduce) { .surface *, .surface *::before, .surface *::after { transition:none!important; animation:none!important; } }
