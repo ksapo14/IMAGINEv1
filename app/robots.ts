@@ -8,7 +8,7 @@ export default function robots(): MetadataRoute.Robots {
     rules: {
       userAgent: "*",
       allow: "/",
-      disallow: "/canvas"
+      disallow: ["/canvas", "/pitch"]
     },
     sitemap: `${origin}/sitemap.xml`
   };

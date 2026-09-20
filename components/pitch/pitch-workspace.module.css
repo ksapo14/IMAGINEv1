@@ -1,0 +1,26 @@
+.workspace { height:100dvh; min-height:420px; display:flex; flex-direction:column; background:#f4f3ef; color:#171717; color-scheme:light; overflow:auto; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif; }
+.workspace:fullscreen { width:100vw; height:100dvh; }
+.header { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:12px 24px; border-bottom:1px solid #dedbd2; }
+.header>div:first-child { display:flex; align-items:baseline; gap:18px; }
+.eyebrow { margin:0; font-size:12px; letter-spacing:.14em; text-transform:uppercase; color:#656156; }
+.header h1 { margin:0; font-size:18px; font-weight:500; }
+.status { color:#5e5a51; font-size:12px; }
+.stage { display:grid; place-items:center; flex:1; min-height:160px; overflow:hidden; background:#fff; }
+.scaledDeck { flex:none; overflow:hidden; }
+.controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; padding:12px 20px; border-top:1px solid #dedbd2; }
+.workspace button,.workspace select { min-height:36px; padding:7px 12px; border:1px solid #d1cec5; border-radius:5px; color:#202020; background:#fff; font:inherit; font-size:13px; cursor:pointer; }
+.workspace button:hover:not(:disabled) { border-color:#777368; }
+.workspace button[aria-pressed=true] { background:#242424; border-color:#242424; color:#fff; }
+.workspace button:disabled { opacity:.45; cursor:default; }
+.workspace button:focus-visible,.workspace select:focus-visible,.workspace textarea:focus-visible { outline:2px solid #555; outline-offset:3px; }
+.slidePicker { display:flex; align-items:center; gap:8px; font-size:12px; color:#656156; }
+.slidePicker select { max-width:210px; }
+.progress { font-size:12px; color:#656156; font-variant-numeric:tabular-nums; }
+.panel { display:grid; grid-template-columns:1fr 1fr; gap:12px 24px; padding:16px 24px; border-top:1px solid #dedbd2; max-height:32vh; overflow:auto; flex:none; }
+.panel p { margin:0; font-size:14px; white-space:pre-wrap; overflow-wrap:anywhere; }
+.panel form { display:grid; gap:8px; grid-column:1/-1; }
+.panel label { font-size:13px; font-weight:500; }
+.panel textarea { width:100%; min-height:60px; resize:vertical; border:1px solid #d1cec5; background:#fff; color:#171717; border-radius:5px; padding:8px 10px; font:inherit; font-size:14px; }
+.panel button { justify-self:start; }
+.notice { margin:0; padding:8px 20px max(8px,env(safe-area-inset-bottom)); font-size:12px; color:#6b5328; background:#fff8e8; }
+@media(max-width:650px) { .header { padding:10px 12px; flex-wrap:wrap; } .header>div:first-child { gap:10px; } .eyebrow { font-size:10px; } .controls { padding:8px 10px; gap:6px; } .panel { grid-template-columns:1fr; padding:12px; gap:14px; } .slidePicker select { max-width:150px; } }

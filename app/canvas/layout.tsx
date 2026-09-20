@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Educator Workspace | Imagine v1",
+  title: "Pitch Mode | Imagine v1",
   description:
-    "Prepare lesson visuals in advance, preview them, and recall them intentionally while teaching.",
+    "Continue to the Imagineer presentation workspace.",
   robots: {
     index: false,
     follow: false

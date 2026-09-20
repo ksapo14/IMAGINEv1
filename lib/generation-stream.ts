@@ -1,5 +1,7 @@
 import type { GenerateRequest, GenerateResponse } from "@/components/workspace/types";
 import { FRONTEND_ONLY_NOTICE, isFrontendOnlyDeployment } from "./deployment-mode.ts";
+export { API_BASE_URL, getApiBaseUrl } from "./api-base.ts";
+import { API_BASE_URL } from "./api-base.ts";
 
 type StreamEvent =
   | { type: "result"; result: unknown }
@@ -7,18 +9,6 @@ type StreamEvent =
   | { type: "error"; message?: string };
 
 type StreamHandlers = { onResult?: (result: GenerateResponse) => void };
-
-export function getApiBaseUrl() {
-  const configuredUrl = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
-  if (configuredUrl) return configuredUrl.replace(/\/$/, "");
-  const apiPort = process.env.NEXT_PUBLIC_API_PORT?.trim() || "8010";
-  if (typeof window !== "undefined") {
-    return `${window.location.protocol}//${window.location.hostname}:${apiPort}`;
-  }
-  return `http://127.0.0.1:${apiPort}`;
-}
-
-export const API_BASE_URL = getApiBaseUrl();
 
 const contentModeNames = new Set(["visual", "notes", "diagram"]);
 const footprints = {
