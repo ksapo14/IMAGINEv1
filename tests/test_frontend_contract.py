@@ -61,39 +61,54 @@ class FrontendContractTests(unittest.TestCase):
         ]
         return "\n".join(path.read_text(encoding="utf-8") for path in files)
 
-    def test_canvas_route_exists(self) -> None:
+    def test_pitch_replaces_canvas_with_semantic_slide_contracts(self) -> None:
         canvas_page = ROOT / "app" / "canvas" / "page.tsx"
+        pitch_page = ROOT / "app" / "pitch" / "page.tsx"
+        pitch_layout = ROOT / "app" / "pitch" / "layout.tsx"
+
         self.assertTrue(canvas_page.is_file())
-        canvas_source = canvas_page.read_text(encoding="utf-8")
-        storage_source = (ROOT / "lib" / "whiteboard-session-storage.ts").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn("export default function CanvasPage", canvas_source)
-        self.assertIn(
-            'export type DashboardTab = "prepare" | "library" | "live"',
-            storage_source,
-        )
-        self.assertIn('activeTab === "prepare"', canvas_source)
-        self.assertIn('activeTab === "live"', canvas_source)
-        self.assertNotIn('activeTab === "overview"', canvas_source)
-        self.assertNotIn('activeTab === "teach"', canvas_source)
+        self.assertTrue(pitch_page.is_file())
+        self.assertTrue(pitch_layout.is_file())
+        self.assertIn('redirect("/pitch")', canvas_page.read_text(encoding="utf-8"))
+        self.assertIn("Pitch", pitch_page.read_text(encoding="utf-8"))
+        layout_source = pitch_layout.read_text(encoding="utf-8")
+        self.assertIn("index: false", layout_source)
+        self.assertIn("follow: false", layout_source)
 
-    def test_prepare_and_library_remain_in_the_dashboard_branch(self) -> None:
-        canvas_source = (ROOT / "app" / "canvas" / "page.tsx").read_text(
-            encoding="utf-8"
-        )
-        live_branch = canvas_source.index('if (activeTab === "live")')
-        dashboard_shell = canvas_source.index('className="dashboard-root', live_branch)
-        prepare_branch = canvas_source.index('activeTab === "prepare"', dashboard_shell)
-        library_branch = canvas_source.index('activeTab === "library"', prepare_branch)
+    def test_pitch_uses_a_safe_semantic_model_and_renderer_contract(self) -> None:
+        types = (ROOT / "lib" / "pitch" / "types.ts").read_text(encoding="utf-8")
+        deck = (ROOT / "lib" / "pitch" / "deck.ts").read_text(encoding="utf-8")
+        model = (ROOT / "lib" / "pitch" / "model.ts").read_text(encoding="utf-8")
+        controller = (ROOT / "lib" / "pitch" / "controller.ts").read_text(encoding="utf-8")
+        storage = (ROOT / "lib" / "pitch" / "storage.ts").read_text(encoding="utf-8")
+        renderer = (
+            ROOT / "components" / "pitch" / "deck" / "pitch-deck-slide.tsx"
+        ).read_text(encoding="utf-8")
 
-        self.assertLess(live_branch, dashboard_shell)
-        self.assertLess(dashboard_shell, prepare_branch)
-        self.assertLess(prepare_branch, library_branch)
-        self.assertIn('aria-label="Workspace views"', canvas_source[dashboard_shell:prepare_branch])
-        self.assertIn("saveLessonContext", canvas_source)
-        self.assertIn("saveLessonLibrary(window.localStorage, lessons)", canvas_source)
-        self.assertIn("loadLessonLibrary(window.localStorage)", canvas_source)
+        for phrase in [
+            "type SlideId = string",
+            "type SlideDescriptor",
+            "type PitchModelInput",
+            'action: "goto_slide"; slide_id: SlideId',
+            'action: "no_action"',
+            "interface PitchModelAdapter",
+            "signal: AbortSignal",
+        ]:
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, types)
+        self.assertEqual(deck.count('id: "'), 18)
+        for slide_id in ["open", "gtm", "tam", "financials", "ask"]:
+            self.assertIn(f'id: "{slide_id}"', deck)
+        self.assertIn("createMockPitchModelAdapter", model)
+        self.assertIn("isPitchDecision", model)
+        self.assertIn("normalizePitchUtterance", model)
+        self.assertIn("runWithTimeout", controller)
+        self.assertIn("cancelActiveRequest", controller)
+        self.assertIn("applyModelDecision", controller)
+        self.assertIn("PITCH_DECK_ID", storage)
+        self.assertIn("PITCH_DECK_VERSION", storage)
+        self.assertIn("DECK_RENDERER_IDS", renderer)
+        self.assertIn("PitchDeckSlide", renderer)
 
     def test_lesson_context_is_local_and_generation_is_live_only(self) -> None:
         lesson_library = (
@@ -112,10 +127,7 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn("JSON.stringify(request)", stream_client)
         self.assertNotIn("text_delta", stream_client)
 
-    def test_live_canvas_unifies_speech_context_and_cumulative_generation(self) -> None:
-        canvas_source = (ROOT / "app" / "canvas" / "page.tsx").read_text(
-            encoding="utf-8"
-        )
+    def test_legacy_whiteboard_contract_remains_available(self) -> None:
         live_session = (ROOT / "lib" / "live-session.ts").read_text(
             encoding="utf-8"
         )
@@ -123,20 +135,8 @@ class FrontendContractTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn("dispatchFinalizedTranscript", canvas_source)
-        self.assertIn("dispatchTeachingTurn", canvas_source)
-        self.assertIn("consumeWakeCommand", canvas_source)
-        self.assertIn("IDLE_WAKE_COMMAND_STATE", canvas_source)
-        self.assertIn('"Armed — say one command"', canvas_source)
-        self.assertIn('value={capturedInput}', canvas_source)
-        self.assertNotIn('value={displayValue}', canvas_source)
-        self.assertIn("ordinaryTurnQueue", canvas_source)
-        self.assertIn("generationInFlight.current", canvas_source)
-        self.assertIn("lessonContext:", canvas_source)
-        self.assertIn("recentTurns:", canvas_source)
-        self.assertIn("concepts:", canvas_source)
-        self.assertIn("board:", canvas_source)
         self.assertIn("MAX_QUEUED_TURNS = 2", live_session)
+        self.assertIn("consumeWakeCommand", live_session)
         self.assertIn("applyBoardDecision", board_session)
         self.assertIn("placementsConflict(candidate.placement, scene.placement)", board_session)
         self.assertIn("currentPage: scene.placement.page", board_session)
@@ -155,60 +155,7 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn('BoardStrategy = "integrate" | "reset"', types_source)
         self.assertIn('["integrate", "reset"]', stream_client)
 
-    def test_live_canvas_is_a_compact_full_screen_teaching_surface(self) -> None:
-        canvas_source = (ROOT / "app" / "canvas" / "page.tsx").read_text(
-            encoding="utf-8"
-        )
-
-        self.assertIn('if (activeTab === "live")', canvas_source)
-        self.assertIn('h-[100dvh] min-h-[100dvh]', canvas_source)
-        self.assertIn("Exit live whiteboard and return to library", canvas_source)
-        self.assertIn("Open live whiteboard options", canvas_source)
-        self.assertIn("Start fresh board", canvas_source)
-        self.assertIn("Open lesson library", canvas_source)
-        self.assertIn("pageCount > 1", canvas_source)
-        self.assertIn("env(safe-area-inset-bottom)", canvas_source)
-        self.assertIn("bg-white/65", canvas_source)
-        self.assertIn("bg-white/75", canvas_source)
-        self.assertIn("backdrop-blur-xl", canvas_source)
-        self.assertIn("animationRequest={sceneAnimation}", canvas_source)
-        self.assertIn("bg-[#fffdf7] text-neutral-950", canvas_source)
-        self.assertIn("text-xs font-semibold text-neutral-600", canvas_source)
-        self.assertIn("text-sm text-neutral-900", canvas_source)
-        self.assertNotIn("data-live-summary", canvas_source)
-        self.assertNotIn("currentConcepts", canvas_source)
-        select_tab = canvas_source[canvas_source.index("function selectTab"):canvas_source.index("function handleLiveSubmit")]
-        self.assertIn('if (tab !== "live")', select_tab)
-        self.assertIn("setSceneAnimation(null)", select_tab)
-
-    def test_live_typed_command_remains_readable_on_the_light_input(self) -> None:
-        canvas_source = (ROOT / "app" / "canvas" / "page.tsx").read_text(
-            encoding="utf-8"
-        )
-        input_start = canvas_source.index('<Textarea id="workspace-input"')
-        input_end = canvas_source.index("/>", input_start)
-        live_input = canvas_source[input_start:input_end]
-
-        self.assertIn("text-black", live_input)
-        self.assertIn("caret-black", live_input)
-        self.assertIn("placeholder:text-neutral-600", live_input)
-
-    def test_live_success_notices_expire_without_clearing_persistent_status(self) -> None:
-        canvas_source = (ROOT / "app" / "canvas" / "page.tsx").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn("if (!notice) return", canvas_source)
-        self.assertIn("}, 3500)", canvas_source)
-        self.assertIn("return () => window.clearTimeout(timer)", canvas_source)
-        self.assertIn("current === notice ? \"\" : current", canvas_source)
-        self.assertIn("setNoticeRevision((current) => current + 1)", canvas_source)
-        self.assertIn("[notice, noticeRevision]", canvas_source)
-        self.assertNotIn('decision.action === "hold"', canvas_source)
-
-    def test_live_canvas_bounds_scenes_and_restores_selected_lessons(self) -> None:
-        canvas_source = (ROOT / "app" / "canvas" / "page.tsx").read_text(
-            encoding="utf-8"
-        )
+    def test_legacy_whiteboard_bounds_scenes(self) -> None:
         board_session = (ROOT / "lib" / "whiteboard-session.ts").read_text(
             encoding="utf-8"
         )
@@ -216,22 +163,8 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn("MAX_BOARD_SCENES = 48", board_session)
         self.assertIn("board.scenes.length >= MAX_BOARD_SCENES", board_session)
         self.assertNotIn("board.scenes.slice(0, 48)", board_session)
-        self.assertIn("const ownsVisualJob = () =>", canvas_source)
-        self.assertGreaterEqual(canvas_source.count("if (!ownsVisualJob()) return;"), 3)
-        self.assertIn("cancelSupersededVisualJob(", canvas_source)
-        self.assertIn(
-            "patchGeneratedAsset(currentBoard, sceneId, jobId, asset, failed)",
-            canvas_source,
-        )
-        self.assertIn("sessionCache.current.delete(lessonId)", canvas_source)
-        self.assertIn('activateLesson(next[0]?.id ?? "", false)', canvas_source)
-        self.assertIn("const settledBoard = settlePendingVisualJobs(boardRef.current)", canvas_source)
-        self.assertIn("if (snapshotOutgoing) snapshotCurrentSession()", canvas_source)
 
-    def test_whiteboard_sessions_hydrate_before_autosave_and_strip_images(self) -> None:
-        canvas_source = (ROOT / "app" / "canvas" / "page.tsx").read_text(
-            encoding="utf-8"
-        )
+    def test_whiteboard_sessions_strip_images_for_legacy_storage(self) -> None:
         storage = (ROOT / "lib" / "whiteboard-session-storage.ts").read_text(
             encoding="utf-8"
         )
@@ -240,15 +173,8 @@ class FrontendContractTests(unittest.TestCase):
         )
 
         self.assertIn("WHITEBOARD_SESSION_STORAGE_KEY", storage)
-        self.assertIn("loadWhiteboardSessionStore", canvas_source)
-        self.assertIn("if (!workspaceReady) return", canvas_source)
-        self.assertIn("sessionCache.current.set(selectedLessonId", canvas_source)
-        self.assertIn("turnSequence: turnSequenceValue", canvas_source)
         self.assertIn("generatedAsset: _asset", storage)
         self.assertIn("visualJobId: _job", storage)
-        self.assertIn("createEmptyWhiteboardSession", canvas_source)
-        self.assertIn("activateLesson(event.target.value)", canvas_source)
-        self.assertIn("fresh board", canvas_source)
         self.assertIn("WHITEBOARD_SESSION_SCHEMA_VERSION = 5", storage)
         self.assertIn("sourceSchema === 1", storage)
         self.assertIn("sourceSchema < WHITEBOARD_SESSION_SCHEMA_VERSION", storage)
@@ -266,7 +192,6 @@ class FrontendContractTests(unittest.TestCase):
         )
 
     def test_whiteboard_uses_structured_visuals_and_generated_diagram_loader(self) -> None:
-        canvas = (ROOT / "app" / "canvas" / "page.tsx").read_text(encoding="utf-8")
         board = (ROOT / "components" / "workspace" / "live-whiteboard.tsx").read_text(
             encoding="utf-8"
         )
@@ -345,8 +270,6 @@ class FrontendContractTests(unittest.TestCase):
         self.assertNotIn("TypewriterText", board)
         self.assertIn('data-animation-block="heading"', board)
         self.assertIn('data-animation-block="notes"', board)
-        self.assertIn('kind: "expandDiagramNotes"', canvas)
-        self.assertIn("shouldAnimateDiagramNotesExpansion", canvas)
         self.assertIn('new Map<number, "running" | "complete">()', board)
         self.assertIn('animationLifecycle.current.set(animationRequest.revision, "running")', board)
         self.assertIn('animationLifecycle.current.set(animationRequest.revision, "complete")', board)
@@ -412,20 +335,16 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn("aria-label={`Board topic: ${pagePrimaryHeading.title}`}", board)
 
     def test_transcription_callbacks_are_scoped_to_one_session(self) -> None:
-        canvas_source = (ROOT / "app" / "canvas" / "page.tsx").read_text(
+        transport = (ROOT / "components" / "pitch" / "transcription-transport.ts").read_text(
             encoding="utf-8"
         )
 
-        self.assertIn("const transcriptionSessionId = useRef(0)", canvas_source)
-        self.assertIn("transcriptionSessionId.current += 1", canvas_source)
-        self.assertIn(
-            "const ownsSession = () => transcriptionSessionId.current === sessionId",
-            canvas_source,
-        )
-        self.assertGreaterEqual(canvas_source.count("if (!ownsSession())"), 8)
-        self.assertIn("releaseSessionResources", canvas_source)
-        self.assertNotIn("speechStopRequested", canvas_source)
-        self.assertNotIn("deepgramConnected", canvas_source)
+        self.assertIn("private sessionId = 0", transport)
+        self.assertIn("const ownsSession = () => this.sessionId === sessionId", transport)
+        self.assertIn("this.sessionId += 1", transport)
+        self.assertIn("this.normalizer.reset()", transport)
+        self.assertIn("if (!ownsSession()) return", transport)
+        self.assertIn("stream.getTracks().forEach((track) => track.stop())", transport)
 
     def test_development_frontend_uses_advertised_port(self) -> None:
         package = json.loads((ROOT / "package.json").read_text())
@@ -490,17 +409,13 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn('process.env.VERCEL === "1"', next_config)
         self.assertIn(': { output: "standalone" }', next_config)
 
-    def test_frontend_only_policy_and_canvas_guards_share_one_notice(self) -> None:
+    def test_frontend_only_policy_and_legacy_generation_guard_share_one_notice(self) -> None:
         deployment = (ROOT / "lib" / "deployment-mode.ts").read_text(
             encoding="utf-8"
         )
         stream = (ROOT / "lib" / "generation-stream.ts").read_text(
             encoding="utf-8"
         )
-        canvas = (ROOT / "app" / "canvas" / "page.tsx").read_text(
-            encoding="utf-8"
-        )
-
         self.assertIn("FRONTEND_ONLY_NOTICE", deployment)
         self.assertIn("process.env.NEXT_PUBLIC_FRONTEND_ONLY", deployment)
         self.assertIn('explicitMode === "true"', deployment)
@@ -511,26 +426,6 @@ class FrontendContractTests(unittest.TestCase):
         self.assertLess(guard, fetch)
         self.assertIn("throw new Error(FRONTEND_ONLY_NOTICE)", stream)
 
-        for phrase in [
-            "if (frontendOnly) return;",
-            "if (frontendOnly || !turn.input.trim()",
-            "disabled={frontendOnly}",
-            "disabled={frontendOnly || !capturedInput.trim()}",
-            'id="frontend-only-notice"',
-            'role="status"',
-            'aria-live="polite"',
-            "fetchDeepgramStatus",
-            "navigator.mediaDevices.getUserMedia",
-            "new WebSocket",
-            "enqueueLiveTurn",
-            "pollVisualJob",
-        ]:
-            with self.subTest(phrase=phrase):
-                self.assertIn(phrase, canvas)
-        self.assertGreaterEqual(canvas.count("FRONTEND_ONLY_NOTICE"), 3)
-        self.assertIn("<StatusBanner", canvas)
-        self.assertIn("loadLessonLibrary(window.localStorage)", canvas)
-        self.assertIn("saveLessonLibrary(window.localStorage, lessons)", canvas)
 
     def test_site_origin_and_frontend_only_docs_follow_the_public_contract(self) -> None:
         site_origin = (ROOT / "lib" / "site-origin.ts").read_text(
@@ -556,7 +451,7 @@ class FrontendContractTests(unittest.TestCase):
             self.assertIn(public_name, env_example)
 
         section = readme[readme.index("## Vercel frontend-only deployment") :]
-        section = section[: section.index("## Cost and context controls")]
+        section = section[: section.index("## Legacy service cost and context controls")]
         for phrase in [
             "npm run build:vercel",
             "NEXT_PUBLIC_FRONTEND_ONLY",
@@ -564,8 +459,8 @@ class FrontendContractTests(unittest.TestCase):
             "no Vercel system-variable exposure or dashboard setup is required",
             "missing, blank, or invalid",
             "literal `false`",
-            "marketing site, lesson",
-            "microphone transcription are disabled",
+            "Pitch slides, manual controls, and typed deterministic",
+            "microphone transcription is disabled",
         ]:
             self.assertIn(phrase, section)
         self.assertNotIn("NEXT_PUBLIC_VERCEL_ENV", section)
@@ -601,20 +496,14 @@ class FrontendContractTests(unittest.TestCase):
             path.read_text(encoding="utf-8")
             for path in (ROOT / "app" / "(marketing)").rglob("*.tsx")
         )
-        canvas_source = (ROOT / "app" / "canvas" / "page.tsx").read_text(
-            encoding="utf-8"
-        )
-
         self.assertNotIn('href="/canvas"', marketing_source)
+        self.assertNotIn('href="/pitch"', marketing_source)
         self.assertNotIn('from "@/components/workspace', marketing_pages)
         self.assertNotIn('from "@/components/workspace', marketing_source)
         self.assertNotIn('from "@/lib/generation-stream', marketing_source)
         self.assertNotIn('from "@/lib/lesson-library', marketing_source)
         self.assertNotIn('from "@/lib/live-session', marketing_source)
         self.assertNotIn('from "@/lib/deployment-mode', marketing_source)
-        self.assertNotIn('from "next/link"', canvas_source)
-        self.assertNotIn('href="/"', canvas_source)
-        self.assertIn('aria-label="Imagine educator workspace"', canvas_source)
 
     def test_public_content_matches_the_evidence_contract(self) -> None:
         marketing_source = self.marketing_source()
@@ -956,8 +845,11 @@ class FrontendContractTests(unittest.TestCase):
         self.assertNotIn("Visual" + " Director", source)
         self.assertIn("Live Assistant", source)
 
-    def test_canvas_is_not_indexed_or_in_the_public_sitemap(self) -> None:
+    def test_pitch_and_legacy_canvas_routes_are_not_indexed_or_in_the_public_sitemap(self) -> None:
         canvas_layout = (ROOT / "app" / "canvas" / "layout.tsx").read_text(
+            encoding="utf-8"
+        )
+        pitch_layout = (ROOT / "app" / "pitch" / "layout.tsx").read_text(
             encoding="utf-8"
         )
         robots = (ROOT / "app" / "robots.ts").read_text(encoding="utf-8")
@@ -968,10 +860,13 @@ class FrontendContractTests(unittest.TestCase):
 
         self.assertIn("index: false", canvas_layout)
         self.assertIn("follow: false", canvas_layout)
-        self.assertIn('disallow: "/canvas"', robots)
+        self.assertIn("index: false", pitch_layout)
+        self.assertIn("follow: false", pitch_layout)
+        self.assertIn('disallow: ["/canvas", "/pitch"]', robots)
         self.assertIn("getSiteOrigin()", robots)
         self.assertIn("`${origin}/sitemap.xml`", robots)
         self.assertNotIn('"/canvas"', sitemap)
+        self.assertNotIn('"/pitch"', sitemap)
         self.assertIn("getSiteOrigin()", sitemap)
         self.assertIn('"http://localhost:3000"', site_origin)
         self.assertIn('replace(/\\/+$/, "")', site_origin)
@@ -1038,15 +933,21 @@ class FrontendContractTests(unittest.TestCase):
             with self.subTest(obsolete=obsolete):
                 self.assertNotIn(obsolete, runtime_source)
 
-    def test_readme_documents_the_live_whiteboard_contract(self) -> None:
+    def test_readme_documents_pitch_mode_and_retained_legacy_services(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         for phrase in [
-            "one Live Assistant text call",
-            "CREATE or UPDATE",
+            "## Pitch Mode",
+            "`/pitch`",
+            "`/canvas`",
+            "semantic (`open`, `gtm`, `financials`",
+            "PitchModelAdapter",
+            "goto_slide(slide_id)",
+            "no_action",
+            "FunctionGemma",
+            "does not train, download, host, or configure FunctionGemma",
+            "## Legacy whiteboard services",
             "24-column by 14-row grid",
-            "typed `WhiteboardDecision`",
-            "schema-v2 lesson context records",
-            "Optional images",
+            "Optional raster assets",
         ]:
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, readme)

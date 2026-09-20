@@ -1,7 +1,7 @@
 # Imagine v1
 
-Real-time speech workspace that turns lesson-grounded teaching turns into a
-cumulative live visual whiteboard.
+Real-time pitch workspace that follows a spoken presentation and moves between
+native React slides when a completed utterance clearly changes topic.
 
 ## Public site
 
@@ -10,50 +10,80 @@ The public product narrative is available at `/`, `/product`, `/educators`,
 static, generated editorial diagrams that remain separate from live workspace
 state.
 
-The educator workspace remains directly addressable at `/canvas`. It is omitted
-from the public sitemap, disallowed in `robots.txt`, and marked
-`noindex, nofollow`. Its header branding is intentionally noninteractive so the
-public and teaching surfaces stay separate.
+Pitch Mode is available at `/pitch`. The retired `/canvas` address redirects to
+it for existing bookmarks. Both paths are omitted from the public sitemap,
+disallowed in `robots.txt`, and marked `noindex, nofollow`.
 
-## Architecture and live flow
+## Pitch Mode
 
 ```text
-Lesson context
-  -> save title, subject, and source locally before class
-  -> select the context and start a fresh board
-
-Live teaching turn
-  -> submit typed input, or say "Hey Imagine" before one Deepgram speech command
-  -> send lesson + recent turns + concepts + board digest
-  -> one Live Assistant text call returns CREATE or UPDATE
-  -> server assigns deterministic, non-overlapping board placement
-  -> trusted React renders the selected visual, notes, and/or diagram modes
-  -> diagram modes show a drawing loader while one raster-diagram job runs
-  -> visual-only modes schedule an image only when the concept needs one
+Deepgram microphone
+  -> completed utterance boundary
+  -> current slide + available semantic slide descriptions
+  -> PitchModelAdapter
+  -> validated goto_slide(slide_id) or no_action
+  -> guarded presentation controller
+  -> native React slide transition
 ```
 
-Deepgram continues transcribing while the microphone stays on, but ambient
-speech never reaches Gemini or changes the board. Say `Hey Imagine` followed by
-a command, or say the wake phrase alone and give one command within eight
-seconds. A split `hey` then `imagine <command>` also works. Each activation is
-consumed by one command. If generation is already active, up to two commands
-wait in FIFO order; later commands are folded into the newest waiting turn
-instead of growing the queue. Typed submission remains an independent manual
-command path and never includes interim speech.
+Pitch Mode ports the supplied 18-slide Imagineer deck into React. Slide IDs are
+semantic (`open`, `gtm`, `financials`, and so on), so presentation state and
+model decisions never depend on slide numbers. Previous/next controls, the
+semantic slide picker, progress, replay, fullscreen, microphone control, and
+automatic-navigation pause/resume remain available while presenting. A
+collapsible transcript panel accepts typed test utterances without a microphone
+or backend.
 
-The buffered `POST /api/generate` and NDJSON `POST /api/generate/stream`
-endpoints return the same atomic whiteboard decision. The stream emits `result`
-and `done`; it does not stream model-authored notes or markup. Optional images
-are separate jobs queried through `GET /api/visual/{job_id}`.
+Deepgram `EndOfTurn` / `TurnInfo` boundaries are evaluated first. Finalized
+`Results` segments remain a compatibility path and are combined only at a final
+speech boundary. Interim transcripts update the panel but never select a slide.
+The session ignores stale sockets, duplicate provider boundaries, empty
+utterances, and evaluations invalidated by a newer utterance or manual move.
 
-## Educator workspace
+The default adapter is deterministic and matches distinctive deck phrases and
+keywords. It returns a move only for one clear, uniquely highest-scoring topic;
+weak, ambiguous, and current-slide matches return `no_action`. The controller
+accepts only registered semantic IDs and ignores redundant or stale decisions.
+It cancels automatic evaluation when it is paused, stopped, or superseded.
 
-`/canvas` is a local-first teaching dashboard with three views:
+`PitchModelAdapter` is the seam for future inference. Its serializable input is
+the latest utterance, current `SlideDescriptor`, and available slide
+descriptors; its only results are `goto_slide(slide_id)` or `no_action`. A
+locally hosted fine-tuned FunctionGemma endpoint can implement that interface
+without changing the deck, controller, or microphone transport. This repository
+does not train, download, host, or configure FunctionGemma.
 
-- **Lesson context** saves the lesson title, optional subject, and source text.
-- **Library** keeps schema-v2 lesson context records in browser `localStorage`.
-- **Live Canvas** is a full-screen teacher whiteboard with compact lesson,
-  page, prompt, and microphone controls.
+To connect a future local model, implement `PitchModelAdapter` from
+`lib/pitch/types.ts` and inject it as `<PitchWorkspace adapter={adapter} />` in a
+client component. `evaluate(input, { signal })` must return
+`{ action: "goto_slide", slide_id: "semantic-id" }` or
+`{ action: "no_action" }`. Forward the abort signal to the request. A future
+FastAPI proxy can connect to the local FunctionGemma service after its serving
+protocol is chosen; no endpoint or inference protocol is assumed here. Runtime
+validation, the five-second timeout, and stale-result protection remain in the
+controller regardless of adapter implementation.
+
+The slide composition is React-owned. The source deck's local SVG drawing
+routines fill scoped artwork placeholders, with timers and animation frames
+cancelled on exit. Re-entering a slide or pressing Replay resets its local
+controls; redundant model decisions do not. Reduced motion completes entrance
+artwork immediately and disables decorative loops. Left/right arrows navigate;
+Home/End jump to the first/last semantic slide, R replays, and F toggles fullscreen.
+These shortcuts ignore editable fields and interactive controls.
+
+Pitch state persists only the deck ID/version and valid current slide in a new
+Pitch-specific browser-storage key. It does not restore transcripts or restart
+the microphone. The deck uses its supplied font fallback stack; no local Poppins
+font file is included, so exact Poppins rendering requires a separately supplied
+local font.
+
+## Legacy whiteboard services
+
+The prior lesson-context, whiteboard, and generation modules remain in the
+repository to preserve their existing storage and backend API contracts. Pitch
+Mode does not call the legacy `POST /api/generate`, streaming generation, or
+visual-job endpoints. The following details describe those retained services,
+not the current `/canvas` user interface.
 
 The board is cumulative within the live session. A CREATE adds a scene, while an
 UPDATE replaces and may safely resize or relocate the same scene without moving
@@ -181,15 +211,15 @@ The Vercel wrapper defaults missing, blank, or invalid
 `NEXT_PUBLIC_FRONTEND_ONLY` values to `true`. A literal `false` remains an
 explicit override for a future deployment with a reachable backend. Local
 development stays backend-enabled by default. In frontend-only mode the
-marketing site, lesson library, and local whiteboards remain available, but
-generation, visual polling, and microphone transcription are disabled before
+marketing site, Pitch slides, manual controls, and typed deterministic
+evaluations remain available, while microphone transcription is disabled before
 any backend request. Do not configure backend API keys for this frontend-only
 deployment.
 
 The canonical site origin uses `NEXT_PUBLIC_SITE_URL` first, then Vercel's HTTPS
 production project URL, and finally `http://localhost:3000`.
 
-## Cost and context controls
+## Legacy service cost and context controls
 
 - Every processed live turn makes one Live Assistant text call. Contextual
   decisions are not cached. A transient failure can add up to two primary
@@ -216,7 +246,7 @@ production project URL, and finally `http://localhost:3000`.
   remains at 480 requests per minute, and no more than two image jobs run
   concurrently.
 
-## Security boundary
+## Security boundary for retained backend services
 
 `DEEPGRAM_API_KEY` and `PROD_GEMINI_API_KEY` are read only by FastAPI. They must
 never use a `NEXT_PUBLIC_` prefix. The production Gemini key is used for both
