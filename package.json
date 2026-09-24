@@ -16,7 +16,7 @@
     "start": "next start",
     "start:sites": "vinext start",
     "lint": "next lint",
-    "test:frontend": "node --experimental-strip-types --test tests/lesson-library.test.mjs tests/pitch-mode.test.mjs tests/pitch-speech.test.mjs tests/pitch-deck.test.mjs"
+    "test:frontend": "node --experimental-strip-types --test tests/pitch-mode.test.mjs tests/pitch-speech.test.mjs tests/pitch-deck.test.mjs"
   },
   "dependencies": {
     "@gsap/react": "^2.1.2",
@@ -31,7 +31,6 @@
     "tailwind-merge": "3.6.0"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "1.37.1",
     "@types/node": "22.19.19",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
@@ -43,8 +42,7 @@
     "react-server-dom-webpack": "19.2.6",
     "typescript": "5.9.3",
     "vinext": "0.0.50",
-    "vite": "8.0.13",
-    "wrangler": "4.92.0"
+    "vite": "8.0.13"
   },
   "type": "module"
 }

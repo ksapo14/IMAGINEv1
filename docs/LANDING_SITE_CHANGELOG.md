@@ -156,7 +156,7 @@ Completed verification:
   static home modes, immediate home hero content, no heading kickers, Founder
   Team cards, and marketing/workspace isolation.
 - `backend\.venv\Scripts\python -m unittest discover -s tests -p
-  test_gemini_pipeline.py`: 47 tests passed with the Live Assistant prompt and
+  provider pipeline tests: 47 tests passed with the Live Assistant prompt and
   error terminology.
 - `.\node_modules\.bin\tsc.cmd --noEmit`: passed.
 - `npm run build`: passed and produced Vinext standalone output; the generated

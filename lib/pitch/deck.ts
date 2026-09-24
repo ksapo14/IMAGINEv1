@@ -4,10 +4,7 @@ export const PITCH_DECK_ID = "imagineer-pitch-carl";
 export const PITCH_DECK_VERSION = 1;
 export const PITCH_START_SLIDE_ID = "open";
 
-/**
- * The deck's model-facing copy lives beside its matching hints, while slide
- * renderers remain independent in the presentation component layer.
- */
+/** Semantic slide descriptions and conservative routing cues share one source. */
 export const PITCH_SLIDES: readonly PitchSlideDefinition[] = [
   { id: "open", title: "Imagineer", description: "Imagineer introduction and founders Vivaan Grover, Jackson Bizzell, and Krish Sapovadia.", matching: { phrases: ["welcome to imagineer", "introduce imagineer"], keywords: ["imagineer", "founders"] } },
   { id: "anecdote", title: "The story", description: "AP Biology experience with the hard-to-picture electron transport chain.", matching: { phrases: ["electron transport chain", "ap biology classroom"], keywords: ["biology", "electron", "transport"] } },
@@ -29,11 +26,12 @@ export const PITCH_SLIDES: readonly PitchSlideDefinition[] = [
   { id: "ask", title: "The ask", description: "Request for advice, next-step feedback, and venture introductions.", matching: { phrases: ["venture introductions", "ask for advice"], keywords: ["advice", "feedback", "introductions"] } }
 ];
 
-export const PITCH_DECK: readonly SlideDescriptor[] = PITCH_SLIDES.map(({ id, title, description }) => ({
-  id,
-  title,
-  description
-}));
+export const PITCH_DECK: readonly SlideDescriptor[] = PITCH_SLIDES.map(({ id, title, description }) => ({ id, title, description }));
+
+/** Read-only cue lookup used by the conservative FunctionGemma quality guard. */
+export const PITCH_SLIDE_MATCHING_CUES = Object.fromEntries(
+  PITCH_SLIDES.map((slide) => [slide.id, slide.matching])
+);
 
 function isValidId(value: string) {
   return /^[a-z0-9][a-z0-9_-]*$/.test(value);

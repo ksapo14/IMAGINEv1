@@ -1,6 +1,6 @@
 /** Shared copy for every frontend-only guard and accessible notice. */
 export const FRONTEND_ONLY_NOTICE =
-  "This deployment is frontend-only. Live generation and microphone features are unavailable.";
+  "This deployment is frontend-only. Only manual slide navigation remains available.";
 
 /**
  * Keep local and backend-enabled deployments unchanged unless the public policy

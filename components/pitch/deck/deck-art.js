@@ -994,7 +994,7 @@ SLIDES.product = {
     const cols = $('#moat-cols', sec); cols.innerHTML = '';
     [['One agent decides, one agent makes', 'The instruction agent picks the moment and the form'],
      ['Three ways to answer', 'Text and images today, live diagrams next'],
-     ['Running on Gemini', 'Which is why cost per class hour is knowable']
+     ['Running on FunctionGemma', 'Which is why cost per class hour is knowable']
     ].forEach(([h, p]) => {
       const d = document.createElement('div');
       d.style.cssText = 'flex:1';

@@ -14,9 +14,6 @@ RUN groupadd --system imagine \
   && useradd --system --gid imagine --home-dir /app imagine
 
 COPY --chown=imagine:imagine backend ./backend
-RUN mkdir -p /app/.cache/visuals \
-  && chown -R imagine:imagine /app/.cache
-
 USER imagine
 
 EXPOSE 8010

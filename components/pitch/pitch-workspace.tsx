@@ -102,11 +102,12 @@ export function PitchWorkspace({ adapter }: { adapter?: PitchModelAdapter }) {
   }, []);
   const submitSimulation = useCallback((event: FormEvent) => {
     event.preventDefault();
+    if (frontendOnly) { setNotice(FRONTEND_ONLY_NOTICE); return; }
     const utterance = typedUtterance.trim();
     if (!utterance) return;
     setTypedUtterance("");
     void controller.evaluateUtterance(utterance, "simulation");
-  }, [controller, typedUtterance]);
+  }, [controller, frontendOnly, typedUtterance]);
   const navigate = useCallback((slideId: string | undefined) => {
     if (slideId) controller.goToSlide(slideId);
   }, [controller]);
@@ -125,8 +126,8 @@ export function PitchWorkspace({ adapter }: { adapter?: PitchModelAdapter }) {
       <button type="button" onClick={() => controller.setAutomaticNavigation(!state.automaticNavigation)} aria-pressed={state.automaticNavigation}>Auto: {state.automaticNavigation ? "on" : "paused"}</button>
       <button type="button" onClick={() => setPanelOpen((open) => !open)} aria-expanded={panelOpen} aria-controls="pitch-transcript">Transcript & test</button>
     </section>
-    {panelOpen && <aside id="pitch-transcript" className={styles.panel} aria-label="Transcript and slide evaluation"><p><strong>Latest transcript:</strong> {state.latestTranscript || "No speech received yet."}</p><p><strong>Outcome:</strong> {state.lastOutcome.message || "No model evaluation yet."}</p><form onSubmit={submitSimulation}><label htmlFor="pitch-utterance">Test utterance (works offline)</label><textarea id="pitch-utterance" maxLength={4000} value={typedUtterance} onChange={(event) => setTypedUtterance(event.target.value)} placeholder="Try: Here is our three-year financial projection." /><button type="submit" disabled={!typedUtterance.trim()}>Evaluate</button></form></aside>}
-    {frontendOnly && <p id="pitch-deployment-notice" className={styles.notice}>{FRONTEND_ONLY_NOTICE} Manual slides and test utterances remain available.</p>}
+    {panelOpen && <aside id="pitch-transcript" className={styles.panel} aria-label="Transcript and slide evaluation"><p><strong>Latest transcript:</strong> {state.latestTranscript || "No speech received yet."}</p><p><strong>Outcome:</strong> {state.lastOutcome.message || "No model evaluation yet."}</p>{frontendOnly ? <p>Slide evaluation requires a backend connection.</p> : <form onSubmit={submitSimulation}><label htmlFor="pitch-utterance">Test utterance</label><textarea id="pitch-utterance" maxLength={4000} value={typedUtterance} onChange={(event) => setTypedUtterance(event.target.value)} placeholder="Try: Here is our three-year financial projection." /><button type="submit" disabled={!typedUtterance.trim()}>Evaluate</button></form>}</aside>}
+    {frontendOnly && <p id="pitch-deployment-notice" className={styles.notice}>{FRONTEND_ONLY_NOTICE}</p>}
     {notice && <p className={styles.notice} role="status">{notice}</p>}
   </main>;
 }

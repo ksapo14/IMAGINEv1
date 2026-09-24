@@ -26,8 +26,7 @@ and the Orchestrator decides when the task is complete.
 - `app/`: Next.js App Router routes and layouts.
 - `components/`: React UI, marketing, canvas, and diagram components.
 - `lib/`: shared TypeScript utilities.
-- `worker/`: Cloudflare/Vinext worker entry point.
-- `backend/`: FastAPI application and Gemini pipeline services.
+- `backend/`: FastAPI application, FunctionGemma adapter, and transcription services.
 - `tests/`: Python unit and repository-contract tests.
 - `public/`: static and brand assets.
 - `scripts/`: existing development, asset, and build helpers.
@@ -52,7 +51,7 @@ owns server startup. Do not perform networking or dependency installation.
 
 `npm run lint` is a configured project command, but agents must report its actual
 result instead of assuming the installed Next.js version supports it. Tests mock
-Gemini and must remain network-free. Never expose `.env` values or API keys.
+external model requests and must remain network-free. Never expose `.env` values or API keys.
 
 Use local conventions: TypeScript variables/functions in `camelCase`, components
 and types in `PascalCase`, route/static filenames in `kebab-case`, Python with

@@ -19,11 +19,7 @@ export type PitchDecision =
   | { action: "goto_slide"; slide_id: SlideId }
   | { action: "no_action" };
 
-/** Future local FunctionGemma clients implement this interface without changing the UI. */
-export interface PitchModelAdapter {
-  evaluate(input: PitchModelInput, options: { signal: AbortSignal }): Promise<PitchDecision>;
-}
-
+/** Deck-owned evidence for conservative automatic navigation. */
 export type PitchMatchingCues = {
   phrases: readonly string[];
   keywords: readonly string[];
@@ -32,3 +28,8 @@ export type PitchMatchingCues = {
 export type PitchSlideDefinition = SlideDescriptor & {
   matching: PitchMatchingCues;
 };
+
+/** FunctionGemma and test adapters implement this interface without changing the UI. */
+export interface PitchModelAdapter {
+  evaluate(input: PitchModelInput, options: { signal: AbortSignal }): Promise<PitchDecision>;
+}

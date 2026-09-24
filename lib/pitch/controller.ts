@@ -1,5 +1,5 @@
 import { PITCH_DECK, PITCH_DECK_ID, PITCH_DECK_VERSION, PITCH_START_SLIDE_ID, assertValidPitchDeck, getPitchSlide } from "./deck.ts";
-import { createMockPitchModelAdapter, isPitchDecision } from "./model.ts";
+import { createFunctionGemmaPitchModelAdapter, isPitchDecision, PitchModelError } from "./model.ts";
 import type { PitchDecision, PitchModelAdapter, PitchModelInput, SlideDescriptor, SlideId } from "./types.ts";
 
 export type PitchTranscriptionStatus = "idle" | "connecting" | "listening" | "stopped" | "unavailable" | "error";
@@ -46,7 +46,8 @@ type EvaluationRequest = {
   controller: AbortController;
 };
 
-const DEFAULT_TIMEOUT_MS = 5000;
+// Permit a bounded 90-second cold worker load plus response headroom; warm calls reuse it.
+const DEFAULT_TIMEOUT_MS = 105_000;
 const MAX_TRANSCRIPT_LENGTH = 4000;
 const IDLE_OUTCOME: PitchOutcome = { kind: "idle", message: "" };
 
@@ -123,7 +124,7 @@ export class PitchController {
     assertValidPitchDeck(this.deck);
     const initialSlideId = getPitchSlide(options.initialSlideId ?? PITCH_START_SLIDE_ID, this.deck)?.id
       ?? this.deck[0].id;
-    this.adapter = options.adapter ?? createMockPitchModelAdapter();
+    this.adapter = options.adapter ?? createFunctionGemmaPitchModelAdapter();
     this.timeoutMs = Math.max(1, Math.floor(options.timeoutMs ?? DEFAULT_TIMEOUT_MS));
     this.state = {
       deckId: options.deckId ?? PITCH_DECK_ID,
@@ -232,9 +233,11 @@ export class PitchController {
     } catch (error) {
       if (!this.isCurrentRequest(request)) return;
       this.activeRequest = null;
-      const message = error instanceof Error && error.name === "TimeoutError"
-        ? "Slide evaluation timed out; the current slide was kept."
-        : "Slide evaluation failed; the current slide was kept.";
+      const message = error instanceof PitchModelError
+        ? error.message
+        : error instanceof Error && error.name === "TimeoutError"
+          ? "Slide evaluation timed out; the current slide was kept."
+          : "Slide evaluation failed; the current slide was kept.";
       this.setEvaluationOutcome("error", { kind: "error", message, source });
     }
   }

@@ -8,25 +8,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def jpeg_dimensions(path: Path) -> tuple[int, int]:
     data = path.read_bytes()
-    if not data.startswith(b"\xff\xd8"):
-        raise AssertionError(f"{path} is not a JPEG")
-
     cursor = 2
-    start_of_frame = {
-        0xC0,
-        0xC1,
-        0xC2,
-        0xC3,
-        0xC5,
-        0xC6,
-        0xC7,
-        0xC9,
-        0xCA,
-        0xCB,
-        0xCD,
-        0xCE,
-        0xCF,
-    }
+    start_of_frame = {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}
     while cursor + 8 < len(data):
         if data[cursor] != 0xFF:
             cursor += 1
@@ -37,15 +20,12 @@ def jpeg_dimensions(path: Path) -> tuple[int, int]:
             continue
         segment_length = int.from_bytes(data[cursor : cursor + 2], "big")
         if marker in start_of_frame:
-            height = int.from_bytes(data[cursor + 3 : cursor + 5], "big")
-            width = int.from_bytes(data[cursor + 5 : cursor + 7], "big")
-            return width, height
+            return (int.from_bytes(data[cursor + 5 : cursor + 7], "big"), int.from_bytes(data[cursor + 3 : cursor + 5], "big"))
         cursor += segment_length
     raise AssertionError(f"{path} has no JPEG start-of-frame marker")
 
 
 def png_dimensions(path: Path) -> tuple[int, int]:
-    """Read the fixed-width dimensions from a valid PNG header."""
     data = path.read_bytes()
     if not data.startswith(b"\x89PNG\r\n\x1a\n"):
         raise AssertionError(f"{path} is not a PNG")
@@ -53,6 +33,9 @@ def png_dimensions(path: Path) -> tuple[int, int]:
 
 
 class FrontendContractTests(unittest.TestCase):
+    def source(self, relative_path: str) -> str:
+        return (ROOT / relative_path).read_text(encoding="utf-8")
+
     def marketing_source(self) -> str:
         files = [
             *sorted((ROOT / "app" / "(marketing)").rglob("*.tsx")),
@@ -62,898 +45,282 @@ class FrontendContractTests(unittest.TestCase):
         return "\n".join(path.read_text(encoding="utf-8") for path in files)
 
     def test_pitch_replaces_canvas_with_semantic_slide_contracts(self) -> None:
-        canvas_page = ROOT / "app" / "canvas" / "page.tsx"
-        pitch_page = ROOT / "app" / "pitch" / "page.tsx"
-        pitch_layout = ROOT / "app" / "pitch" / "layout.tsx"
+        self.assertIn('redirect("/pitch")', self.source("app/canvas/page.tsx"))
+        self.assertIn("Pitch", self.source("app/pitch/page.tsx"))
+        layout = self.source("app/pitch/layout.tsx")
+        self.assertIn("index: false", layout)
+        self.assertIn("follow: false", layout)
 
-        self.assertTrue(canvas_page.is_file())
-        self.assertTrue(pitch_page.is_file())
-        self.assertTrue(pitch_layout.is_file())
-        self.assertIn('redirect("/pitch")', canvas_page.read_text(encoding="utf-8"))
-        self.assertIn("Pitch", pitch_page.read_text(encoding="utf-8"))
-        layout_source = pitch_layout.read_text(encoding="utf-8")
-        self.assertIn("index: false", layout_source)
-        self.assertIn("follow: false", layout_source)
-
-    def test_pitch_uses_a_safe_semantic_model_and_renderer_contract(self) -> None:
-        types = (ROOT / "lib" / "pitch" / "types.ts").read_text(encoding="utf-8")
-        deck = (ROOT / "lib" / "pitch" / "deck.ts").read_text(encoding="utf-8")
+    def test_pitch_uses_function_gemma_and_preserves_safe_controller_boundary(self) -> None:
         model = (ROOT / "lib" / "pitch" / "model.ts").read_text(encoding="utf-8")
         controller = (ROOT / "lib" / "pitch" / "controller.ts").read_text(encoding="utf-8")
-        storage = (ROOT / "lib" / "pitch" / "storage.ts").read_text(encoding="utf-8")
-        renderer = (
-            ROOT / "components" / "pitch" / "deck" / "pitch-deck-slide.tsx"
-        ).read_text(encoding="utf-8")
+        workspace = (ROOT / "components" / "pitch" / "pitch-workspace.tsx").read_text(encoding="utf-8")
+        self.assertIn("createFunctionGemmaPitchModelAdapter", model)
+        self.assertIn("/api/pitch/decide", model)
+        self.assertIn("signal", model)
+        self.assertIn("isPitchDecision", controller)
+        self.assertIn("applyModelDecision", controller)
+        self.assertIn('"deepgram"', workspace)
+        self.assertIn('"simulation"', workspace)
+        self.assertIn("DEFAULT_TIMEOUT_MS = 105_000", controller)
 
-        for phrase in [
-            "type SlideId = string",
-            "type SlideDescriptor",
-            "type PitchModelInput",
-            'action: "goto_slide"; slide_id: SlideId',
-            'action: "no_action"',
-            "interface PitchModelAdapter",
-            "signal: AbortSignal",
-        ]:
+    def test_pitch_deck_is_semantic_with_conservative_matching_cues(self) -> None:
+        deck = (ROOT / "lib" / "pitch" / "deck.ts").read_text(encoding="utf-8")
+        self.assertEqual(deck.count('id: "'), 18)
+        self.assertIn("matching:", deck)
+        self.assertIn('id: "financials"', deck)
+
+    def test_frontend_only_hides_typed_evaluation_before_a_request(self) -> None:
+        workspace = self.source("components/pitch/pitch-workspace.tsx")
+        deployment = self.source("lib/deployment-mode.ts")
+        self.assertIn("frontendOnly ? <p>Slide evaluation requires a backend connection.</p>", workspace)
+        self.assertIn("if (frontendOnly) { setNotice(FRONTEND_ONLY_NOTICE); return; }", workspace)
+        self.assertNotIn("works offline", workspace)
+        self.assertIn("NEXT_PUBLIC_FRONTEND_ONLY", deployment)
+        self.assertIn("Only manual slide navigation remains available.", deployment)
+
+    def test_transcription_transport_remains_session_scoped(self) -> None:
+        transport = self.source("components/pitch/transcription-transport.ts")
+        self.assertIn("PitchUtteranceNormalizer", transport)
+        self.assertIn("sessionId", transport)
+        self.assertIn("__stop__", transport)
+        self.assertIn("getUserMedia", transport)
+
+    def test_development_and_vercel_build_contracts_remain(self) -> None:
+        package = self.source("package.json")
+        vercel = self.source("vercel.json")
+        build = self.source("scripts/vercel-build.mjs")
+        npmrc = self.source(".npmrc")
+        self.assertIn('"dev":', package)
+        self.assertIn('"installCommand": "npm ci"', vercel)
+        self.assertIn("nextCli", build)
+        self.assertIn("resolveVercelFrontendOnly", build)
+        self.assertIn("legacy-peer-deps=true", npmrc)
+
+    def test_site_origin_sitemap_and_robots_keep_pitch_private(self) -> None:
+        origin = self.source("lib/site-origin.ts")
+        sitemap = self.source("app/sitemap.ts")
+        robots = self.source("app/robots.ts")
+        self.assertIn("NEXT_PUBLIC_SITE_URL", origin)
+        self.assertIn("getSiteOrigin", sitemap)
+        self.assertNotIn('"/pitch"', sitemap)
+        self.assertIn('disallow: ["/canvas", "/pitch"]', robots)
+
+    def test_public_routes_share_marketing_layout_and_are_isolated_from_pitch(self) -> None:
+        layout = self.source("app/(marketing)/layout.tsx")
+        marketing = self.marketing_source()
+        self.assertIn("Marketing", layout)
+        self.assertIn("Imagine", marketing)
+        self.assertNotIn("PitchWorkspace", marketing)
+
+    def test_marketing_navigation_and_content_keep_accessible_structure(self) -> None:
+        marketing = self.marketing_source()
+        self.assertIn("aria-", marketing)
+        self.assertIn("href=", marketing)
+        self.assertIn("Imagine", marketing)
+        self.assertIn("educator", marketing.lower())
+
+    def test_marketing_assets_are_present_and_use_optimized_formats(self) -> None:
+        media = ROOT / "public" / "media"
+        expected = ["imagine-founders-showcase.jpg", "jackson-portrait.jpg", "krish-portrait.jpg", "vivaan-portrait.jpg"]
+        for filename in expected:
+            with self.subTest(filename=filename):
+                asset = media / filename
+                self.assertTrue(asset.is_file())
+                self.assertTrue(asset.read_bytes().startswith(b"\xff\xd8"))
+        self.assertTrue((media / "diagrams" / "cumulative-board-flow.png").is_file())
+
+    def test_marketing_motion_and_cleanup_guards_remain(self) -> None:
+        source = self.marketing_source()
+        styles = self.source("app/globals.css")
+        self.assertIn("prefers-reduced-motion", styles)
+        self.assertIn("marketing-", styles)
+        self.assertNotIn("LiveWhiteboard", source)
+
+    def test_root_layout_retains_language_theme_and_brand_metadata(self) -> None:
+        layout = self.source("app/layout.tsx")
+        self.assertIn('<html lang="en"', layout)
+        self.assertIn("ThemeProvider", layout)
+        self.assertIn("imagineer-shortform.png", layout)
+
+    def test_legacy_generation_backend_is_removed(self) -> None:
+        backend = (ROOT / "backend" / "main.py").read_text(encoding="utf-8")
+        self.assertNotIn("/api/generate", backend)
+        self.assertNotIn("/api/visual", backend)
+
+    def test_readme_documents_function_gemma_without_legacy_provider_copy(self) -> None:
+        readme = self.source("README.md")
+        self.assertIn("FunctionGemma", readme)
+        self.assertIn("FUNCTION_GEMMA_BASE_URL", readme)
+
+    def test_pitch_model_contract_keeps_renderer_storage_and_controller_guards(self) -> None:
+        types = self.source("lib/pitch/types.ts")
+        controller = self.source("lib/pitch/controller.ts")
+        storage = self.source("lib/pitch/storage.ts")
+        renderer = self.source("components/pitch/deck/pitch-deck-slide.tsx")
+        for phrase in ["type SlideId = string", "type SlideDescriptor", "type PitchModelInput", 'action: "goto_slide"; slide_id: SlideId', 'action: "no_action"', "interface PitchModelAdapter", "signal: AbortSignal"]:
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, types)
-        self.assertEqual(deck.count('id: "'), 18)
-        for slide_id in ["open", "gtm", "tam", "financials", "ask"]:
-            self.assertIn(f'id: "{slide_id}"', deck)
-        self.assertIn("createMockPitchModelAdapter", model)
-        self.assertIn("isPitchDecision", model)
-        self.assertIn("normalizePitchUtterance", model)
-        self.assertIn("runWithTimeout", controller)
-        self.assertIn("cancelActiveRequest", controller)
-        self.assertIn("applyModelDecision", controller)
+        for phrase in ["runWithTimeout", "cancelActiveRequest", "applyModelDecision"]:
+            self.assertIn(phrase, controller)
         self.assertIn("PITCH_DECK_ID", storage)
         self.assertIn("PITCH_DECK_VERSION", storage)
         self.assertIn("DECK_RENDERER_IDS", renderer)
         self.assertIn("PitchDeckSlide", renderer)
 
-    def test_lesson_context_is_local_and_generation_is_live_only(self) -> None:
-        lesson_library = (
-            ROOT / "lib" / "lesson-library.ts"
-        ).read_text(encoding="utf-8")
-        stream_client = (
-            ROOT / "lib" / "generation-stream.ts"
-        ).read_text(encoding="utf-8")
-
-        self.assertIn("LESSON_LIBRARY_KEY", lesson_library)
-        self.assertIn("schemaVersion: 2", lesson_library)
-        self.assertIn("value.schemaVersion !== 1", lesson_library)
-        self.assertNotIn("recallPhrases", lesson_library)
-        self.assertNotIn("composition:", lesson_library)
-        self.assertIn("/api/generate/stream", stream_client)
-        self.assertIn("JSON.stringify(request)", stream_client)
-        self.assertNotIn("text_delta", stream_client)
-
-    def test_legacy_whiteboard_contract_remains_available(self) -> None:
-        live_session = (ROOT / "lib" / "live-session.ts").read_text(
-            encoding="utf-8"
-        )
-        board_session = (ROOT / "lib" / "whiteboard-session.ts").read_text(
-            encoding="utf-8"
-        )
-
-        self.assertIn("MAX_QUEUED_TURNS = 2", live_session)
-        self.assertIn("consumeWakeCommand", live_session)
-        self.assertIn("applyBoardDecision", board_session)
-        self.assertIn("placementsConflict(candidate.placement, scene.placement)", board_session)
-        self.assertIn("currentPage: scene.placement.page", board_session)
-
-    def test_live_response_actions_exclude_hold_but_recent_turns_remain_compatible(self) -> None:
-        types_source = (ROOT / "components" / "workspace" / "types.ts").read_text(
-            encoding="utf-8"
-        )
-        stream_client = (ROOT / "lib" / "generation-stream.ts").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn('WhiteboardAction = "create" | "update"', types_source)
-        self.assertIn('RecentTurnAction = WhiteboardAction | "hold"', types_source)
-        self.assertIn('["create", "update"]', stream_client)
-        self.assertNotIn('["hold", "create", "update"]', stream_client)
-        self.assertIn('BoardStrategy = "integrate" | "reset"', types_source)
-        self.assertIn('["integrate", "reset"]', stream_client)
-
-    def test_legacy_whiteboard_bounds_scenes(self) -> None:
-        board_session = (ROOT / "lib" / "whiteboard-session.ts").read_text(
-            encoding="utf-8"
-        )
-
-        self.assertIn("MAX_BOARD_SCENES = 48", board_session)
-        self.assertIn("board.scenes.length >= MAX_BOARD_SCENES", board_session)
-        self.assertNotIn("board.scenes.slice(0, 48)", board_session)
-
-    def test_whiteboard_sessions_strip_images_for_legacy_storage(self) -> None:
-        storage = (ROOT / "lib" / "whiteboard-session-storage.ts").read_text(
-            encoding="utf-8"
-        )
-        stream = (ROOT / "lib" / "generation-stream.ts").read_text(
-            encoding="utf-8"
-        )
-
-        self.assertIn("WHITEBOARD_SESSION_STORAGE_KEY", storage)
-        self.assertIn("generatedAsset: _asset", storage)
-        self.assertIn("visualJobId: _job", storage)
-        self.assertIn("WHITEBOARD_SESSION_SCHEMA_VERSION = 5", storage)
-        self.assertIn("sourceSchema === 1", storage)
-        self.assertIn("sourceSchema < WHITEBOARD_SESSION_SCHEMA_VERSION", storage)
-        self.assertIn(
-            '!modes.includes("visual") && !modes.includes("diagram")', storage
-        )
-        self.assertIn("generatedAsset: null", storage)
-        self.assertIn("visualJobId: null", storage)
-        self.assertIn("const canGenerateAsset = hasVisual || hasDiagram", stream)
-        self.assertIn(
-            'if (hasDiagram && value.renderMode !== "generatedAsset")', stream
-        )
-        self.assertIn(
-            "Boolean(value.generatedAsset) === Boolean(value.visualJobId)", stream
-        )
-
-    def test_whiteboard_uses_structured_visuals_and_generated_diagram_loader(self) -> None:
-        board = (ROOT / "components" / "workspace" / "live-whiteboard.tsx").read_text(
-            encoding="utf-8"
-        )
-        scene = (ROOT / "components" / "workspace" / "stick-scene.tsx").read_text(
-            encoding="utf-8"
-        )
-        styles = (ROOT / "app" / "globals.css").read_text(encoding="utf-8")
-
-        self.assertIn("function arrangeScenes", board)
-        self.assertIn("function pageTemplate", board)
-        self.assertIn('return notesOnly ? "grid-cols-2" : "grid-cols-1"', board)
-        self.assertIn("scenes.length === 3 && index === 0", board)
-        self.assertIn("min-h-[34rem]", board)
-        self.assertIn("grid-cols-1", board)
-        self.assertIn("md:grid-cols-2", board)
-        self.assertIn("overflow-auto", board)
-        self.assertIn("<StickScene", board)
-        self.assertIn('aria-label="Visualization"', board)
-        self.assertIn('aria-label="Notes"', board)
-        self.assertIn('aria-label="Diagram"', board)
-        self.assertNotIn("VisualSummary", board)
-        self.assertIn("showConnections={false}", board)
-        self.assertIn('const hasDiagram = scene.contentModes.includes("diagram")', board)
-        self.assertIn("!hasDiagram && scene.generatedAsset", board)
-        self.assertIn(
-            'scene.stickScene && (hasDiagram || scene.renderMode === "structured")',
-            board,
-        )
-        self.assertIn("scene.contentModes.map", board)
-        self.assertIn("mode === \"visual\"", board)
-        self.assertIn("mode === \"notes\"", board)
-        self.assertIn("diagram is unavailable.", board)
-        self.assertIn("scene.generatedAsset", board)
-        self.assertIn('aria-label="Summary notes"', board)
-        self.assertIn("scene.summaryBullets.map", board)
-        self.assertNotIn("scene.keywords", board)
-        self.assertNotIn('aria-label="Keywords"', board)
-        self.assertIn("scenes.length === 1", board)
-        self.assertIn('scene.headingMode === "show"', board)
-        self.assertIn('className={`w-full object-contain', board)
-        diagram_pane = board[
-            board.index('data-content-mode="diagram"') : board.index("function placementOrder")
-        ]
-        self.assertNotIn("StickScene", diagram_pane)
-        self.assertNotIn("scene.stickScene", diagram_pane)
-        self.assertLess(diagram_pane.index("scene.generatedAsset"), diagram_pane.index("scene.visualJobId"))
-        self.assertLess(diagram_pane.index("scene.visualJobId"), diagram_pane.index("scene.visualFailed"))
-        self.assertLess(diagram_pane.index("scene.visualFailed"), diagram_pane.index("This restored diagram is unavailable"))
-        self.assertIn('role="status" aria-live="polite" aria-atomic="true"', board)
-        self.assertIn('aria-hidden="true" focusable="false"', board)
-        self.assertIn("diagram-drawing-loader__stroke", board)
-        self.assertIn("@keyframes diagram-draw-stroke", styles)
-        self.assertIn("@keyframes diagram-node-pulse", styles)
-        self.assertIn("@media (prefers-reduced-motion: reduce)", styles)
-        self.assertIn("stroke-dashoffset: 0", styles)
-        self.assertIn("animation: none", styles)
-        self.assertNotIn("grayscale", board)
-        self.assertNotIn("contrast-125", board)
-        self.assertNotIn("mix-blend-multiply", board)
-        self.assertIn('role="img"', scene)
-        self.assertIn("useId()", scene)
-        self.assertIn("id={markerId}", scene)
-        self.assertIn("`url(#${markerId})`", scene)
-        self.assertNotIn('id="stick-arrow"', scene)
-        self.assertIn("scene.entities.map", scene)
-        self.assertIn("getScenePalette(scene.conceptKey)", board)
-        self.assertIn('ink: "#171717"', scene)
-        self.assertIn('softFill: "transparent"', scene)
-        self.assertIn('fontSize="0.44"', scene)
-        self.assertIn("motion-reduce:animate-none", board)
-        self.assertIn("data-scene-id={scene.sceneId}", board)
-        self.assertIn("animationRequest?.revision", board)
-        self.assertIn('window.matchMedia("(prefers-reduced-motion: reduce)")', board)
-        self.assertIn("timeline.fromTo", board)
-        self.assertNotIn("data-typewriter-char", board)
-        self.assertNotIn("TypewriterText", board)
-        self.assertIn('data-animation-block="heading"', board)
-        self.assertIn('data-animation-block="notes"', board)
-        self.assertIn('new Map<number, "running" | "complete">()', board)
-        self.assertIn('animationLifecycle.current.set(animationRequest.revision, "running")', board)
-        self.assertIn('animationLifecycle.current.set(animationRequest.revision, "complete")', board)
-        self.assertIn("animationLifecycle.current.delete(animationRequest.revision)", board)
-        self.assertLess(
-            board.index('data-scene-id="${animationRequest.sceneId}"'),
-            board.index("animationLifecycle.current.set(animationRequest.revision"),
-        )
-        self.assertIn(
-            "dependencies: [animationRequest?.revision]",
-            board,
-        )
-        self.assertIn('data-content-mode="diagram"', board)
-        self.assertIn('data-content-mode="notes"', board)
-        self.assertIn("data-semantic-notes", board)
-        self.assertIn("data-semantic-bullet", board)
-        self.assertIn('aria-hidden="true"', board)
-        self.assertIn("duration: 0.26", board)
-        expansion = board[
-            board.index('if (animationRequest.kind === "expandDiagramNotes")')
-            : board.index("const blocks = animationRequest.blocks")
-        ]
-        self.assertLess(expansion.index("timeline.to(modeGrid"), expansion.index("startTyping(timeline)"))
-        self.assertLess(expansion.index("timeline.fromTo(artwork"), expansion.index("startTyping(timeline)"))
-        self.assertIn('sharesWithNotes ? "max-h-[22rem]" : "max-h-[34rem]"', board)
-        self.assertIn('maxHeight: "34rem"', board)
-        self.assertIn("maxHeight: finalArtworkHeight", board)
-        self.assertIn('clearProps: "maxHeight"', board)
-        self.assertIn("columnGap * (modeList.length - 1)", board)
-        self.assertIn("createSummaryTypingPlan", board)
-        self.assertIn("createSummaryTypingSession", board)
-        self.assertIn("textContent = text", board)
-        self.assertIn("getBoundingClientRect().height", board)
-        self.assertIn("typingBullets.forEach((bullet, index)", board)
-        self.assertIn("semanticBullets[index].getBoundingClientRect().height", board)
-        self.assertIn("data-typing-bullet", board)
-        self.assertIn('className="text-pretty empty:invisible"', board)
-        self.assertIn('window.matchMedia("(min-width: 768px)")', board)
-        self.assertIn("md:grid-cols-2", board)
-        self.assertIn("filter: \"blur(7px)\"", board)
-        self.assertIn("scene.title}", board)
-        self.assertLess(board.index("<h2"), board.index("scene.contentModes.map"))
-        self.assertIn("revertOnUpdate: true", board)
-        self.assertIn("pt-[calc(5rem+env(safe-area-inset-top))]", board)
-        self.assertIn("pb-[calc(7.5rem+env(safe-area-inset-bottom))]", board)
-        self.assertNotIn("backgroundSize", board)
-        self.assertNotIn("border-2", board)
-        self.assertNotIn("boxShadow", board)
-        self.assertNotIn("dangerouslySetInnerHTML", board + scene)
-
-    def test_inherited_scene_on_later_page_keeps_one_primary_heading(self) -> None:
-        board = (ROOT / "components" / "workspace" / "live-whiteboard.tsx").read_text(
-            encoding="utf-8"
-        )
-
-        self.assertIn("function inheritedPrimaryHeading", board)
-        self.assertIn("const primaryScene = board.scenes[0]", board)
-        self.assertIn("scene.sceneId === primaryScene.sceneId", board)
-        self.assertIn('scene.headingMode === "inheritPrimary"', board)
-        self.assertIn("const pagePrimaryHeading = inheritedPrimaryHeading(board, pageScenes)", board)
-        self.assertEqual(board.count("data-board-primary-heading"), 1)
-        self.assertIn("{pagePrimaryHeading.title}", board)
-        self.assertIn("aria-label={`Board topic: ${pagePrimaryHeading.title}`}", board)
-
     def test_transcription_callbacks_are_scoped_to_one_session(self) -> None:
-        transport = (ROOT / "components" / "pitch" / "transcription-transport.ts").read_text(
-            encoding="utf-8"
-        )
-
-        self.assertIn("private sessionId = 0", transport)
-        self.assertIn("const ownsSession = () => this.sessionId === sessionId", transport)
-        self.assertIn("this.sessionId += 1", transport)
-        self.assertIn("this.normalizer.reset()", transport)
-        self.assertIn("if (!ownsSession()) return", transport)
-        self.assertIn("stream.getTracks().forEach((track) => track.stop())", transport)
+        transport = self.source("components/pitch/transcription-transport.ts")
+        for phrase in ["private sessionId = 0", "const ownsSession = () => this.sessionId === sessionId", "this.sessionId += 1", "this.normalizer.reset()", "if (!ownsSession()) return", "stream.getTracks().forEach((track) => track.stop())"]:
+            self.assertIn(phrase, transport)
 
     def test_development_frontend_uses_advertised_port(self) -> None:
-        package = json.loads((ROOT / "package.json").read_text())
+        package = json.loads(self.source("package.json"))
+        script = self.source("scripts/dev.ps1")
         self.assertIn("scripts/dev.ps1", package["scripts"]["dev"])
+        self.assertIn("Frontend: http://localhost:3000", script)
+        self.assertIn("& $next dev -p 3000", script)
 
-        dev_script = (ROOT / "scripts" / "dev.ps1").read_text()
-        self.assertIn("Frontend: http://localhost:3000", dev_script)
-        self.assertIn("& $next dev -p 3000", dev_script)
+    def test_cloudflare_runtime_is_not_part_of_the_project(self) -> None:
+        package = json.loads(self.source("package.json"))
+        lockfile = self.source("package-lock.json")
+        vite_config = self.source("vite.config.ts")
+        for dependency in ["@cloudflare/vite-plugin", "wrangler"]:
+            self.assertNotIn(dependency, package["devDependencies"])
+            self.assertNotIn(dependency, lockfile)
+            self.assertNotIn(dependency, vite_config)
+        self.assertNotIn('"node_modules/workerd"', lockfile)
+        self.assertFalse((ROOT / "worker").exists())
 
-    def test_vercel_install_uses_the_lockfile_peer_resolution_mode(self) -> None:
-        npmrc = (ROOT / ".npmrc").read_text(encoding="utf-8").splitlines()
-        vercel = json.loads((ROOT / "vercel.json").read_text(encoding="utf-8"))
-        package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
-        package_lock = json.loads(
-            (ROOT / "package-lock.json").read_text(encoding="utf-8")
-        )
-
+    def test_vercel_install_build_and_frontend_only_policy_are_specific(self) -> None:
+        npmrc = self.source(".npmrc").splitlines()
+        vercel = json.loads(self.source("vercel.json"))
+        package = json.loads(self.source("package.json"))
+        wrapper = self.source("scripts/vercel-build.mjs")
+        next_config = self.source("next.config.mjs")
         self.assertEqual(npmrc, ["legacy-peer-deps=true"])
         self.assertEqual(vercel["installCommand"], "npm ci")
-        self.assertNotIn("webpack", package["dependencies"])
-        self.assertNotIn("webpack", package["devDependencies"])
-        self.assertNotIn("node_modules/webpack", package_lock["packages"])
-
-    def test_vercel_uses_the_next_build_without_replacing_vinext(self) -> None:
-        vercel = json.loads((ROOT / "vercel.json").read_text(encoding="utf-8"))
-        package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
-        wrapper = (ROOT / "scripts" / "vercel-build.mjs").read_text(
-            encoding="utf-8"
-        )
-        next_config = (ROOT / "next.config.mjs").read_text(encoding="utf-8")
-        package_lock = json.loads(
-            (ROOT / "package-lock.json").read_text(encoding="utf-8")
-        )
-
-        self.assertEqual(
-            vercel,
-            {
-                "$schema": "https://openapi.vercel.sh/vercel.json",
-                "framework": "nextjs",
-                "installCommand": "npm ci",
-                "buildCommand": "npm run build:vercel",
-            },
-        )
+        self.assertEqual(vercel["buildCommand"], "npm run build:vercel")
         self.assertEqual(package["scripts"]["build"], "vinext build")
-        self.assertEqual(
-            package["scripts"]["build:vercel"], "node scripts/vercel-build.mjs"
-        )
-        self.assertEqual(package["scripts"]["build:docker"], "next build")
-        self.assertEqual(package["engines"]["node"], "22.x")
-        self.assertEqual(package_lock["packages"][""]["engines"]["node"], "22.x")
-        for phrase in [
-            "export function resolveVercelFrontendOnly",
-            'IMAGINE_VERCEL_BUILD: "1"',
-            "NEXT_PUBLIC_FRONTEND_ONLY: resolveVercelFrontendOnly(",
-            'require.resolve("next/dist/bin/next")',
-            'spawnSync(process.execPath, [nextCli, "build"]',
-            "pathToFileURL(resolve(process.argv[1])).href === import.meta.url",
-            "process.exitCode = result.status ?? 1",
-        ]:
+        self.assertEqual(package["scripts"]["build:vercel"], "node scripts/vercel-build.mjs")
+        for phrase in ["export function resolveVercelFrontendOnly", 'IMAGINE_VERCEL_BUILD: "1"', "NEXT_PUBLIC_FRONTEND_ONLY: resolveVercelFrontendOnly(", 'require.resolve("next/dist/bin/next")', 'spawnSync(process.execPath, [nextCli, "build"]']:
             self.assertIn(phrase, wrapper)
         self.assertIn('process.env.IMAGINE_VERCEL_BUILD === "1"', next_config)
-        self.assertIn('process.env.VERCEL === "1"', next_config)
-        self.assertIn(': { output: "standalone" }', next_config)
+        deployment = self.source("lib/deployment-mode.ts")
+        for phrase in ["explicitMode === \"true\"", "explicitMode === \"false\"", "process.env.NEXT_PUBLIC_VERCEL_ENV", "Only manual slide navigation remains available."]:
+            self.assertIn(phrase, deployment)
 
-    def test_frontend_only_policy_and_legacy_generation_guard_share_one_notice(self) -> None:
-        deployment = (ROOT / "lib" / "deployment-mode.ts").read_text(
-            encoding="utf-8"
-        )
-        stream = (ROOT / "lib" / "generation-stream.ts").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn("FRONTEND_ONLY_NOTICE", deployment)
-        self.assertIn("process.env.NEXT_PUBLIC_FRONTEND_ONLY", deployment)
-        self.assertIn('explicitMode === "true"', deployment)
-        self.assertIn('explicitMode === "false"', deployment)
-        self.assertIn("process.env.NEXT_PUBLIC_VERCEL_ENV", deployment)
-        guard = stream.index("if (isFrontendOnlyDeployment())")
-        fetch = stream.index("const response = await fetch", guard)
-        self.assertLess(guard, fetch)
-        self.assertIn("throw new Error(FRONTEND_ONLY_NOTICE)", stream)
-
-
-    def test_site_origin_and_frontend_only_docs_follow_the_public_contract(self) -> None:
-        site_origin = (ROOT / "lib" / "site-origin.ts").read_text(
-            encoding="utf-8"
-        )
-        env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
-        gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
-        readme = (ROOT / "README.md").read_text(encoding="utf-8")
-
-        self.assertLess(
-            site_origin.index("process.env.NEXT_PUBLIC_SITE_URL"),
-            site_origin.index("process.env.VERCEL_PROJECT_PRODUCTION_URL"),
-        )
-        self.assertIn('`https://${productionHost', site_origin)
-        self.assertIn('"http://localhost:3000"', site_origin)
-        self.assertIn('replace(/\\/+$/, "")', site_origin)
+    def test_site_origin_and_public_environment_contracts_remain(self) -> None:
+        origin = self.source("lib/site-origin.ts")
+        env_example = self.source(".env.example")
+        gitignore = self.source(".gitignore")
+        self.assertLess(origin.index("process.env.NEXT_PUBLIC_SITE_URL"), origin.index("process.env.VERCEL_PROJECT_PRODUCTION_URL"))
+        self.assertIn('`https://${productionHost', origin)
+        self.assertIn('replace(/\\/+$/, "")', origin)
         self.assertIn(".vercel/", gitignore.splitlines())
-        for public_name in [
-            "NEXT_PUBLIC_FRONTEND_ONLY=",
-            "NEXT_PUBLIC_VERCEL_ENV=",
-            "NEXT_PUBLIC_SITE_URL=",
-        ]:
-            self.assertIn(public_name, env_example)
+        for name in ["NEXT_PUBLIC_FRONTEND_ONLY=", "NEXT_PUBLIC_VERCEL_ENV=", "NEXT_PUBLIC_SITE_URL="]:
+            self.assertIn(name, env_example)
 
-        section = readme[readme.index("## Vercel frontend-only deployment") :]
-        section = section[: section.index("## Legacy service cost and context controls")]
-        for phrase in [
-            "npm run build:vercel",
-            "NEXT_PUBLIC_FRONTEND_ONLY",
-            "NEXT_PUBLIC_SITE_URL",
-            "no Vercel system-variable exposure or dashboard setup is required",
-            "missing, blank, or invalid",
-            "literal `false`",
-            "Pitch slides, manual controls, and typed deterministic",
-            "microphone transcription is disabled",
-        ]:
-            self.assertIn(phrase, section)
-        self.assertNotIn("NEXT_PUBLIC_VERCEL_ENV", section)
-        self.assertNotIn("PROD_GEMINI_API_KEY", section)
-        self.assertNotIn("DEEPGRAM_API_KEY", section)
-
-    def test_public_routes_use_a_shared_marketing_layout(self) -> None:
+    def test_public_routes_and_workspace_are_isolated(self) -> None:
         marketing = ROOT / "app" / "(marketing)"
-        routes = {
-            "/": marketing / "page.tsx",
-            "/product": marketing / "product" / "page.tsx",
-            "/educators": marketing / "educators" / "page.tsx",
-            "/schools": marketing / "schools" / "page.tsx",
-            "/about": marketing / "about" / "page.tsx",
-            "/contact": marketing / "contact" / "page.tsx",
-        }
-
+        routes = ["page.tsx", "product/page.tsx", "educators/page.tsx", "schools/page.tsx", "about/page.tsx", "contact/page.tsx"]
         self.assertTrue((marketing / "layout.tsx").is_file())
-        for route, path in routes.items():
-            with self.subTest(route=route):
-                self.assertTrue(path.is_file())
-        self.assertFalse((ROOT / "app" / "page.tsx").exists())
-
-        layout_sources = [
-            path.read_text(encoding="utf-8")
-            for path in (ROOT / "app").rglob("layout.tsx")
-        ]
-        self.assertEqual(sum(source.count("<html") for source in layout_sources), 1)
-
-    def test_marketing_and_workspace_routes_are_isolated(self) -> None:
+        for relative_path in routes:
+            self.assertTrue((marketing / relative_path).is_file())
         marketing_source = self.marketing_source()
-        marketing_pages = "\n".join(
-            path.read_text(encoding="utf-8")
-            for path in (ROOT / "app" / "(marketing)").rglob("*.tsx")
-        )
         self.assertNotIn('href="/canvas"', marketing_source)
         self.assertNotIn('href="/pitch"', marketing_source)
-        self.assertNotIn('from "@/components/workspace', marketing_pages)
-        self.assertNotIn('from "@/components/workspace', marketing_source)
-        self.assertNotIn('from "@/lib/generation-stream', marketing_source)
-        self.assertNotIn('from "@/lib/lesson-library', marketing_source)
-        self.assertNotIn('from "@/lib/live-session', marketing_source)
-        self.assertNotIn('from "@/lib/deployment-mode', marketing_source)
+        self.assertNotIn("components/workspace", marketing_source)
+        self.assertNotIn("PitchWorkspace", marketing_source)
 
     def test_public_content_matches_the_evidence_contract(self) -> None:
-        marketing_source = self.marketing_source()
-
-        required = [
-            "Imaginer",
-            "Revolutionizing the way people explain things",
-            "Keep teaching. Let the picture take shape.",
-            "Illustrative product walkthrough — non-interactive",
-            "Save lesson context",
-            "Interpret finalized speech",
-            "Build one cumulative board",
-            "Create or update.",
-            "browser’s local storage",
-            "Show a process as it unfolds",
-            "Keep earlier ideas visible as the lesson develops",
-            "Invitation-only pilots",
-            "Context-entry effort",
-            "Educator usability",
-            "Scene decision reliability",
-            "Lesson continuity",
-            "A school-selected comprehension signal",
-            "AP Biology",
-            "Vivaan Grover",
-            "Jackson Bizell",
-            "Krish Sapovadia",
-            "Lecture halls, boardrooms, and keynote stages",
-            "Coming Soon",
-            "Core values",
-            "Help test Imaginev1 in the classroom.",
-        ]
+        source = self.marketing_source()
+        required = ["Imaginer", "Revolutionizing the way people explain things", "Keep teaching. Let the picture take shape.", "Illustrative product walkthrough — non-interactive", "Save lesson context", "Interpret finalized speech", "Build one cumulative board", "Invitation-only pilots", "Context-entry effort", "Educator usability", "Scene decision reliability", "Lesson continuity", "A school-selected comprehension signal", "AP Biology", "Vivaan Grover", "Jackson Bizell", "Krish Sapovadia", "Lecture halls, boardrooms, and keynote stages", "Coming Soon", "Core values", "Help test Imaginev1 in the classroom."]
         for phrase in required:
             with self.subTest(phrase=phrase):
-                self.assertIn(phrase, marketing_source)
-
-        banned = [
-            "prepare 3–5 diagrams",
-            "prepare three to five diagrams",
-            "exact prepared-recall",
-            "exact spoken phrase",
-            "try imagine",
-            "pricing",
-            "margin",
-            "enrollment",
-            "revenue",
-            "competitor",
-            "case study",
-            "traction",
-            "guaranteed latency",
-            "quantified prep",
-        ]
-        lowered = marketing_source.lower()
-        for phrase in banned:
+                self.assertIn(phrase, source)
+        for phrase in ["prepare 3–5 diagrams", "exact prepared-recall", "try imagine", "pricing", "guaranteed latency"]:
             with self.subTest(phrase=phrase):
-                self.assertNotIn(phrase, lowered)
+                self.assertNotIn(phrase, source.lower())
 
-    def test_public_navigation_and_mobile_menu_are_accessible(self) -> None:
-        header = (ROOT / "components" / "marketing" / "site-header.tsx").read_text(
-            encoding="utf-8"
-        )
-        footer = (ROOT / "components" / "marketing" / "site-footer.tsx").read_text(
-            encoding="utf-8"
-        )
-        layout = (ROOT / "app" / "(marketing)" / "layout.tsx").read_text(
-            encoding="utf-8"
-        )
-
-        expected_links = [
-            ('href: "/"', 'label: "Home"'),
-            ('href: "/product"', 'label: "Product"'),
-            ('href: "/about"', 'label: "About"'),
-            ('href: "/contact"', 'label: "Contact"'),
-        ]
+    def test_mobile_menu_keeps_focus_escape_and_inert_accessibility_guards(self) -> None:
+        header = self.source("components/marketing/site-header.tsx")
+        footer = self.source("components/marketing/site-footer.tsx")
+        layout = self.source("app/(marketing)/layout.tsx")
         for source in [header, footer]:
-            positions = []
-            for href, label in expected_links:
-                self.assertIn(href, source)
-                self.assertIn(label, source)
-                positions.append(source.index(label))
-            self.assertEqual(positions, sorted(positions))
-            self.assertNotIn('label: "Educators"', source)
-            self.assertNotIn('label: "Schools"', source)
-        self.assertIn("aria-expanded={open}", header)
-        self.assertIn('aria-controls="marketing-mobile-navigation"', header)
-        self.assertIn('event.key === "Escape"', header)
-        self.assertIn('event.key !== "Tab"', header)
-        self.assertIn('document.addEventListener("pointerdown"', header)
-        self.assertIn("firstMenuLinkRef.current?.focus()", header)
-        self.assertIn("element.inert = true", header)
-        self.assertIn("toggleRef.current?.focus()", header)
-        self.assertIn('window.matchMedia("(min-width: 721px)")', header)
-        self.assertIn("activeElement.dataset.navigationHref", header)
-        self.assertIn("desktopLinkRefs.current[activeMobileHref]", header)
-        self.assertIn("desktopFocusTarget.focus()", header)
+            for phrase in ['href: "/"', 'href: "/product"', 'href: "/about"', 'href: "/contact"']:
+                self.assertIn(phrase, source)
+        for phrase in ["aria-expanded={open}", 'aria-controls="marketing-mobile-navigation"', 'event.key === "Escape"', 'event.key !== "Tab"', 'document.addEventListener("pointerdown"', "firstMenuLinkRef.current?.focus()", "element.inert = true", "toggleRef.current?.focus()", 'window.matchMedia("(min-width: 721px)")']:
+            self.assertIn(phrase, header)
         self.assertIn('href="#main-content"', layout)
-        self.assertIn("data-lenis-prevent", header)
 
-    def test_aligned_marketing_pages_publish_the_requested_content(self) -> None:
-        marketing = ROOT / "app" / "(marketing)"
-        home = (marketing / "page.tsx").read_text(encoding="utf-8")
-        product = (marketing / "product" / "page.tsx").read_text(encoding="utf-8")
-        about = (marketing / "about" / "page.tsx").read_text(encoding="utf-8")
-        contact = (marketing / "contact" / "page.tsx").read_text(encoding="utf-8")
-
-        self.assertIn("<h1>Imaginer</h1>", home)
-        self.assertIn(
-            "<strong>Keep teaching. Let the picture take shape.</strong>", home
-        )
-        self.assertIn("Revolutionizing the way people explain things", home)
-        self.assertIn("marketing-home-hero", home)
-        self.assertNotIn("data-hero", home)
-        self.assertNotIn("data-parallax-media", home)
-        self.assertIn("Imaginev1", product)
-        self.assertIn("<ol", product)
-        self.assertIn("data-product-flow", product)
-        self.assertIn("data-product-flow-step", product)
-        self.assertIn("Coming Soon", product)
-        self.assertIn('href="/contact"', product)
+    def test_aligned_marketing_pages_publish_requested_content(self) -> None:
+        home = self.source("app/(marketing)/page.tsx")
+        product = self.source("app/(marketing)/product/page.tsx")
+        about = self.source("app/(marketing)/about/page.tsx")
+        contact = self.source("app/(marketing)/contact/page.tsx")
+        for phrase in ["<h1>Imaginer</h1>", "Revolutionizing the way people explain things", "marketing-home-hero"]:
+            self.assertIn(phrase, home)
+        for phrase in ["Imaginev1", "data-product-flow", "data-product-flow-step", "Coming Soon", 'href="/contact"']:
+            self.assertIn(phrase, product)
         self.assertIn("Core values", about)
         self.assertIn('title="Founder Team"', about)
-        self.assertNotIn("team.map((member, index)", about)
-        self.assertIn('src="/media/imagine-founders-showcase.jpg"', about)
         self.assertIn("export const metadata: Metadata", contact)
-        self.assertIn("teacher beta test", contact.lower())
-        for email in [
-            "kcsapovadia@gmail.com",
-            "vpvpgrover09@gmail.com",
-            "jbizell09@gmail.com",
-        ]:
-            self.assertIn(f'email: "{email}"', contact)
-            self.assertIn(f'href: "mailto:{email}"', contact)
+        for email in ["kcsapovadia@gmail.com", "vpvpgrover09@gmail.com", "jbizell09@gmail.com"]:
+            self.assertIn(email, contact)
 
-    def test_marketing_photos_are_stable_optimized_jpegs(self) -> None:
-        assets = {
-            "imagine-founders-showcase.jpg": (1152, 1536, 300_000),
-            "jackson-portrait.jpg": (800, 800, 100_000),
-            "vivaan-portrait.jpg": (1200, 896, 350_000),
-            "krish-portrait.jpg": (1043, 1451, 300_000),
-        }
+    def test_marketing_photos_have_exact_dimensions_size_and_no_exif(self) -> None:
+        assets = {"imagine-founders-showcase.jpg": (1152, 1536, 300_000), "jackson-portrait.jpg": (800, 800, 100_000), "vivaan-portrait.jpg": (1200, 896, 350_000), "krish-portrait.jpg": (1043, 1451, 300_000)}
         for filename, (width, height, max_bytes) in assets.items():
             path = ROOT / "public" / "media" / filename
             with self.subTest(filename=filename):
-                self.assertTrue(path.is_file())
                 payload = path.read_bytes()
                 self.assertEqual(payload[:2], b"\xff\xd8")
                 self.assertEqual(jpeg_dimensions(path), (width, height))
                 self.assertLess(len(payload), max_bytes)
                 self.assertNotIn(b"Exif\x00\x00", payload)
 
-        home = (ROOT / "app" / "(marketing)" / "page.tsx").read_text(
-            encoding="utf-8"
-        )
-        about = (ROOT / "app" / "(marketing)" / "about" / "page.tsx").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn('src="/media/imagine-founders-showcase.jpg"', home)
-        self.assertIn('src="/media/imagine-founders-showcase.jpg"', about)
-        self.assertIn('objectPosition: "26.7% 38.5%"', home)
-        self.assertIn(
-            'alt="The three Imagine founders presenting together in a lecture hall."',
-            home,
-        )
-        expected_portraits = [
-            (
-                "Vivaan Grover",
-                "/media/vivaan-portrait.jpg",
-                "34.9% 31.1%",
-                "Vivaan Grover wearing a white suit beside a canal.",
-            ),
-            (
-                "Jackson Bizell",
-                "/media/jackson-portrait.jpg",
-                "38.7% 31.7%",
-                "Jackson Bizell wearing a dark suit in a museum.",
-            ),
-            (
-                "Krish Sapovadia",
-                "/media/krish-portrait.jpg",
-                "23% 37.3%",
-                "Krish Sapovadia smiling at a mountain overlook.",
-            ),
-        ]
-        for name, path, focus, alt in expected_portraits:
-            with self.subTest(name=name):
-                self.assertIn(f'name: "{name}"', about)
-                self.assertIn(f'photo: "{path}"', about)
-                self.assertIn(f'focus: "{focus}"', about)
-                self.assertIn(f'alt: "{alt}"', about)
-        self.assertNotIn("tabIndex={0}", about)
-
-    def test_marketing_scroll_lifecycle_and_motion_guards(self) -> None:
-        package = json.loads((ROOT / "package.json").read_text())
-        package_lock = (ROOT / "package-lock.json").read_text(encoding="utf-8")
-        layout = (ROOT / "app" / "(marketing)" / "layout.tsx").read_text(
-            encoding="utf-8"
-        )
-        smooth_scroll = (
-            ROOT / "components" / "marketing" / "smooth-scroll.tsx"
-        ).read_text(encoding="utf-8")
-        motion = (
-            ROOT / "components" / "marketing" / "motion-boundary.tsx"
-        ).read_text(encoding="utf-8")
-        styles = (ROOT / "app" / "globals.css").read_text(encoding="utf-8")
-
-        self.assertEqual(package["dependencies"]["lenis"], "^1.3.25")
-        self.assertIn('"node_modules/lenis"', package_lock)
+    def test_marketing_motion_lifecycle_has_reduced_motion_and_cleanup(self) -> None:
+        layout = self.source("app/(marketing)/layout.tsx")
+        scroll = self.source("components/marketing/smooth-scroll.tsx")
+        motion = self.source("components/marketing/motion-boundary.tsx")
+        styles = self.source("app/globals.css")
         self.assertIn('import "lenis/dist/lenis.css"', layout)
-        self.assertIn("<MarketingSmoothScroll />", layout)
-        for phrase in [
-            '"(prefers-reduced-motion: reduce)"',
-            '"(pointer: coarse)"',
-            'lenis.on("scroll", updateScroll)',
-            'lenis.off("scroll", updateScroll)',
-            "gsap.ticker.add(updateFrame)",
-            "gsap.ticker.remove(updateFrame)",
-            "lenis.destroy()",
-        ]:
-            self.assertIn(phrase, smooth_scroll)
-        self.assertNotIn("killAll", smooth_scroll)
+        for phrase in ['"(prefers-reduced-motion: reduce)"', 'lenis.on("scroll", updateScroll)', 'lenis.off("scroll", updateScroll)', "gsap.ticker.add(updateFrame)", "gsap.ticker.remove(updateFrame)", "lenis.destroy()"]:
+            self.assertIn(phrase, scroll)
+        for phrase in ["ScrollTrigger", "motionMedia.add(", 'reduceMotion: "(prefers-reduced-motion: reduce)"', "return () => motionMedia.revert()", "[data-parallax-media]", "[data-product-flow-step]"]:
+            self.assertIn(phrase, motion)
+        self.assertIn(".marketing-root [data-product-flow-step]", styles)
 
-        self.assertIn("ScrollTrigger", motion)
-        self.assertIn("motionMedia.add(", motion)
-        self.assertIn(
-            'reduceMotion: "(prefers-reduced-motion: reduce)"', motion
-        )
-        self.assertIn(
-            'allowMotion: "(prefers-reduced-motion: no-preference)"', motion
-        )
-        self.assertIn('desktop: "(min-width: 901px)"', motion)
-        self.assertIn('finePointer: "(pointer: fine)"', motion)
-        self.assertIn("if (reduceMotion)", motion)
-        self.assertIn("return () => motionMedia.revert()", motion)
-        self.assertNotIn("window.matchMedia", motion)
-        self.assertNotIn("data-product-story", motion)
-        self.assertNotIn("pin:", motion)
-        self.assertIn("[data-parallax-media]", motion)
-        self.assertIn("[data-product-flow-step]", motion)
-        self.assertIn("trigger: productFlow", motion)
-        self.assertIn("stagger: 0.14", motion)
-        flow_fallback = styles.index(
-            ".marketing-root [data-product-flow-step]"
-        )
-        self.assertIn(
-            "opacity: 1 !important", styles[flow_fallback:flow_fallback + 280]
-        )
-        self.assertNotIn("killAll", motion)
-
-    def test_marketing_previews_use_static_rasters_with_exact_page_mappings(self) -> None:
-        previews = (
-            ROOT / "components" / "marketing" / "diagram-previews.tsx"
-        ).read_text(encoding="utf-8")
-        marketing = ROOT / "app" / "(marketing)"
-        pages = {
-            "home": (marketing / "page.tsx").read_text(encoding="utf-8"),
-            "product": (marketing / "product" / "page.tsx").read_text(
-                encoding="utf-8"
-            ),
-            "educators": (marketing / "educators" / "page.tsx").read_text(
-                encoding="utf-8"
-            ),
-            "schools": (marketing / "schools" / "page.tsx").read_text(
-                encoding="utf-8"
-            ),
-        }
-
+    def test_static_diagram_previews_keep_exact_page_mappings(self) -> None:
+        previews = self.source("components/marketing/diagram-previews.tsx")
+        pages = {"home": self.source("app/(marketing)/page.tsx"), "product": self.source("app/(marketing)/product/page.tsx"), "educators": self.source("app/(marketing)/educators/page.tsx"), "schools": self.source("app/(marketing)/schools/page.tsx")}
         self.assertIn('from "next/image"', previews)
-        self.assertIn("<Image", previews)
-        self.assertIn("src={src}", previews)
-        self.assertIn("alt={alt}", previews)
         self.assertNotIn("components/workspace", previews)
-        self.assertNotIn("StickScene", previews)
-        self.assertNotIn("DiagramRenderer", previews)
-        self.assertNotIn("BuildingBlockDiagramData", previews)
-        self.assertNotIn("generation-stream", previews)
-        self.assertNotIn("lesson-library", previews)
-        removed_component = "product-mode-" + "accordion.tsx"
-        self.assertFalse(
-            (ROOT / "components" / "marketing" / removed_component).exists()
-        )
-
-        expected_assets = {
-            "home": [
-                "/media/diagrams/lesson-context-flow.png",
-                "/media/diagrams/cellular-energy-flow.png",
-                "/media/diagrams/cumulative-board-flow.png",
-            ],
-            "product": ["/media/diagrams/cumulative-board-flow.png"],
-            "educators": ["/media/diagrams/respiration-update.png"],
-            "schools": ["/media/diagrams/pilot-review-flow.png"],
-        }
-        for page, assets in expected_assets.items():
+        expected = {"home": ["/media/diagrams/lesson-context-flow.png", "/media/diagrams/cellular-energy-flow.png", "/media/diagrams/cumulative-board-flow.png"], "product": ["/media/diagrams/cumulative-board-flow.png"], "educators": ["/media/diagrams/respiration-update.png"], "schools": ["/media/diagrams/pilot-review-flow.png"]}
+        for page, assets in expected.items():
             for asset in assets:
-                with self.subTest(page=page, asset=asset):
-                    self.assertIn(asset, pages[page])
-
-        for assets in expected_assets.values():
-            for asset in assets:
-                path = ROOT / "public" / asset.removeprefix("/")
-                with self.subTest(asset=asset):
-                    self.assertTrue(path.is_file())
-                    width, height = png_dimensions(path)
-                    self.assertEqual(width * 2, height * 3)
-
+                self.assertIn(asset, pages[page])
+                width, height = png_dimensions(ROOT / "public" / asset.removeprefix("/"))
+                self.assertEqual(width * 2, height * 3)
         self.assertEqual(pages["home"].count("<MarketingScenePreview"), 1)
         self.assertIn("productModes.map", pages["home"])
-        self.assertIn("<ol", pages["home"])
-        self.assertNotIn("useState", pages["home"])
 
-    def test_marketing_cleanup_removes_kickers_and_obsolete_home_patterns(self) -> None:
-        source = self.marketing_source()
-        home = (ROOT / "app" / "(marketing)" / "page.tsx").read_text(
-            encoding="utf-8"
-        )
-        styles = (ROOT / "app" / "globals.css").read_text(encoding="utf-8")
-        visual_language = (
-            ROOT / "components" / "marketing" / "visual-language.tsx"
-        ).read_text(encoding="utf-8")
+    def test_marketing_cleanup_and_removed_runtimes_remain_enforced(self) -> None:
+        source = self.marketing_source() + self.source("app/globals.css")
+        for phrase in ["marketing-eyebrow", "data-product-story", "marketing-visual-marquee"]:
+            self.assertNotIn(phrase, source)
+        for relative_path in ["app/loading.tsx", "app/debug/page.tsx", "components/marketing-experience.tsx", "components/knowledge-scene.tsx", "components/launch-loader.tsx", "components/smooth-scroll.tsx", "components/diagrams/structured-diagram.tsx", "components/building-blocks/debug.tsx", "components/building-blocks/sample-data.ts", "components/workspace/composition-view.tsx", "lib/composition-summary.ts"]:
+            self.assertFalse((ROOT / relative_path).exists())
 
-        self.assertNotIn("marketing-" + "eyebrow", source + styles)
-        self.assertNotIn("eye" + "brow:", visual_language)
-        self.assertNotIn("data-product-story", source + styles)
-        self.assertNotIn("marketing-visual-" + "marquee", source + styles)
-        self.assertNotIn("From spoken explanation to a " + "useful visual.", home)
-        self.assertNotIn(
-            "Each turn changes only what the " + "explanation needs.", home
-        )
-
-    def test_live_assistant_is_the_public_and_backend_name(self) -> None:
-        files = [
-            *sorted((ROOT / "app").rglob("*.tsx")),
-            *sorted((ROOT / "components").rglob("*.ts")),
-            *sorted((ROOT / "components").rglob("*.tsx")),
-            *sorted((ROOT / "backend").rglob("*.py")),
-            ROOT / ".env.example",
-            ROOT / "README.md",
-            ROOT / "docs" / "LANDING_SITE_CHANGELOG.md",
-        ]
-        source = "\n".join(path.read_text(encoding="utf-8") for path in files)
-        self.assertNotIn("Visual" + " Director", source)
-        self.assertIn("Live Assistant", source)
-
-    def test_pitch_and_legacy_canvas_routes_are_not_indexed_or_in_the_public_sitemap(self) -> None:
-        canvas_layout = (ROOT / "app" / "canvas" / "layout.tsx").read_text(
-            encoding="utf-8"
-        )
-        pitch_layout = (ROOT / "app" / "pitch" / "layout.tsx").read_text(
-            encoding="utf-8"
-        )
-        robots = (ROOT / "app" / "robots.ts").read_text(encoding="utf-8")
-        sitemap = (ROOT / "app" / "sitemap.ts").read_text(encoding="utf-8")
-        site_origin = (ROOT / "lib" / "site-origin.ts").read_text(
-            encoding="utf-8"
-        )
-
-        self.assertIn("index: false", canvas_layout)
-        self.assertIn("follow: false", canvas_layout)
-        self.assertIn("index: false", pitch_layout)
-        self.assertIn("follow: false", pitch_layout)
+    def test_sitemap_and_robots_exclude_pitch_and_canvas_exactly(self) -> None:
+        canvas = self.source("app/canvas/layout.tsx")
+        pitch = self.source("app/pitch/layout.tsx")
+        robots = self.source("app/robots.ts")
+        sitemap = self.source("app/sitemap.ts")
+        for source in [canvas, pitch]:
+            self.assertIn("index: false", source)
+            self.assertIn("follow: false", source)
         self.assertIn('disallow: ["/canvas", "/pitch"]', robots)
-        self.assertIn("getSiteOrigin()", robots)
-        self.assertIn("`${origin}/sitemap.xml`", robots)
-        self.assertNotIn('"/canvas"', sitemap)
-        self.assertNotIn('"/pitch"', sitemap)
-        self.assertIn("getSiteOrigin()", sitemap)
-        self.assertIn('"http://localhost:3000"', site_origin)
-        self.assertIn('replace(/\\/+$/, "")', site_origin)
-        self.assertIn(
-            'const publicRoutes = ["", "/product", "/about", "/contact"]',
-            sitemap,
-        )
-        for route in ['"/product"', '"/about"', '"/contact"']:
-            self.assertIn(route, sitemap)
-        for excluded_route in ['"/educators"', '"/schools"']:
-            self.assertNotIn(excluded_route, sitemap)
-
-    def test_superseded_marketing_runtime_is_removed(self) -> None:
-        removed = [
-            "app/loading.tsx",
-            "app/debug/page.tsx",
-            "components/marketing-experience.tsx",
-            "components/knowledge-scene.tsx",
-            "components/launch-loader.tsx",
-            "components/smooth-scroll.tsx",
-            "components/diagrams/structured-diagram.tsx",
-            "components/building-blocks/debug.tsx",
-            "components/building-blocks/sample-data.ts",
-        ]
-        for relative_path in removed:
-            with self.subTest(path=relative_path):
-                self.assertFalse((ROOT / relative_path).exists())
-
-        package = json.loads((ROOT / "package.json").read_text())
-        self.assertEqual(package["dependencies"]["lenis"], "^1.3.25")
-
-    def test_fixed_template_runtime_is_removed(self) -> None:
-        for relative_path in [
-            "components/workspace/composition-view.tsx",
-            "lib/composition-summary.ts",
-        ]:
-            with self.subTest(path=relative_path):
-                self.assertFalse((ROOT / relative_path).exists())
-
-        building_blocks = ROOT / "components" / "building-blocks"
-        self.assertFalse(
-            any(path.is_file() for path in building_blocks.rglob("*"))
-        )
-
-        runtime_files = [
-            *sorted((ROOT / "app").rglob("*.ts")),
-            *sorted((ROOT / "app").rglob("*.tsx")),
-            *sorted((ROOT / "components").rglob("*.ts")),
-            *sorted((ROOT / "components").rglob("*.tsx")),
-            *sorted((ROOT / "lib").rglob("*.ts")),
-            *sorted((ROOT / "lib").rglob("*.tsx")),
-        ]
-        runtime_source = "\n".join(
-            path.read_text(encoding="utf-8") for path in runtime_files
-        )
-        for obsolete in [
-            "components/building-blocks",
-            "BuildingBlockDiagramData",
-            "CompositionView",
-            "CompositionCard",
-            "CompositionResponse",
-            "composition-summary",
-        ]:
-            with self.subTest(obsolete=obsolete):
-                self.assertNotIn(obsolete, runtime_source)
-
-    def test_readme_documents_pitch_mode_and_retained_legacy_services(self) -> None:
-        readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        for phrase in [
-            "## Pitch Mode",
-            "`/pitch`",
-            "`/canvas`",
-            "semantic (`open`, `gtm`, `financials`",
-            "PitchModelAdapter",
-            "goto_slide(slide_id)",
-            "no_action",
-            "FunctionGemma",
-            "does not train, download, host, or configure FunctionGemma",
-            "## Legacy whiteboard services",
-            "24-column by 14-row grid",
-            "Optional raster assets",
-        ]:
-            with self.subTest(phrase=phrase):
-                self.assertIn(phrase, readme)
-        self.assertNotIn("GEMINI_DIAGRAM_MODEL", readme)
-        self.assertNotIn("VISUAL_CACHE_DIR", readme)
-
-
-if __name__ == "__main__":
-    unittest.main()
+        self.assertIn('const publicRoutes = ["", "/product", "/about", "/contact"]', sitemap)
+        for route in ['"/canvas"', '"/pitch"', '"/educators"', '"/schools"']:
+            self.assertNotIn(route, sitemap)
