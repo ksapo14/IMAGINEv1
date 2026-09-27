@@ -1,24 +1,13 @@
 # Pitch Mode handoff
 
-Pitch Mode renders the 18-slide Imagineer deck at `/pitch`; `/canvas` remains a
-redirect for existing bookmarks. The controller owns every transition, keeping
-manual navigation intact and rejecting stale, redundant, malformed, and
-unknown model decisions.
+Pitch Mode now lives in the Windows Tauri application under `desktop/`. The marketing website has no pitch or canvas route.
 
-Deepgram Flux boundaries and typed test utterances both call the default
-FunctionGemma HTTP adapter. The adapter posts the finalized utterance, current
-slide, and available semantic slide descriptions to `/api/pitch/decide` and
-forwards cancellation. The FastAPI route calls a separately managed
-OpenAI-compatible FunctionGemma server using `google/functiongemma-270m-it` by
-default. It constrains the provider to exactly `goto_slide` or `no_action` and
-validates the tool call before returning it to the controller.
+The existing 18-slide deck, controller, storage, replay, keyboard navigation, and transcript UI remain React modules shared with the desktop entry. The controller is the only component that applies transitions. It rejects unknown or malformed slide IDs, redundant choices, cancelled results, and results made stale by manual navigation or a newer speech turn.
 
-The backend intentionally does not serve cached model weights. A separately
-managed runtime must expose OpenAI-compatible tools at `/v1/chat/completions`.
-`/health` is backend liveness only; `/api/pitch/status?probe=true` performs a
-bounded protocol probe and reports `ready` only after a valid tool response.
+Desktop React uses narrow Tauri commands for model evaluation and cancellation, transcription session control, and fullscreen. Rust starts one background `backend.evaluate` Python process from the local environment and keeps its CPU-only FunctionGemma model loaded across requests. The evaluator finds its snapshot in the local Hugging Face cache automatically, loads it offline, and accepts bounded JSONL requests through stdin/stdout. Only strict `goto_slide` and `no_action` outputs are accepted. On a crash, timeout, or bad response Rust stops the evaluator and the current slide remains visible; a later request may start a fresh process.
 
-The backend retains CORS, origin, transcription session, and rate-limit
-protections. It does not run model inference, download model assets, or start a
-model server. The old backend generation, streaming, and visual endpoints are
-removed.
+Deepgram remains the only external desktop service. Rust reads the key from its launch environment, connects to Deepgram, and sends session-scoped transcription events to React. The key never enters the WebView or Python sidecar. Typed local evaluation still works if no Deepgram key is configured.
+
+No FastAPI route, model HTTP endpoint, backend container, or browser-to-backend transport is part of this architecture.
+
+The current Tauri bundle is disabled because this development build uses the checkout and an installed Python environment. See [DOCS.md](../DOCS.md) for the complete architecture and [desktop/README.md](../desktop/README.md) for setup and verification.

@@ -1,37 +1,32 @@
-import type { PitchSlideDefinition, SlideDescriptor, SlideId } from "./types.ts";
+import type { SlideDescriptor, SlideId } from "./types.ts";
 
 export const PITCH_DECK_ID = "imagineer-pitch-carl";
 export const PITCH_DECK_VERSION = 1;
 export const PITCH_START_SLIDE_ID = "open";
 
-/** Semantic slide descriptions and conservative routing cues share one source. */
-export const PITCH_SLIDES: readonly PitchSlideDefinition[] = [
-  { id: "open", title: "Imagineer", description: "Imagineer introduction and founders Vivaan Grover, Jackson Bizzell, and Krish Sapovadia.", matching: { phrases: ["welcome to imagineer", "introduce imagineer"], keywords: ["imagineer", "founders"] } },
-  { id: "anecdote", title: "The story", description: "AP Biology experience with the hard-to-picture electron transport chain.", matching: { phrases: ["electron transport chain", "ap biology classroom"], keywords: ["biology", "electron", "transport"] } },
-  { id: "problem", title: "The problem", description: "Invisible concepts, teacher preparation time, and explanation gaps in class.", matching: { phrases: ["invisible concepts", "teacher preparation time"], keywords: ["invisible", "preparation", "explanation"] } },
-  { id: "hall", title: "In the hall", description: "Live visual explanations used across classrooms and school subjects.", matching: { phrases: ["across classrooms", "live visual explanations"], keywords: ["classrooms", "subjects", "hallway"] } },
-  { id: "whynow", title: "Why now", description: "New technology capabilities and costs make the product possible now.", matching: { phrases: ["why now", "technology costs"], keywords: ["capabilities", "costs", "technology"] } },
-  { id: "product", title: "The product", description: "The product pipeline, agent responsibilities, and visual output formats.", matching: { phrases: ["product pipeline", "agent responsibilities"], keywords: ["pipeline", "agents", "formats"] } },
-  { id: "demo", title: "Demo", description: "Transition from the product explanation into a live product demonstration.", matching: { phrases: ["live product demonstration", "show you the demo"], keywords: ["demo", "demonstration"] } },
-  { id: "value", title: "Classroom value", description: "Attention, engagement, and clearer classroom explanations for learners.", matching: { phrases: ["classroom attention", "student engagement"], keywords: ["attention", "engagement", "learners"] } },
-  { id: "competition", title: "Competition", description: "Competitors and Imagineer's distinct position in the education market.", matching: { phrases: ["competitive landscape", "our competitors"], keywords: ["competition", "competitors", "positioning"] } },
-  { id: "gtm", title: "Go to market", description: "Private-school entry, teacher referrals, and classroom-by-classroom expansion.", matching: { phrases: ["teacher next door", "private school entry"], keywords: ["referrals", "entry", "expansion"] } },
-  { id: "tam", title: "Market opportunity", description: "Market size, North Carolina launch area, geographic expansion, and pricing basis.", matching: { phrases: ["private school market", "north carolina market"], keywords: ["market", "carolina", "geographic"] } },
-  { id: "model", title: "Business model", description: "Teacher and school plans, recurring revenue, and delivery costs.", matching: { phrases: ["teacher and school plans", "delivery costs"], keywords: ["plans", "revenue", "delivery"] } },
-  { id: "financials", title: "Financials", description: "Funding allocation and three-year financial projections.", matching: { phrases: ["three year financial projection", "funding allocation"], keywords: ["financial", "projection", "allocation"] } },
-  { id: "whyus", title: "Why us", description: "Founders' relevant experience, personal motivation, and ability to execute.", matching: { phrases: ["why us", "founder experience"], keywords: ["experience", "motivation", "execute"] } },
-  { id: "supports", title: "Supporters", description: "Supporters, advisors, and prospective classroom testers.", matching: { phrases: ["prospective testers", "our supporters"], keywords: ["supporters", "advisors", "testers"] } },
-  { id: "roadmap", title: "Roadmap", description: "Development, beta testing, and launch milestones.", matching: { phrases: ["beta testing", "launch milestones"], keywords: ["roadmap", "beta", "launch"] } },
-  { id: "vision", title: "Vision", description: "Longer-term applications for Imagineer beyond classrooms.", matching: { phrases: ["beyond classrooms", "long term vision"], keywords: ["vision", "longer", "applications"] } },
-  { id: "ask", title: "The ask", description: "Request for advice, next-step feedback, and venture introductions.", matching: { phrases: ["venture introductions", "ask for advice"], keywords: ["advice", "feedback", "introductions"] } }
+/** Each description becomes the selection guidance for that slide's model function. */
+export const PITCH_SLIDES: readonly SlideDescriptor[] = [
+  { id: "open", title: "Imagineer", description: "Opening and introduction to Imagineer and founders Vivaan Grover, Jackson Bizzell, and Krish Sapovadia. Choose for an explicit request to start over, introduce the company or team, or return to the title slide." },
+  { id: "anecdote", title: "The story", description: "The founders' AP Biology story about struggling to picture the electron transport chain. Choose when the speaker introduces the personal classroom anecdote, biology example, or what inspired Imagineer." },
+  { id: "problem", title: "The problem", description: "The classroom problem: invisible or abstract concepts are hard to explain, teachers spend time preparing visuals, and students can miss the explanation. Choose for the pain point, teaching gap, or why existing classroom explanations fall short." },
+  { id: "hall", title: "In the hall", description: "Imagineer used for live visual explanations across classrooms and school subjects. Choose for the hallway or classroom scenario, teachers using it across subjects, or showing how an explanation reaches students in the moment." },
+  { id: "whynow", title: "Why now", description: "Why this is possible now: advances in AI generation and falling technology costs. Choose for timing, recent technical capability, affordability, or why the product could not be built the same way earlier." },
+  { id: "product", title: "The product", description: "How Imagineer works: the product pipeline, agent responsibilities, and generated visual formats. Choose for an explanation of the system, workflow, agents, inputs and outputs, or the product itself before a live demonstration." },
+  { id: "demo", title: "Demo", description: "Transition into a live demonstration of Imagineer. Choose for an explicit request to see the product in action, run the demo, or move from describing the product to showing it." },
+  { id: "value", title: "Classroom value", description: "Benefits in class: stronger attention and engagement and clearer explanations for learners. Choose when discussing student understanding, classroom impact, learning value, or the benefit to teachers and students." },
+  { id: "competition", title: "Competition", description: "Competitors and Imagineer's distinct position in the education market. Choose for alternatives, competing tools, differentiation, comparisons, or why a school would choose Imagineer over another product." },
+  { id: "gtm", title: "Go to market", description: "The go-to-market and customer acquisition strategy: start with private schools, grow through teacher referrals, and expand classroom by classroom. Choose for sales, distribution, reaching schools, finding early customers, or a plan to spread adoption. This is about who adopts the product and how, not the product build schedule." },
+  { id: "tam", title: "Market opportunity", description: "Market size and expansion: North Carolina launch area, broader geography, and the pricing basis used to estimate opportunity. Choose for TAM, addressable market, market sizing, geographic reach, or how large the opportunity could become." },
+  { id: "model", title: "Business model", description: "How Imagineer makes money: teacher and school plans, recurring revenue, and delivery costs. Choose for subscriptions, pricing plans, who pays, revenue model, unit economics, or cost to serve; use the financials slide for projections and funding use." },
+  { id: "financials", title: "Financials", description: "Funding allocation and three-year financial projections. Choose for forecast revenue or expenses, projected growth, cash needs, budgets, funding use, or the numbers over the next three years." },
+  { id: "whyus", title: "Why us", description: "Why this founding team can execute: relevant experience, personal motivation, and ability to build Imagineer. Choose for founder qualifications, team fit, background, credibility, or why these founders are the right people." },
+  { id: "supports", title: "Supporters", description: "People supporting Imagineer: supporters, advisors, and prospective classroom testers. Choose for mentors, external validation, advisory help, early school contacts, or teachers willing to test." },
+  { id: "roadmap", title: "Roadmap", description: "The product development timeline: build milestones, beta testing, and launch dates. Choose for what will be built next, testing schedule, release phases, or when Imagineer will launch. Do not choose for go-to-market, sales, private-school entry, or teacher referrals." },
+  { id: "vision", title: "Vision", description: "Longer-term possibilities for Imagineer beyond classrooms. Choose for future applications, broader vision, long-term direction, or where the technology could go after the initial education use case." },
+  { id: "ask", title: "The ask", description: "The closing request for advice, next-step feedback, and venture introductions. Choose when wrapping up with what the team wants from the audience, requests for introductions, feedback, support, or a final call to action." }
 ];
 
-export const PITCH_DECK: readonly SlideDescriptor[] = PITCH_SLIDES.map(({ id, title, description }) => ({ id, title, description }));
-
-/** Read-only cue lookup used by the conservative FunctionGemma quality guard. */
-export const PITCH_SLIDE_MATCHING_CUES = Object.fromEntries(
-  PITCH_SLIDES.map((slide) => [slide.id, slide.matching])
-);
+export const PITCH_DECK: readonly SlideDescriptor[] = PITCH_SLIDES;
 
 function isValidId(value: string) {
   return /^[a-z0-9][a-z0-9_-]*$/.test(value);

@@ -1,4 +1,8 @@
-"""Strict, versioned JSONL messages and FunctionGemma call parsing."""
+"""Shared Python pipe contract: bounded JSONL frames and exact model proposals.
+
+Rust independently enforces the same version, frame limit, request ID, and
+deck-scoped decision rules before React can change a slide.
+"""
 
 import json
 import re
@@ -6,11 +10,8 @@ from typing import Any
 
 PROTOCOL_VERSION = 1
 MAX_IPC_LINE_BYTES = 64 * 1024
-_ID = r"[a-z0-9][a-z0-9_-]{0,79}"
 _NO_ACTION = re.compile(r"\A<start_function_call>call:no_action\{\}<end_function_call>\Z")
-_GOTO_SLIDE = re.compile(
-    rf"\A<start_function_call>call:goto_slide\{{slide_id:<escape>(?P<slide_id>{_ID})<escape>\}}<end_function_call>\Z"
-)
+_SHOW_SLIDE = re.compile(r"\A<start_function_call>call:(?P<name>show_[a-z0-9_]{1,60})\{\}<end_function_call>\Z")
 
 
 class ProtocolError(ValueError):
@@ -38,11 +39,11 @@ def decode_message(line: bytes) -> dict[str, Any]:
     return value
 
 
-def parse_function_call(output: str, available_ids: set[str]) -> dict[str, str]:
+def parse_function_call(output: str, available_functions: dict[str, str]) -> dict[str, str]:
     """Accept exactly one deck-scoped FunctionGemma call and nothing else."""
     if _NO_ACTION.fullmatch(output):
         return {"action": "no_action"}
-    match = _GOTO_SLIDE.fullmatch(output)
-    if match and match["slide_id"] in available_ids:
-        return {"action": "goto_slide", "slide_id": match["slide_id"]}
+    match = _SHOW_SLIDE.fullmatch(output)
+    if match and match["name"] in available_functions:
+        return {"action": "goto_slide", "slide_id": available_functions[match["name"]]}
     raise ProtocolError("invalid_function_call")

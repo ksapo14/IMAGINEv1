@@ -46,8 +46,8 @@ type EvaluationRequest = {
   controller: AbortController;
 };
 
-// Permit a bounded 90-second cold worker load plus response headroom; warm calls reuse it.
-const DEFAULT_TIMEOUT_MS = 105_000;
+// Cover a 300-second cold load, a 120-second CPU decision, and response headroom.
+const DEFAULT_TIMEOUT_MS = 435_000;
 const MAX_TRANSCRIPT_LENGTH = 4000;
 const IDLE_OUTCOME: PitchOutcome = { kind: "idle", message: "" };
 

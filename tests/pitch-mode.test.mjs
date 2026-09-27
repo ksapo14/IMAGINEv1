@@ -3,7 +3,8 @@ import test from "node:test";
 
 import { PitchController } from "../lib/pitch/controller.ts";
 import { PITCH_DECK, PITCH_SLIDES, assertValidPitchDeck, validatePitchRendererIds } from "../lib/pitch/deck.ts";
-import { createFunctionGemmaPitchModelAdapter, highConfidencePitchDecision, isPitchDecision, PitchModelError } from "../lib/pitch/model.ts";
+import { createFunctionGemmaPitchModelAdapter, isPitchDecision, PitchModelError } from "../lib/pitch/model.ts";
+import { desktopPitchModel } from "../desktop/src/model.ts";
 import {
   PITCH_PRESENTATION_STORAGE_KEY,
   loadPitchPresentation,
@@ -41,46 +42,21 @@ test("deck metadata preserves all semantic slide IDs and renderer validation", (
   assert.equal(PITCH_SLIDES.length, PITCH_DECK.length);
 });
 
-test("FunctionGemma adapter posts finalized input, forwards cancellation, and validates decisions", async () => {
+test("FunctionGemma adapter accepts a model-chosen slide without keyword cues and validates decisions", async () => {
   const calls = [];
-  const adapter = createFunctionGemmaPitchModelAdapter(async (url, options) => {
-    calls.push({ url, options });
-    return new Response(JSON.stringify({ action: "goto_slide", slide_id: "tam" }));
+  const adapter = createFunctionGemmaPitchModelAdapter(async (input, signal) => {
+    calls.push({ input, signal });
+    return { action: "goto_slide", slide_id: "tam" };
   });
   const signal = new AbortController().signal;
-  assert.deepEqual(await adapter.evaluate(mockInput("open", "Tell me about market size."), { signal }), { action: "no_action" });
-  assert.match(calls[0].url, /\/api\/pitch\/decide$/);
-  assert.equal(calls[0].options.method, "POST");
-  assert.equal(calls[0].options.signal, signal);
-  assert.equal(JSON.parse(calls[0].options.body).latestUtterance, "Tell me about market size.");
+  assert.deepEqual(await adapter.evaluate(mockInput("open", "Let's move on."), { signal }), { action: "goto_slide", slide_id: "tam" });
+  assert.equal(calls[0].signal, signal);
+  assert.equal(calls[0].input.latestUtterance, "Let's move on.");
 
-  const unavailable = createFunctionGemmaPitchModelAdapter(async () => new Response(JSON.stringify({ action: "goto_slide", slide_id: "missing" })));
-  await assert.rejects(unavailable.evaluate(mockInput(), { signal: new AbortController().signal }), /unavailable slide/);
-  const malformed = createFunctionGemmaPitchModelAdapter(async () => new Response(JSON.stringify({ action: "no_action", extra: true })));
-  await assert.rejects(malformed.evaluate(mockInput(), { signal: new AbortController().signal }), /invalid decision/);
-  const refused = createFunctionGemmaPitchModelAdapter(async () => new Response(JSON.stringify({
-    detail: { code: "function_gemma_runtime_unavailable", message: "PRIVATE provider detail must never reach the browser." }
-  }), { status: 503 }));
-  await assert.rejects(refused.evaluate(mockInput(), { signal: new AbortController().signal }), (error) => {
-    assert.equal(error.code, "function_gemma_runtime_unavailable");
-    assert.match(error.message, /FunctionGemma is not running/);
-    assert.doesNotMatch(error.message, /PRIVATE/);
-    return true;
-  });
-  const hostile = createFunctionGemmaPitchModelAdapter(async () => new Response(JSON.stringify({
-    detail: { code: "unknown_code", message: "PRIVATE provider detail" }
-  }), { status: 502 }));
-  await assert.rejects(hostile.evaluate(mockInput(), { signal: new AbortController().signal }), (error) => {
-    assert.equal(error.code, "function_gemma_unavailable");
-    assert.doesNotMatch(error.message, /PRIVATE/);
-    return true;
-  });
-  const transportFailure = createFunctionGemmaPitchModelAdapter(async () => { throw new Error("PRIVATE http://private-user:private-pass@example.test"); });
-  await assert.rejects(transportFailure.evaluate(mockInput(), { signal: new AbortController().signal }), (error) => {
-    assert.equal(error.code, "function_gemma_unavailable");
-    assert.doesNotMatch(error.message, /PRIVATE/);
-    return true;
-  });
+  const unavailable = createFunctionGemmaPitchModelAdapter(async () => ({ action: "goto_slide", slide_id: "missing" }));
+  await assert.rejects(unavailable.evaluate(mockInput(), { signal }), { code: "protocol_error" });
+  const malformed = createFunctionGemmaPitchModelAdapter(async () => ({ action: "no_action", extra: true }));
+  await assert.rejects(malformed.evaluate(mockInput(), { signal }), { code: "protocol_error" });
   const aborted = new AbortController();
   aborted.abort();
   await assert.rejects(adapter.evaluate(mockInput(), { signal: aborted.signal }), { name: "AbortError" });
@@ -89,30 +65,36 @@ test("FunctionGemma adapter posts finalized input, forwards cancellation, and va
   assert.equal(isPitchDecision({ action: "no_action", slide_id: "tam" }), false);
 });
 
-test("conservative quality guard routes only strong cues and holds unsupported model moves", async () => {
-  assert.deepEqual(highConfidencePitchDecision(mockInput("open", "Let's discuss the private school market.")), { action: "goto_slide", slide_id: "tam" });
-  assert.equal(highConfidencePitchDecision(mockInput("tam", "Let's discuss the private school market.")), null);
-  assert.equal(highConfidencePitchDecision(mockInput("open", "marketing is hard")), null);
-  assert.equal(highConfidencePitchDecision(mockInput("open", "beta testing and venture introductions")), null);
-
-  let calls = 0;
-  const adapter = createFunctionGemmaPitchModelAdapter(async () => {
-    calls += 1;
-    return new Response(JSON.stringify({ action: "goto_slide", slide_id: "tam" }));
-  });
-  assert.deepEqual(await adapter.evaluate(mockInput("open", "teacher preparation"), { signal: new AbortController().signal }), { action: "no_action" });
-  assert.equal(calls, 1);
-  assert.deepEqual(await adapter.evaluate(mockInput("open", "market"), { signal: new AbortController().signal }), { action: "no_action" });
-  assert.equal(calls, 2);
-  assert.deepEqual(await adapter.evaluate(mockInput("open", "beta testing and venture introductions"), { signal: new AbortController().signal }), { action: "no_action" });
-  assert.equal(calls, 3);
-  assert.deepEqual(await adapter.evaluate(mockInput("tam", "private school market"), { signal: new AbortController().signal }), { action: "no_action" });
-  assert.equal(calls, 4);
-
-  const direct = createFunctionGemmaPitchModelAdapter(async () => {
-    throw new Error("strong matches must not invoke FunctionGemma");
-  });
-  assert.deepEqual(await direct.evaluate(mockInput("open", "private school market"), { signal: new AbortController().signal }), { action: "goto_slide", slide_id: "tam" });
+test("desktop model bridge cancels superseded work and hides native error details", async () => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const calls = [];
+  let resolveEvaluation;
+  Object.defineProperty(globalThis, "window", { configurable: true, value: {
+    __TAURI__: { core: { invoke: (command, args) => {
+      calls.push({ command, args });
+      if (command === "evaluate_pitch") return new Promise((resolve) => { resolveEvaluation = resolve; });
+      return Promise.resolve();
+    } } }
+  } });
+  try {
+    const controller = new AbortController();
+    const evaluation = desktopPitchModel.evaluate(mockInput("open", "Move to market."), { signal: controller.signal });
+    controller.abort();
+    resolveEvaluation({ action: "goto_slide", slide_id: "tam" });
+    await assert.rejects(evaluation, { name: "AbortError" });
+    assert.equal(calls[0].command, "evaluate_pitch");
+    assert.equal(calls[1].command, "cancel_pitch");
+    assert.equal(calls[0].args.requestId, calls[1].args.requestId);
+    globalThis.window.__TAURI__.core.invoke = () => Promise.reject("PRIVATE model path");
+    await assert.rejects(desktopPitchModel.evaluate(mockInput(), { signal: new AbortController().signal }), (error) => {
+      assert.equal(error.code, "function_gemma_unavailable");
+      assert.doesNotMatch(error.message, /PRIVATE/);
+      return true;
+    });
+  } finally {
+    if (original) Object.defineProperty(globalThis, "window", original);
+    else delete globalThis.window;
+  }
 });
 
 test("deck validation rejects duplicate and incomplete semantic metadata", () => {
@@ -229,11 +211,11 @@ test("timeouts and model errors keep the visible slide", async () => {
   assert.equal(throwController.getSnapshot().currentSlideId, "open");
   assert.equal(throwController.getSnapshot().evaluationStatus, "error");
   const runtimeController = new PitchController({
-    adapter: { evaluate: () => { throw new PitchModelError("function_gemma_runtime_unavailable"); } }
+    adapter: { evaluate: () => { throw new PitchModelError("worker_crashed"); } }
   });
   await runtimeController.evaluateUtterance("private school market");
   assert.equal(runtimeController.getSnapshot().currentSlideId, "open");
-  assert.match(runtimeController.getSnapshot().lastOutcome.message, /FunctionGemma is not running/);
+  assert.match(runtimeController.getSnapshot().lastOutcome.message, /stopped unexpectedly/);
   timeoutController.dispose();
   throwController.dispose();
   runtimeController.dispose();

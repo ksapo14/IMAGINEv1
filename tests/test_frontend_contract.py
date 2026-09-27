@@ -44,47 +44,14 @@ class FrontendContractTests(unittest.TestCase):
         ]
         return "\n".join(path.read_text(encoding="utf-8") for path in files)
 
-    def test_pitch_replaces_canvas_with_semantic_slide_contracts(self) -> None:
-        self.assertIn('redirect("/pitch")', self.source("app/canvas/page.tsx"))
-        self.assertIn("Pitch", self.source("app/pitch/page.tsx"))
-        layout = self.source("app/pitch/layout.tsx")
-        self.assertIn("index: false", layout)
-        self.assertIn("follow: false", layout)
-
-    def test_pitch_uses_function_gemma_and_preserves_safe_controller_boundary(self) -> None:
-        model = (ROOT / "lib" / "pitch" / "model.ts").read_text(encoding="utf-8")
-        controller = (ROOT / "lib" / "pitch" / "controller.ts").read_text(encoding="utf-8")
-        workspace = (ROOT / "components" / "pitch" / "pitch-workspace.tsx").read_text(encoding="utf-8")
-        self.assertIn("createFunctionGemmaPitchModelAdapter", model)
-        self.assertIn("/api/pitch/decide", model)
-        self.assertIn("signal", model)
-        self.assertIn("isPitchDecision", controller)
-        self.assertIn("applyModelDecision", controller)
-        self.assertIn('"deepgram"', workspace)
-        self.assertIn('"simulation"', workspace)
-        self.assertIn("DEFAULT_TIMEOUT_MS = 105_000", controller)
-
-    def test_pitch_deck_is_semantic_with_conservative_matching_cues(self) -> None:
-        deck = (ROOT / "lib" / "pitch" / "deck.ts").read_text(encoding="utf-8")
-        self.assertEqual(deck.count('id: "'), 18)
-        self.assertIn("matching:", deck)
-        self.assertIn('id: "financials"', deck)
-
-    def test_frontend_only_hides_typed_evaluation_before_a_request(self) -> None:
-        workspace = self.source("components/pitch/pitch-workspace.tsx")
-        deployment = self.source("lib/deployment-mode.ts")
-        self.assertIn("frontendOnly ? <p>Slide evaluation requires a backend connection.</p>", workspace)
-        self.assertIn("if (frontendOnly) { setNotice(FRONTEND_ONLY_NOTICE); return; }", workspace)
-        self.assertNotIn("works offline", workspace)
-        self.assertIn("NEXT_PUBLIC_FRONTEND_ONLY", deployment)
-        self.assertIn("Only manual slide navigation remains available.", deployment)
-
-    def test_transcription_transport_remains_session_scoped(self) -> None:
-        transport = self.source("components/pitch/transcription-transport.ts")
-        self.assertIn("PitchUtteranceNormalizer", transport)
-        self.assertIn("sessionId", transport)
-        self.assertIn("__stop__", transport)
-        self.assertIn("getUserMedia", transport)
+    def test_pitch_routes_and_server_are_absent_from_website(self) -> None:
+        for relative_path in ["app/pitch/page.tsx", "app/pitch/layout.tsx", "app/canvas/page.tsx", "app/canvas/layout.tsx", "backend/main.py", "backend.Dockerfile"]:
+            with self.subTest(relative_path=relative_path):
+                self.assertFalse((ROOT / relative_path).exists())
+        compose = self.source("docker-compose.yml")
+        self.assertIn("website:", compose)
+        self.assertNotIn("backend:", compose)
+        self.assertNotIn("backend.Dockerfile", compose)
 
     def test_development_and_vercel_build_contracts_remain(self) -> None:
         package = self.source("package.json")
@@ -94,17 +61,17 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn('"dev":', package)
         self.assertIn('"installCommand": "npm ci"', vercel)
         self.assertIn("nextCli", build)
-        self.assertIn("resolveVercelFrontendOnly", build)
+        self.assertNotIn("NEXT_PUBLIC_FRONTEND_ONLY", build)
         self.assertIn("legacy-peer-deps=true", npmrc)
 
-    def test_site_origin_sitemap_and_robots_keep_pitch_private(self) -> None:
+    def test_site_origin_sitemap_and_robots_publish_marketing(self) -> None:
         origin = self.source("lib/site-origin.ts")
         sitemap = self.source("app/sitemap.ts")
         robots = self.source("app/robots.ts")
         self.assertIn("NEXT_PUBLIC_SITE_URL", origin)
         self.assertIn("getSiteOrigin", sitemap)
         self.assertNotIn('"/pitch"', sitemap)
-        self.assertIn('disallow: ["/canvas", "/pitch"]', robots)
+        self.assertIn('allow: "/"', robots)
 
     def test_public_routes_share_marketing_layout_and_are_isolated_from_pitch(self) -> None:
         layout = self.source("app/(marketing)/layout.tsx")
@@ -143,42 +110,17 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn("ThemeProvider", layout)
         self.assertIn("imagineer-shortform.png", layout)
 
-    def test_legacy_generation_backend_is_removed(self) -> None:
-        backend = (ROOT / "backend" / "main.py").read_text(encoding="utf-8")
-        self.assertNotIn("/api/generate", backend)
-        self.assertNotIn("/api/visual", backend)
-
-    def test_readme_documents_function_gemma_without_legacy_provider_copy(self) -> None:
+    def test_readme_documents_local_function_gemma(self) -> None:
         readme = self.source("README.md")
         self.assertIn("FunctionGemma", readme)
-        self.assertIn("FUNCTION_GEMMA_BASE_URL", readme)
+        self.assertIn("desktop/", readme)
+        self.assertNotIn("FUNCTION_GEMMA_BASE_URL", readme)
 
-    def test_pitch_model_contract_keeps_renderer_storage_and_controller_guards(self) -> None:
-        types = self.source("lib/pitch/types.ts")
-        controller = self.source("lib/pitch/controller.ts")
-        storage = self.source("lib/pitch/storage.ts")
-        renderer = self.source("components/pitch/deck/pitch-deck-slide.tsx")
-        for phrase in ["type SlideId = string", "type SlideDescriptor", "type PitchModelInput", 'action: "goto_slide"; slide_id: SlideId', 'action: "no_action"', "interface PitchModelAdapter", "signal: AbortSignal"]:
-            with self.subTest(phrase=phrase):
-                self.assertIn(phrase, types)
-        for phrase in ["runWithTimeout", "cancelActiveRequest", "applyModelDecision"]:
-            self.assertIn(phrase, controller)
-        self.assertIn("PITCH_DECK_ID", storage)
-        self.assertIn("PITCH_DECK_VERSION", storage)
-        self.assertIn("DECK_RENDERER_IDS", renderer)
-        self.assertIn("PitchDeckSlide", renderer)
-
-    def test_transcription_callbacks_are_scoped_to_one_session(self) -> None:
-        transport = self.source("components/pitch/transcription-transport.ts")
-        for phrase in ["private sessionId = 0", "const ownsSession = () => this.sessionId === sessionId", "this.sessionId += 1", "this.normalizer.reset()", "if (!ownsSession()) return", "stream.getTracks().forEach((track) => track.stop())"]:
-            self.assertIn(phrase, transport)
-
-    def test_development_frontend_uses_advertised_port(self) -> None:
+    def test_development_website_has_no_backend_launcher(self) -> None:
         package = json.loads(self.source("package.json"))
-        script = self.source("scripts/dev.ps1")
-        self.assertIn("scripts/dev.ps1", package["scripts"]["dev"])
-        self.assertIn("Frontend: http://localhost:3000", script)
-        self.assertIn("& $next dev -p 3000", script)
+        self.assertEqual(package["scripts"]["dev"], "next dev")
+        self.assertNotIn("dev:backend", package["scripts"])
+        self.assertFalse((ROOT / "scripts" / "dev.ps1").exists())
 
     def test_cloudflare_runtime_is_not_part_of_the_project(self) -> None:
         package = json.loads(self.source("package.json"))
@@ -191,7 +133,7 @@ class FrontendContractTests(unittest.TestCase):
         self.assertNotIn('"node_modules/workerd"', lockfile)
         self.assertFalse((ROOT / "worker").exists())
 
-    def test_vercel_install_build_and_frontend_only_policy_are_specific(self) -> None:
+    def test_vercel_install_and_website_build_are_specific(self) -> None:
         npmrc = self.source(".npmrc").splitlines()
         vercel = json.loads(self.source("vercel.json"))
         package = json.loads(self.source("package.json"))
@@ -202,12 +144,10 @@ class FrontendContractTests(unittest.TestCase):
         self.assertEqual(vercel["buildCommand"], "npm run build:vercel")
         self.assertEqual(package["scripts"]["build"], "vinext build")
         self.assertEqual(package["scripts"]["build:vercel"], "node scripts/vercel-build.mjs")
-        for phrase in ["export function resolveVercelFrontendOnly", 'IMAGINE_VERCEL_BUILD: "1"', "NEXT_PUBLIC_FRONTEND_ONLY: resolveVercelFrontendOnly(", 'require.resolve("next/dist/bin/next")', 'spawnSync(process.execPath, [nextCli, "build"]']:
+        for phrase in ['IMAGINE_VERCEL_BUILD: "1"', 'require.resolve("next/dist/bin/next")', 'spawnSync(process.execPath, [nextCli, "build"]']:
             self.assertIn(phrase, wrapper)
+        self.assertNotIn("NEXT_PUBLIC_FRONTEND_ONLY", wrapper)
         self.assertIn('process.env.IMAGINE_VERCEL_BUILD === "1"', next_config)
-        deployment = self.source("lib/deployment-mode.ts")
-        for phrase in ["explicitMode === \"true\"", "explicitMode === \"false\"", "process.env.NEXT_PUBLIC_VERCEL_ENV", "Only manual slide navigation remains available."]:
-            self.assertIn(phrase, deployment)
 
     def test_site_origin_and_public_environment_contracts_remain(self) -> None:
         origin = self.source("lib/site-origin.ts")
@@ -217,7 +157,7 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn('`https://${productionHost', origin)
         self.assertIn('replace(/\\/+$/, "")', origin)
         self.assertIn(".vercel/", gitignore.splitlines())
-        for name in ["NEXT_PUBLIC_FRONTEND_ONLY=", "NEXT_PUBLIC_VERCEL_ENV=", "NEXT_PUBLIC_SITE_URL="]:
+        for name in ["NEXT_PUBLIC_SITE_URL=", "DEEPGRAM_API_KEY="]:
             self.assertIn(name, env_example)
 
     def test_public_routes_and_workspace_are_isolated(self) -> None:
@@ -312,15 +252,10 @@ class FrontendContractTests(unittest.TestCase):
         for relative_path in ["app/loading.tsx", "app/debug/page.tsx", "components/marketing-experience.tsx", "components/knowledge-scene.tsx", "components/launch-loader.tsx", "components/smooth-scroll.tsx", "components/diagrams/structured-diagram.tsx", "components/building-blocks/debug.tsx", "components/building-blocks/sample-data.ts", "components/workspace/composition-view.tsx", "lib/composition-summary.ts"]:
             self.assertFalse((ROOT / relative_path).exists())
 
-    def test_sitemap_and_robots_exclude_pitch_and_canvas_exactly(self) -> None:
-        canvas = self.source("app/canvas/layout.tsx")
-        pitch = self.source("app/pitch/layout.tsx")
+    def test_sitemap_contains_only_public_marketing_routes(self) -> None:
         robots = self.source("app/robots.ts")
         sitemap = self.source("app/sitemap.ts")
-        for source in [canvas, pitch]:
-            self.assertIn("index: false", source)
-            self.assertIn("follow: false", source)
-        self.assertIn('disallow: ["/canvas", "/pitch"]', robots)
+        self.assertIn('allow: "/"', robots)
         self.assertIn('const publicRoutes = ["", "/product", "/about", "/contact"]', sitemap)
         for route in ['"/canvas"', '"/pitch"', '"/educators"', '"/schools"']:
             self.assertNotIn(route, sitemap)
