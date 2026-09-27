@@ -1,0 +1,336 @@
+target|current|difficulty|utterance
+open|ask|easy|Let's start again with the Imagineer title slide.
+open|problem|easy|I want to introduce Imagineer and the three founders.
+open|roadmap|easy|Put our opening logo back on screen.
+open|value|easy|First, here is who we are.
+open|vision|easy|Return to the introduction with our names.
+open|financials|easy|Take us back to the beginning of the pitch.
+open|anecdote|hard|Before the classroom story, let me introduce Vivaan, Jackson, and Krish.
+open|whyus|hard|I mentioned our team credentials; now show the title with all three names.
+open|product|hard|The name on the screen is Imagineer; let's begin at the cover.
+open|ask|hard|We have finished the questions, so reset the deck to its first slide.
+open|supports|hard|Those are our advisors; I want to return to our own company introduction.
+open|demo|hard|Pause the demo and show the Imagineer opening screen.
+anecdote|open|easy|This began in sophomore AP Biology.
+anecdote|problem|easy|Let me tell you what happened when our teacher asked us to picture the electron transport chain.
+anecdote|product|easy|The original spark came from a moment in biology class.
+anecdote|value|easy|I closed my eyes in AP Bio and saw nothing.
+anecdote|roadmap|easy|Let's go back to the classroom story that started it.
+anecdote|demo|easy|Our first inspiration was a biology lesson we could not visualize.
+anecdote|problem|hard|The teaching gap is real, but first I want to tell you about one particular AP Bio lecture.
+anecdote|whyus|hard|We were the students in that class; here is the exact moment the idea struck.
+anecdote|product|hard|Before explaining our agents, think back to an electron transport chain lesson.
+anecdote|hall|hard|Not every classroom example is hypothetical; ours started with a teacher saying to close our eyes.
+anecdote|value|hard|I am not talking about general engagement yet. I am talking about the day I could not picture that biology process.
+anecdote|vision|hard|The future is exciting, but the first seed was an AP Biology assignment.
+problem|anecdote|easy|The real problem is that teachers cannot show abstract ideas while they explain them.
+problem|open|easy|Let's look at the gap between spoken explanations and what students can actually see.
+problem|product|easy|Preparing useful visuals takes teachers too much time.
+problem|value|easy|Students can miss the point when an invisible concept is only described aloud.
+problem|hall|easy|Why do traditional classroom explanations fall short?
+problem|gtm|easy|I want to explain the classroom pain point before talking about sales.
+problem|anecdote|hard|That AP Bio moment is one example; the larger issue affects teachers explaining anything you cannot see.
+problem|value|hard|Attention matters, but the root issue is that the explanation has no visual to anchor it.
+problem|product|hard|Before the solution, we need to show why making a visual in advance is so hard.
+problem|demo|hard|Hold the product demo; first show what goes wrong in a normal lecture.
+problem|whynow|hard|Even if AI is getting cheaper, we still need to explain the pain teachers face today.
+problem|competition|hard|The issue is not yet which tool wins; it is the lack of useful visuals in the moment.
+hall|problem|easy|Now show how it can work in any classroom, in any subject, while the teacher is still talking.
+hall|product|easy|Let's move to the hallway scene of the tool being used across classrooms.
+hall|open|easy|Here is Imagineer helping a teacher explain something live in class.
+hall|vision|easy|Show the in-school scenario with multiple subjects.
+hall|gtm|easy|Picture this moving from one classroom to the room next door.
+hall|demo|easy|I want the slide that shows this working in a real school setting.
+hall|gtm|hard|I'm describing students seeing a live explanation in the next classroom, not how we sell to that school.
+hall|value|hard|The benefit matters, but right now look at the teacher using it while talking.
+hall|product|hard|Skip the internal agent diagram and show the cross-subject classroom scene.
+hall|anecdote|hard|This is no longer just my AP Bio memory; imagine the same live visual in chemistry or history.
+hall|vision|hard|We can go beyond schools later; first show how the product travels down the hall today.
+hall|supports|hard|The teachers next door are using the visual, rather than advising our company.
+whynow|open|easy|Why is this product possible now when it was not a few years ago?
+whynow|problem|easy|Recent AI advances finally make live generated visuals practical.
+whynow|product|easy|The cost of generating these explanations has fallen dramatically.
+whynow|competition|easy|Let's talk about the technology timing and lower compute costs.
+whynow|financials|easy|Show the slide about why the technical moment is right.
+whynow|vision|easy|What changed in AI to make Imagineer feasible today?
+whynow|model|hard|I mean falling generation costs across the industry, not our subscription price.
+whynow|financials|hard|Set aside our budget; show how technical capability has improved while costs declined.
+whynow|product|hard|Before showing the pipeline, explain why modern AI can build visuals as the speaker talks.
+whynow|roadmap|hard|I am asking why the timing is right, not when our beta launches.
+whynow|competition|hard|Other tools exist, but first look at the breakthrough that made this category possible.
+whynow|tam|hard|This is a technology inflection point, not a calculation of the education market.
+product|open|easy|Let me explain the product pipeline from a spoken request to a visual.
+product|problem|easy|One agent decides what to draw and another draws it.
+product|hall|easy|Here is how Imagineer turns an explanation into a generated diagram.
+product|demo|easy|Before showing it live, walk through how the system works.
+product|value|easy|Let's unpack the inputs, outputs, and responsibilities of the agents.
+product|competition|easy|I want to show the architecture of the visual generator.
+product|demo|hard|I am describing the workflow, not asking to run the live demonstration yet.
+product|roadmap|hard|These are the steps inside each request, not the milestones in our launch plan.
+product|whynow|hard|The AI breakthrough enables this, but I want to explain which component chooses the visual.
+product|model|hard|By model here I mean our software architecture, not pricing or subscriptions.
+product|hall|hard|The teacher speaks in class; now let's open up what the two agents do behind the scenes.
+product|value|hard|Clearer explanations are the result; first show how our system produces the visual.
+demo|product|easy|Enough architecture; let's see a live demo.
+demo|open|easy|I would like to show you the product in action now.
+demo|value|easy|Let's switch to the demonstration screen.
+demo|competition|easy|Can we run the live example?
+demo|roadmap|easy|Show us what Imagineer actually does.
+demo|hall|easy|I will stop talking about it and demonstrate it.
+demo|product|hard|I just explained the two agents; now I am going to use the product in front of you.
+demo|financials|hard|The numbers can wait; let me show the live experience.
+demo|vision|hard|That is the long-term vision, but right now watch the working prototype.
+demo|supports|hard|Instead of telling you who tested it, I want to demonstrate it myself.
+demo|value|hard|You'll see the classroom benefit in a moment; first let me run the tool.
+demo|hall|hard|We saw where it is used. Now watch me generate a visual live.
+value|demo|easy|This is what the product changes for attention and understanding in class.
+value|problem|easy|Students stay engaged longer when explanations become visual.
+value|open|easy|Let's discuss the benefit for teachers and students.
+value|hall|easy|What does this actually do for learning outcomes?
+value|product|easy|Now let us talk about classroom impact rather than the internal pipeline.
+value|financials|easy|A clearer explanation helps students grasp the lesson.
+value|problem|hard|The challenge is real; now focus on the improvement in student attention.
+value|hall|hard|I know where it happens, but what matters is whether learners follow along.
+value|model|hard|I mean value for the classroom, not our revenue model.
+value|demo|hard|The demo is over; let's discuss why seeing the concept helps students understand it.
+value|gtm|hard|Teachers may recommend it, but here I am talking about the benefit their pupils feel.
+value|tam|hard|The number of schools can wait; this slide is about what a student gets from a better explanation.
+competition|product|easy|Let's compare Imagineer with competing education tools.
+competition|open|easy|How are we different from other visual learning products?
+competition|value|easy|What alternatives do schools have today?
+competition|gtm|easy|Show our position relative to competitors.
+competition|model|easy|Why would a school pick us over another platform?
+competition|tam|easy|Let's look at the competitive landscape.
+competition|product|hard|Both products generate visuals, but the key point here is how our approach differs from theirs.
+competition|value|hard|The student benefit is similar on paper; show the comparison with other tools.
+competition|gtm|hard|I am not explaining how we reach schools yet; I am explaining who else sells to them.
+competition|whynow|hard|Recent AI changes brought rivals too, so let's compare our positions.
+competition|financials|hard|This is not our revenue forecast; it is the matrix of existing solutions.
+competition|vision|hard|We can dream bigger later; first explain why the current options do not solve this as well.
+gtm|open|easy|We'll start with private schools where one person can approve adoption.
+gtm|model|easy|Our go-to-market plan grows through teacher referrals.
+gtm|roadmap|easy|How do we reach our first schools and expand classroom by classroom?
+gtm|competition|easy|Show the sales and distribution strategy.
+gtm|tam|easy|Which customers will we approach first?
+gtm|financials|easy|Let's talk about acquiring customers rather than the forecast.
+gtm|roadmap|hard|The beta date is a different question; here is how a teacher brings us to the next classroom.
+gtm|model|hard|I am describing who introduces us to a school, not the price that school pays.
+gtm|supports|hard|These are teacher referrals that spread adoption, not advisors who endorse the project.
+gtm|hall|hard|One classroom tells the next about it; I mean the adoption path, not a live classroom example.
+gtm|tam|hard|North Carolina may be the first region, but this slide is about how we get through the door.
+gtm|vision|hard|The expansion I mean is our sales channel through schools, not future uses outside education.
+tam|open|easy|How large is the addressable market for Imagineer?
+tam|gtm|easy|Let's size the North Carolina opportunity before expanding geographically.
+tam|model|easy|Show the market calculation per teacher and per school.
+tam|financials|easy|What is our total addressable market?
+tam|competition|easy|How many schools could this eventually reach?
+tam|vision|easy|Let's walk through the geographic market expansion numbers.
+tam|gtm|hard|I am counting the schools we could serve, not explaining how we sell to the first ones.
+tam|model|hard|The teacher and school prices are inputs to a market estimate here.
+tam|financials|hard|This is an opportunity size, not our projected revenue over three years.
+tam|supports|hard|The map represents reachable schools, not the people advising us.
+tam|whynow|hard|Falling costs help, but I want to calculate the size of the education opportunity.
+tam|roadmap|hard|By expansion I mean geography and addressable customers, not a release milestone.
+model|open|easy|How do teacher and school subscriptions make money?
+model|gtm|easy|Teachers get us in, but schools are the business.
+model|tam|easy|Show the pricing plans and recurring revenue model.
+model|financials|easy|What does it cost to deliver the service per customer?
+model|product|easy|Let's explain who pays for Imagineer.
+model|competition|easy|What are the unit economics of a school plan?
+model|gtm|hard|A teacher introduces the tool, but I am asking which account pays and how often.
+model|financials|hard|I want current subscription economics, not year-three projections.
+model|tam|hard|Per-school pricing is the product we sell here, not the multiplier in a TAM equation.
+model|product|hard|By business model I mean the paying customer, not the two-agent technical system.
+model|whynow|hard|The cost that matters here is serving each school, not a general decline in AI prices.
+model|value|hard|The classroom value is clear; now show how we capture revenue from it.
+financials|open|easy|Show the three-year revenue and expense projections.
+financials|model|easy|How would we allocate the fifteen thousand six hundred dollars?
+financials|tam|easy|What do the year-three forecast numbers look like?
+financials|roadmap|easy|Let's discuss the funding budget for the next twelve months.
+financials|gtm|easy|Show the slide with one hundred schools and projected revenue.
+financials|value|easy|I want to see the cash needs and gross profit forecast.
+financials|tam|hard|One hundred schools is our year-three forecast here, not the entire addressable market.
+financials|model|hard|The subscription terms are set; now show the projected revenue they produce.
+financials|roadmap|hard|Twelve months here is how long the funding lasts, not a list of build milestones.
+financials|whynow|hard|I mean the budget for our project, not industry-wide compute price declines.
+financials|ask|hard|We will ask for help later; first show how the proposed funds would be spent.
+financials|competition|hard|The important comparison is revenue versus expenses across three years.
+whyus|open|easy|Why are these three founders the right people to build Imagineer?
+whyus|supports|easy|Let's introduce the team's relevant experience and motivation.
+whyus|anecdote|easy|We were the students who had this problem, and we built the solution.
+whyus|product|easy|Show why our team can execute the technical work.
+whyus|ask|easy|I want to talk about our background and credibility.
+whyus|roadmap|easy|Why us, specifically, to solve this?
+whyus|open|hard|You know our names from the title; now let me explain what makes us qualified.
+whyus|supports|hard|Those mentors help, but the question is why our founding team can deliver.
+whyus|anecdote|hard|The AP Bio story explains the spark; this slide is about the three years we kept building.
+whyus|demo|hard|You just saw what we made; now let me explain why this team made it.
+whyus|gtm|hard|School contacts matter, but I am talking about founder-market fit.
+whyus|vision|hard|The ambition is broad; our personal experience makes us a credible starting team.
+supports|open|easy|Let's introduce the advisors and supporters behind Imagineer.
+supports|whyus|easy|Who has offered to help or test the product in a classroom?
+supports|gtm|easy|Show the people who have already said yes to supporting us.
+supports|ask|easy|Which mentors have given us feedback?
+supports|roadmap|easy|Let's talk about prospective classroom testers.
+supports|product|easy|I want to name the external people helping this project.
+supports|whyus|hard|We covered the founders; now show the mentors outside the company.
+supports|gtm|hard|These teachers are willing to test, not customers acquired through a referral funnel.
+supports|value|hard|Their feedback may improve learning, but I want to acknowledge the supporters themselves.
+supports|ask|hard|These introductions have already happened; now show who is backing us.
+supports|demo|hard|The people who watched the prototype and offered help belong on this slide.
+supports|roadmap|hard|Beta testers are people here, rather than dates on the development timeline.
+roadmap|open|easy|What are the next product development milestones?
+roadmap|gtm|easy|When will we beta test and launch Imagineer?
+roadmap|product|easy|Show the build and release timeline.
+roadmap|financials|easy|Let's walk through what gets built next and when.
+roadmap|vision|easy|What is the sequence from prototype to classroom beta?
+roadmap|supports|easy|Where are we on the product roadmap?
+roadmap|gtm|hard|This is when the beta ships, not how a private school hears about it.
+roadmap|model|hard|I am asking for release phases, not subscription tiers.
+roadmap|financials|hard|The next twelve months here are milestones, not a spending breakdown.
+roadmap|vision|hard|The long-term vision can wait; show the next concrete steps to launch.
+roadmap|supports|hard|Teachers will test the beta during this phase; I want the schedule rather than their names.
+roadmap|hall|hard|The classroom rollout comes after we finish these development steps.
+vision|open|easy|The classroom board is only the beginning of what this could become.
+vision|hall|easy|Where could Imagineer go beyond schools?
+vision|roadmap|easy|Let's talk about the long-term vision after the initial education product.
+vision|tam|easy|Could this technology help people explain things outside classrooms?
+vision|product|easy|Show the future applications of our visual explanation system.
+vision|ask|easy|What is the broader direction for Imagineer?
+vision|roadmap|hard|I am describing possibilities years from now, not next quarter's beta milestones.
+vision|tam|hard|The opportunity I mean is new kinds of explanations, not just more schools on a map.
+vision|hall|hard|Any room could be a classroom today; in the future this can move beyond education altogether.
+vision|value|hard|The benefit might reach other settings, but this is the long-range vision rather than current learning impact.
+vision|product|hard|The present system draws classroom visuals; imagine its uses after that first product.
+vision|competition|hard|This is where we might take the category, not how current alternatives compare.
+ask|open|easy|To close, we would value your advice and introductions.
+ask|vision|easy|What we need from you is feedback on our next steps.
+ask|financials|easy|Let's end with the specific help we are asking this audience for.
+ask|supports|easy|If you know someone we should speak with, please introduce us.
+ask|roadmap|easy|Here is our final request to the room.
+ask|model|easy|I would love your feedback on the idea after this pitch.
+ask|financials|hard|The forecast is complete; now we are asking for introductions, not another number.
+ask|supports|hard|We have supporters already, and we would like you to connect us to more people.
+ask|vision|hard|That is our ambition; to finish, tell us who we should talk to next.
+ask|gtm|hard|This is a request for your help, rather than our sales channel into schools.
+ask|open|hard|We began with our names; now I want to close with a concrete ask.
+ask|whyus|hard|We have explained why we can build it; your candid advice is the next thing we need.
+no_action|open|easy|Please stay on this slide for a moment.
+no_action|anecdote|easy|Let me finish this story before moving on.
+no_action|problem|easy|There is one more part of this problem.
+no_action|hall|easy|Keep this classroom example on screen.
+no_action|whynow|easy|I want to add one more point about the timing.
+no_action|product|easy|The second agent draws the visual after the first one selects it.
+no_action|demo|easy|Give me a second while the demo loads.
+no_action|value|easy|That attention gap matters for the whole lesson.
+no_action|competition|easy|The comparison also includes tools teachers already know.
+no_action|gtm|easy|The teacher next door is another path for adoption.
+no_action|tam|easy|Now look at the per-school estimate on this map.
+no_action|model|easy|The school plan renews each year.
+no_action|financials|easy|The year-three column is a projection, not a guarantee.
+no_action|whyus|easy|Our experience in that classroom still shapes the work.
+no_action|supports|easy|Another advisor has offered to review the beta.
+no_action|roadmap|easy|The next milestone depends on completing the first.
+no_action|vision|easy|We are still exploring those future uses.
+no_action|ask|easy|I would welcome your questions before we finish.
+no_action|open|hard|The founders are Vivaan, Jackson, and Krish.
+no_action|anecdote|hard|I still could not see the electron transport chain in my head.
+no_action|problem|hard|The issue is still that teachers cannot draw every invisible process during class.
+no_action|hall|hard|This same room could be a chemistry classroom tomorrow.
+no_action|whynow|hard|AI generation has improved enough to make this possible.
+no_action|product|hard|I want to stay with the pipeline and explain what the first agent does.
+no_action|demo|hard|Don't switch screens; I am still showing the prototype.
+no_action|value|hard|The important effect is better comprehension, not just novelty.
+no_action|competition|hard|We are still comparing our approach with the alternatives.
+no_action|gtm|hard|Private schools remain our initial customer segment.
+no_action|tam|hard|That is the addressable market estimate for North Carolina alone.
+no_action|model|hard|Our pricing is per teacher and per school.
+no_action|financials|hard|The twelve-month budget is still on screen.
+no_action|whyus|hard|We have been working on this for three years.
+no_action|supports|hard|Those teachers offered to test the product.
+no_action|roadmap|hard|The beta launch is the next step in this timeline.
+no_action|vision|hard|Outside classrooms, there may be other uses too.
+no_action|ask|hard|We would also welcome honest feedback from you.
+no_action|open|hard|Okay, next.
+no_action|problem|hard|Let's move forward.
+no_action|demo|hard|Can we continue?
+no_action|gtm|hard|We can talk about that later.
+no_action|tam|hard|That's interesting, but let me finish this point.
+no_action|financials|hard|The number on the left is larger than the one on the right.
+no_action|whyus|hard|I mentioned biology earlier, but I am not changing slides yet.
+no_action|supports|hard|A teacher had a question about pricing, but stay here while I answer it.
+no_action|roadmap|hard|Our beta users may refer others later; for now keep the plan visible.
+no_action|vision|hard|There are some product details we can revisit after this slide.
+no_action|ask|hard|Thanks. I will pause here for questions.
+no_action|open|easy|Take a moment to read the names under the logo.
+no_action|open|hard|I'll explain our product in a moment; for now, this is Imagineer.
+no_action|open|hard|The company name is spelled right there on the cover.
+no_action|open|hard|Before we get into the business model, welcome everyone.
+no_action|anecdote|easy|My teacher had just introduced the electron transport chain.
+no_action|anecdote|hard|That later became a product idea, but at that moment I only saw a blank image.
+no_action|anecdote|hard|We will get to the larger classroom problem; I am still describing that afternoon in AP Bio.
+no_action|anecdote|hard|The exact instruction was to close our eyes and picture the process.
+no_action|problem|easy|A textbook picture often does not match the explanation happening now.
+no_action|problem|hard|Our product addresses it, but I am still listing why the teaching gap exists.
+no_action|problem|hard|That story was personal; this is the broader difficulty teachers face every day.
+no_action|problem|hard|The issue comes up in science, history, and other subjects too.
+no_action|hall|easy|The explanation appears while the teacher is speaking.
+no_action|hall|hard|This is a use case in another school subject, not a new product feature.
+no_action|hall|hard|Our go-to-market plan comes later; right now imagine the tool in a neighboring room.
+no_action|hall|hard|The history teacher can use it in the same way the biology teacher does.
+no_action|whynow|easy|Generation quality is much better than it was before.
+no_action|whynow|hard|The financial forecast comes later; these are general technology cost trends.
+no_action|whynow|hard|It is the combination of capability and affordability that matters here.
+no_action|whynow|hard|I'm still explaining why today is different from three years ago.
+no_action|product|easy|The first component decides the format of the visual.
+no_action|product|hard|I'll run the demo next, but first note how the two agents hand work to each other.
+no_action|product|hard|This is an architecture decision, not our business model.
+no_action|product|hard|A diagram is one of several possible outputs of the same pipeline.
+no_action|demo|easy|Watch this example finish rendering.
+no_action|demo|hard|I will explain the classroom impact after this live example completes.
+no_action|demo|hard|The agents are working behind this demo, but stay with what is on screen.
+no_action|demo|hard|Can everyone see the generated result now?
+no_action|value|easy|A visual can keep more students following the lesson.
+no_action|value|hard|We covered the pain already; I am still explaining the learning benefit.
+no_action|value|hard|The fifty-minute class and ten-minute attention comparison is the point here.
+no_action|value|hard|Better comprehension is part of the same classroom value story.
+no_action|competition|easy|Some alternatives require a teacher to prepare material ahead of time.
+no_action|competition|hard|Our pipeline is relevant to this comparison, but I am staying with competitors.
+no_action|competition|hard|I want to finish this comparison column before moving on.
+no_action|competition|hard|Schools can already buy tools from other vendors, as you see here.
+no_action|gtm|easy|A referral from a teacher can open the next classroom.
+no_action|gtm|hard|The roadmap has a launch date; I am still describing how we reach buyers.
+no_action|gtm|hard|Private-school decision makers are part of this entry strategy.
+no_action|gtm|hard|A teacher might recommend us even when the school signs the contract.
+no_action|tam|easy|This view starts in North Carolina before widening out.
+no_action|tam|hard|Per-school pricing is an input to the estimate we are looking at.
+no_action|tam|hard|This map is about market reach, not the beta rollout calendar.
+no_action|tam|hard|Keep the current geography selected while I explain the calculation.
+no_action|model|easy|A school plan is a recurring subscription.
+no_action|model|hard|The go-to-market strategy brings schools in; I am still explaining how they pay.
+no_action|model|hard|We will forecast revenue later; this is the underlying pricing model.
+no_action|model|hard|Serving each school has a cost, which affects unit economics.
+no_action|financials|easy|The use-of-funds chart covers the first twelve months.
+no_action|financials|hard|A hundred schools is the year-three assumption in this forecast.
+no_action|financials|hard|The pricing model feeds these numbers, but I am still on the financial projection.
+no_action|financials|hard|The figure on this slide is projected gross profit, not the market size.
+no_action|whyus|easy|All three of us have lived with this classroom problem.
+no_action|whyus|hard|The advisors are important, but this is still about the founders.
+no_action|whyus|hard|Our earlier biology story helps explain why we kept building.
+no_action|whyus|hard|We can show the roadmap next; first let me finish our team background.
+no_action|supports|easy|One of these teachers offered a classroom test.
+no_action|supports|hard|These are external supporters, not the three founders.
+no_action|supports|hard|An introduction from an advisor helped us get feedback.
+no_action|supports|hard|I am still acknowledging the people who have already offered help.
+no_action|roadmap|easy|First we finish the beta, then we prepare launch.
+no_action|roadmap|hard|Private schools might test it, but I am talking about when the beta is ready.
+no_action|roadmap|hard|The funding covers some of this work, but the milestones remain on screen.
+no_action|roadmap|hard|One thing has to land before the next release phase begins.
+no_action|vision|easy|There are uses for live visuals beyond education.
+no_action|vision|hard|Our current classroom rollout is only one possible starting point.
+no_action|vision|hard|I am still sketching the long-range direction, not announcing a launch date.
+no_action|vision|hard|The board is the first surface, and there may be others later.
+no_action|ask|easy|If anything was unclear, please tell us.
+no_action|ask|hard|We have asked for introductions; I also welcome direct feedback.
+no_action|ask|hard|Our team would be grateful for your advice on the next step.
+no_action|ask|hard|Let's stay here while we take questions from the room.

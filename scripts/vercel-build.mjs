@@ -3,11 +3,6 @@ import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-/** Vercel defaults safely to frontend-only; only an explicit false opts out. */
-export function resolveVercelFrontendOnly(value) {
-  return value?.trim().toLowerCase() === "false" ? "false" : "true";
-}
-
 /** Run the installed Next CLI without relying on platform-specific shell syntax. */
 function runVercelBuild() {
   const require = createRequire(import.meta.url);
@@ -16,10 +11,7 @@ function runVercelBuild() {
     stdio: "inherit",
     env: {
       ...process.env,
-      IMAGINE_VERCEL_BUILD: "1",
-      NEXT_PUBLIC_FRONTEND_ONLY: resolveVercelFrontendOnly(
-        process.env.NEXT_PUBLIC_FRONTEND_ONLY
-      )
+      IMAGINE_VERCEL_BUILD: "1"
     }
   });
 

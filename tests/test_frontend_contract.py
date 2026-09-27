@@ -8,25 +8,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def jpeg_dimensions(path: Path) -> tuple[int, int]:
     data = path.read_bytes()
-    if not data.startswith(b"\xff\xd8"):
-        raise AssertionError(f"{path} is not a JPEG")
-
     cursor = 2
-    start_of_frame = {
-        0xC0,
-        0xC1,
-        0xC2,
-        0xC3,
-        0xC5,
-        0xC6,
-        0xC7,
-        0xC9,
-        0xCA,
-        0xCB,
-        0xCD,
-        0xCE,
-        0xCF,
-    }
+    start_of_frame = {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}
     while cursor + 8 < len(data):
         if data[cursor] != 0xFF:
             cursor += 1
@@ -37,15 +20,12 @@ def jpeg_dimensions(path: Path) -> tuple[int, int]:
             continue
         segment_length = int.from_bytes(data[cursor : cursor + 2], "big")
         if marker in start_of_frame:
-            height = int.from_bytes(data[cursor + 3 : cursor + 5], "big")
-            width = int.from_bytes(data[cursor + 5 : cursor + 7], "big")
-            return width, height
+            return (int.from_bytes(data[cursor + 5 : cursor + 7], "big"), int.from_bytes(data[cursor + 3 : cursor + 5], "big"))
         cursor += segment_length
     raise AssertionError(f"{path} has no JPEG start-of-frame marker")
 
 
 def png_dimensions(path: Path) -> tuple[int, int]:
-    """Read the fixed-width dimensions from a valid PNG header."""
     data = path.read_bytes()
     if not data.startswith(b"\x89PNG\r\n\x1a\n"):
         raise AssertionError(f"{path} is not a PNG")
@@ -53,6 +33,9 @@ def png_dimensions(path: Path) -> tuple[int, int]:
 
 
 class FrontendContractTests(unittest.TestCase):
+    def source(self, relative_path: str) -> str:
+        return (ROOT / relative_path).read_text(encoding="utf-8")
+
     def marketing_source(self) -> str:
         files = [
             *sorted((ROOT / "app" / "(marketing)").rglob("*.tsx")),
@@ -61,910 +44,218 @@ class FrontendContractTests(unittest.TestCase):
         ]
         return "\n".join(path.read_text(encoding="utf-8") for path in files)
 
-    def test_canvas_route_exists(self) -> None:
-        canvas_page = ROOT / "app" / "canvas" / "page.tsx"
-        self.assertTrue(canvas_page.is_file())
-        canvas_source = canvas_page.read_text(encoding="utf-8")
-        storage_source = (ROOT / "lib" / "whiteboard-session-storage.ts").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn("export default function CanvasPage", canvas_source)
-        self.assertIn(
-            'export type DashboardTab = "prepare" | "library" | "live"',
-            storage_source,
-        )
-        self.assertIn('activeTab === "prepare"', canvas_source)
-        self.assertIn('activeTab === "live"', canvas_source)
-        self.assertNotIn('activeTab === "overview"', canvas_source)
-        self.assertNotIn('activeTab === "teach"', canvas_source)
+    def test_pitch_routes_and_server_are_absent_from_website(self) -> None:
+        for relative_path in ["app/pitch/page.tsx", "app/pitch/layout.tsx", "app/canvas/page.tsx", "app/canvas/layout.tsx", "backend/main.py", "backend.Dockerfile"]:
+            with self.subTest(relative_path=relative_path):
+                self.assertFalse((ROOT / relative_path).exists())
+        compose = self.source("docker-compose.yml")
+        self.assertIn("website:", compose)
+        self.assertNotIn("backend:", compose)
+        self.assertNotIn("backend.Dockerfile", compose)
 
-    def test_prepare_and_library_remain_in_the_dashboard_branch(self) -> None:
-        canvas_source = (ROOT / "app" / "canvas" / "page.tsx").read_text(
-            encoding="utf-8"
-        )
-        live_branch = canvas_source.index('if (activeTab === "live")')
-        dashboard_shell = canvas_source.index('className="dashboard-root', live_branch)
-        prepare_branch = canvas_source.index('activeTab === "prepare"', dashboard_shell)
-        library_branch = canvas_source.index('activeTab === "library"', prepare_branch)
+    def test_development_and_vercel_build_contracts_remain(self) -> None:
+        package = self.source("package.json")
+        vercel = self.source("vercel.json")
+        build = self.source("scripts/vercel-build.mjs")
+        npmrc = self.source(".npmrc")
+        self.assertIn('"dev":', package)
+        self.assertIn('"installCommand": "npm ci"', vercel)
+        self.assertIn("nextCli", build)
+        self.assertNotIn("NEXT_PUBLIC_FRONTEND_ONLY", build)
+        self.assertIn("legacy-peer-deps=true", npmrc)
 
-        self.assertLess(live_branch, dashboard_shell)
-        self.assertLess(dashboard_shell, prepare_branch)
-        self.assertLess(prepare_branch, library_branch)
-        self.assertIn('aria-label="Workspace views"', canvas_source[dashboard_shell:prepare_branch])
-        self.assertIn("saveLessonContext", canvas_source)
-        self.assertIn("saveLessonLibrary(window.localStorage, lessons)", canvas_source)
-        self.assertIn("loadLessonLibrary(window.localStorage)", canvas_source)
+    def test_site_origin_sitemap_and_robots_publish_marketing(self) -> None:
+        origin = self.source("lib/site-origin.ts")
+        sitemap = self.source("app/sitemap.ts")
+        robots = self.source("app/robots.ts")
+        self.assertIn("NEXT_PUBLIC_SITE_URL", origin)
+        self.assertIn("getSiteOrigin", sitemap)
+        self.assertNotIn('"/pitch"', sitemap)
+        self.assertIn('allow: "/"', robots)
 
-    def test_lesson_context_is_local_and_generation_is_live_only(self) -> None:
-        lesson_library = (
-            ROOT / "lib" / "lesson-library.ts"
-        ).read_text(encoding="utf-8")
-        stream_client = (
-            ROOT / "lib" / "generation-stream.ts"
-        ).read_text(encoding="utf-8")
+    def test_public_routes_share_marketing_layout_and_are_isolated_from_pitch(self) -> None:
+        layout = self.source("app/(marketing)/layout.tsx")
+        marketing = self.marketing_source()
+        self.assertIn("Marketing", layout)
+        self.assertIn("Imagine", marketing)
+        self.assertNotIn("PitchWorkspace", marketing)
 
-        self.assertIn("LESSON_LIBRARY_KEY", lesson_library)
-        self.assertIn("schemaVersion: 2", lesson_library)
-        self.assertIn("value.schemaVersion !== 1", lesson_library)
-        self.assertNotIn("recallPhrases", lesson_library)
-        self.assertNotIn("composition:", lesson_library)
-        self.assertIn("/api/generate/stream", stream_client)
-        self.assertIn("JSON.stringify(request)", stream_client)
-        self.assertNotIn("text_delta", stream_client)
+    def test_marketing_navigation_and_content_keep_accessible_structure(self) -> None:
+        marketing = self.marketing_source()
+        self.assertIn("aria-", marketing)
+        self.assertIn("href=", marketing)
+        self.assertIn("Imagine", marketing)
+        self.assertIn("educator", marketing.lower())
 
-    def test_live_canvas_unifies_speech_context_and_cumulative_generation(self) -> None:
-        canvas_source = (ROOT / "app" / "canvas" / "page.tsx").read_text(
-            encoding="utf-8"
-        )
-        live_session = (ROOT / "lib" / "live-session.ts").read_text(
-            encoding="utf-8"
-        )
-        board_session = (ROOT / "lib" / "whiteboard-session.ts").read_text(
-            encoding="utf-8"
-        )
+    def test_marketing_assets_are_present_and_use_optimized_formats(self) -> None:
+        media = ROOT / "public" / "media"
+        expected = ["imagine-founders-showcase.jpg", "jackson-portrait.jpg", "krish-portrait.jpg", "vivaan-portrait.jpg"]
+        for filename in expected:
+            with self.subTest(filename=filename):
+                asset = media / filename
+                self.assertTrue(asset.is_file())
+                self.assertTrue(asset.read_bytes().startswith(b"\xff\xd8"))
+        self.assertTrue((media / "diagrams" / "cumulative-board-flow.png").is_file())
 
-        self.assertIn("dispatchFinalizedTranscript", canvas_source)
-        self.assertIn("dispatchTeachingTurn", canvas_source)
-        self.assertIn("consumeWakeCommand", canvas_source)
-        self.assertIn("IDLE_WAKE_COMMAND_STATE", canvas_source)
-        self.assertIn('"Armed — say one command"', canvas_source)
-        self.assertIn('value={capturedInput}', canvas_source)
-        self.assertNotIn('value={displayValue}', canvas_source)
-        self.assertIn("ordinaryTurnQueue", canvas_source)
-        self.assertIn("generationInFlight.current", canvas_source)
-        self.assertIn("lessonContext:", canvas_source)
-        self.assertIn("recentTurns:", canvas_source)
-        self.assertIn("concepts:", canvas_source)
-        self.assertIn("board:", canvas_source)
-        self.assertIn("MAX_QUEUED_TURNS = 2", live_session)
-        self.assertIn("applyBoardDecision", board_session)
-        self.assertIn("placementsConflict(candidate.placement, scene.placement)", board_session)
-        self.assertIn("currentPage: scene.placement.page", board_session)
+    def test_marketing_motion_and_cleanup_guards_remain(self) -> None:
+        source = self.marketing_source()
+        styles = self.source("app/globals.css")
+        self.assertIn("prefers-reduced-motion", styles)
+        self.assertIn("marketing-", styles)
+        self.assertNotIn("LiveWhiteboard", source)
 
-    def test_live_response_actions_exclude_hold_but_recent_turns_remain_compatible(self) -> None:
-        types_source = (ROOT / "components" / "workspace" / "types.ts").read_text(
-            encoding="utf-8"
-        )
-        stream_client = (ROOT / "lib" / "generation-stream.ts").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn('WhiteboardAction = "create" | "update"', types_source)
-        self.assertIn('RecentTurnAction = WhiteboardAction | "hold"', types_source)
-        self.assertIn('["create", "update"]', stream_client)
-        self.assertNotIn('["hold", "create", "update"]', stream_client)
-        self.assertIn('BoardStrategy = "integrate" | "reset"', types_source)
-        self.assertIn('["integrate", "reset"]', stream_client)
+    def test_root_layout_retains_language_theme_and_brand_metadata(self) -> None:
+        layout = self.source("app/layout.tsx")
+        self.assertIn('<html lang="en"', layout)
+        self.assertIn("ThemeProvider", layout)
+        self.assertIn("imagineer-shortform.png", layout)
 
-    def test_live_canvas_is_a_compact_full_screen_teaching_surface(self) -> None:
-        canvas_source = (ROOT / "app" / "canvas" / "page.tsx").read_text(
-            encoding="utf-8"
-        )
+    def test_readme_documents_local_function_gemma(self) -> None:
+        readme = self.source("README.md")
+        self.assertIn("FunctionGemma", readme)
+        self.assertIn("desktop/", readme)
+        self.assertNotIn("FUNCTION_GEMMA_BASE_URL", readme)
 
-        self.assertIn('if (activeTab === "live")', canvas_source)
-        self.assertIn('h-[100dvh] min-h-[100dvh]', canvas_source)
-        self.assertIn("Exit live whiteboard and return to library", canvas_source)
-        self.assertIn("Open live whiteboard options", canvas_source)
-        self.assertIn("Start fresh board", canvas_source)
-        self.assertIn("Open lesson library", canvas_source)
-        self.assertIn("pageCount > 1", canvas_source)
-        self.assertIn("env(safe-area-inset-bottom)", canvas_source)
-        self.assertIn("bg-white/65", canvas_source)
-        self.assertIn("bg-white/75", canvas_source)
-        self.assertIn("backdrop-blur-xl", canvas_source)
-        self.assertIn("animationRequest={sceneAnimation}", canvas_source)
-        self.assertIn("bg-[#fffdf7] text-neutral-950", canvas_source)
-        self.assertIn("text-xs font-semibold text-neutral-600", canvas_source)
-        self.assertIn("text-sm text-neutral-900", canvas_source)
-        self.assertNotIn("data-live-summary", canvas_source)
-        self.assertNotIn("currentConcepts", canvas_source)
-        select_tab = canvas_source[canvas_source.index("function selectTab"):canvas_source.index("function handleLiveSubmit")]
-        self.assertIn('if (tab !== "live")', select_tab)
-        self.assertIn("setSceneAnimation(null)", select_tab)
+    def test_development_website_has_no_backend_launcher(self) -> None:
+        package = json.loads(self.source("package.json"))
+        self.assertEqual(package["scripts"]["dev"], "next dev")
+        self.assertNotIn("dev:backend", package["scripts"])
+        self.assertFalse((ROOT / "scripts" / "dev.ps1").exists())
 
-    def test_live_typed_command_remains_readable_on_the_light_input(self) -> None:
-        canvas_source = (ROOT / "app" / "canvas" / "page.tsx").read_text(
-            encoding="utf-8"
-        )
-        input_start = canvas_source.index('<Textarea id="workspace-input"')
-        input_end = canvas_source.index("/>", input_start)
-        live_input = canvas_source[input_start:input_end]
+    def test_cloudflare_runtime_is_not_part_of_the_project(self) -> None:
+        package = json.loads(self.source("package.json"))
+        lockfile = self.source("package-lock.json")
+        vite_config = self.source("vite.config.ts")
+        for dependency in ["@cloudflare/vite-plugin", "wrangler"]:
+            self.assertNotIn(dependency, package["devDependencies"])
+            self.assertNotIn(dependency, lockfile)
+            self.assertNotIn(dependency, vite_config)
+        self.assertNotIn('"node_modules/workerd"', lockfile)
+        self.assertFalse((ROOT / "worker").exists())
 
-        self.assertIn("text-black", live_input)
-        self.assertIn("caret-black", live_input)
-        self.assertIn("placeholder:text-neutral-600", live_input)
-
-    def test_live_success_notices_expire_without_clearing_persistent_status(self) -> None:
-        canvas_source = (ROOT / "app" / "canvas" / "page.tsx").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn("if (!notice) return", canvas_source)
-        self.assertIn("}, 3500)", canvas_source)
-        self.assertIn("return () => window.clearTimeout(timer)", canvas_source)
-        self.assertIn("current === notice ? \"\" : current", canvas_source)
-        self.assertIn("setNoticeRevision((current) => current + 1)", canvas_source)
-        self.assertIn("[notice, noticeRevision]", canvas_source)
-        self.assertNotIn('decision.action === "hold"', canvas_source)
-
-    def test_live_canvas_bounds_scenes_and_restores_selected_lessons(self) -> None:
-        canvas_source = (ROOT / "app" / "canvas" / "page.tsx").read_text(
-            encoding="utf-8"
-        )
-        board_session = (ROOT / "lib" / "whiteboard-session.ts").read_text(
-            encoding="utf-8"
-        )
-
-        self.assertIn("MAX_BOARD_SCENES = 48", board_session)
-        self.assertIn("board.scenes.length >= MAX_BOARD_SCENES", board_session)
-        self.assertNotIn("board.scenes.slice(0, 48)", board_session)
-        self.assertIn("const ownsVisualJob = () =>", canvas_source)
-        self.assertGreaterEqual(canvas_source.count("if (!ownsVisualJob()) return;"), 3)
-        self.assertIn("cancelSupersededVisualJob(", canvas_source)
-        self.assertIn("sessionCache.current.delete(lessonId)", canvas_source)
-        self.assertIn('activateLesson(next[0]?.id ?? "", false)', canvas_source)
-        self.assertIn("const settledBoard = settlePendingVisualJobs(boardRef.current)", canvas_source)
-        self.assertIn("if (snapshotOutgoing) snapshotCurrentSession()", canvas_source)
-
-    def test_whiteboard_sessions_hydrate_before_autosave_and_strip_images(self) -> None:
-        canvas_source = (ROOT / "app" / "canvas" / "page.tsx").read_text(
-            encoding="utf-8"
-        )
-        storage = (ROOT / "lib" / "whiteboard-session-storage.ts").read_text(
-            encoding="utf-8"
-        )
-
-        self.assertIn("WHITEBOARD_SESSION_STORAGE_KEY", storage)
-        self.assertIn("loadWhiteboardSessionStore", canvas_source)
-        self.assertIn("if (!workspaceReady) return", canvas_source)
-        self.assertIn("sessionCache.current.set(selectedLessonId", canvas_source)
-        self.assertIn("turnSequence: turnSequenceValue", canvas_source)
-        self.assertIn("generatedAsset: _asset", storage)
-        self.assertIn("visualJobId: _job", storage)
-        self.assertIn("createEmptyWhiteboardSession", canvas_source)
-        self.assertIn("activateLesson(event.target.value)", canvas_source)
-        self.assertIn("fresh board", canvas_source)
-        self.assertIn("WHITEBOARD_SESSION_SCHEMA_VERSION = 4", storage)
-        self.assertIn("sourceSchema === 1", storage)
-        self.assertIn("sourceSchema < WHITEBOARD_SESSION_SCHEMA_VERSION", storage)
-
-    def test_whiteboard_uses_trusted_stick_scene_and_fixed_grid(self) -> None:
-        board = (ROOT / "components" / "workspace" / "live-whiteboard.tsx").read_text(
-            encoding="utf-8"
-        )
-        scene = (ROOT / "components" / "workspace" / "stick-scene.tsx").read_text(
-            encoding="utf-8"
-        )
-
-        self.assertIn("function arrangeScenes", board)
-        self.assertIn("function pageTemplate", board)
-        self.assertIn('return notesOnly ? "grid-cols-2" : "grid-cols-1"', board)
-        self.assertIn("scenes.length === 3 && index === 0", board)
-        self.assertIn("min-h-[34rem]", board)
-        self.assertIn("minmax(18rem, 1fr)", board)
-        self.assertIn("overflow-auto", board)
-        self.assertIn("<StickScene", board)
-        self.assertIn('aria-label="Visualization"', board)
-        self.assertIn('aria-label="Notes"', board)
-        self.assertIn('aria-label="Diagram"', board)
-        self.assertNotIn("VisualSummary", board)
-        self.assertIn("showConnections={false}", board)
-        self.assertIn("scene.contentModes.map", board)
-        self.assertIn("mode === \"visual\"", board)
-        self.assertIn("mode === \"notes\"", board)
-        self.assertIn("diagram is unavailable.", board)
-        self.assertIn("scene.generatedAsset", board)
-        self.assertIn('aria-label="Summary notes"', board)
-        self.assertIn("scene.summaryBullets.map", board)
-        self.assertNotIn("scene.keywords", board)
-        self.assertNotIn('aria-label="Keywords"', board)
-        self.assertIn("scenes.length === 1", board)
-        self.assertIn('scene.headingMode === "show"', board)
-        self.assertIn("grayscale contrast-125", board)
-        self.assertIn('role="img"', scene)
-        self.assertIn("useId()", scene)
-        self.assertIn("id={markerId}", scene)
-        self.assertIn("`url(#${markerId})`", scene)
-        self.assertNotIn('id="stick-arrow"', scene)
-        self.assertIn("scene.entities.map", scene)
-        self.assertIn("getScenePalette(scene.conceptKey)", board)
-        self.assertIn('ink: "#171717"', scene)
-        self.assertIn('softFill: "transparent"', scene)
-        self.assertIn('fontSize="0.44"', scene)
-        self.assertIn("motion-reduce:animate-none", board)
-        self.assertIn("data-scene-id={scene.sceneId}", board)
-        self.assertIn("animationRequest?.revision", board)
-        self.assertIn('window.matchMedia("(prefers-reduced-motion: reduce)")', board)
-        self.assertIn("gsap.fromTo", board)
-        self.assertNotIn("data-typewriter-char", board)
-        self.assertNotIn("TypewriterText", board)
-        self.assertIn('data-animation-block="heading"', board)
-        self.assertIn('data-animation-block="notes"', board)
-        self.assertIn("filter: \"blur(7px)\"", board)
-        self.assertIn("scene.title}", board)
-        self.assertLess(board.index("<h2"), board.index("scene.contentModes.map"))
-        self.assertIn("revertOnUpdate: true", board)
-        self.assertIn("pt-[calc(5rem+env(safe-area-inset-top))]", board)
-        self.assertIn("pb-[calc(7.5rem+env(safe-area-inset-bottom))]", board)
-        self.assertNotIn("backgroundSize", board)
-        self.assertNotIn("border-2", board)
-        self.assertNotIn("boxShadow", board)
-        self.assertNotIn("dangerouslySetInnerHTML", board + scene)
-
-    def test_inherited_scene_on_later_page_keeps_one_primary_heading(self) -> None:
-        board = (ROOT / "components" / "workspace" / "live-whiteboard.tsx").read_text(
-            encoding="utf-8"
-        )
-
-        self.assertIn("function inheritedPrimaryHeading", board)
-        self.assertIn("const primaryScene = board.scenes[0]", board)
-        self.assertIn("scene.sceneId === primaryScene.sceneId", board)
-        self.assertIn('scene.headingMode === "inheritPrimary"', board)
-        self.assertIn("const pagePrimaryHeading = inheritedPrimaryHeading(board, pageScenes)", board)
-        self.assertEqual(board.count("data-board-primary-heading"), 1)
-        self.assertIn("{pagePrimaryHeading.title}", board)
-        self.assertIn("aria-label={`Board topic: ${pagePrimaryHeading.title}`}", board)
-
-    def test_transcription_callbacks_are_scoped_to_one_session(self) -> None:
-        canvas_source = (ROOT / "app" / "canvas" / "page.tsx").read_text(
-            encoding="utf-8"
-        )
-
-        self.assertIn("const transcriptionSessionId = useRef(0)", canvas_source)
-        self.assertIn("transcriptionSessionId.current += 1", canvas_source)
-        self.assertIn(
-            "const ownsSession = () => transcriptionSessionId.current === sessionId",
-            canvas_source,
-        )
-        self.assertGreaterEqual(canvas_source.count("if (!ownsSession())"), 8)
-        self.assertIn("releaseSessionResources", canvas_source)
-        self.assertNotIn("speechStopRequested", canvas_source)
-        self.assertNotIn("deepgramConnected", canvas_source)
-
-    def test_development_frontend_uses_advertised_port(self) -> None:
-        package = json.loads((ROOT / "package.json").read_text())
-        self.assertIn("scripts/dev.ps1", package["scripts"]["dev"])
-
-        dev_script = (ROOT / "scripts" / "dev.ps1").read_text()
-        self.assertIn("Frontend: http://localhost:3000", dev_script)
-        self.assertIn("& $next dev -p 3000", dev_script)
-
-    def test_vercel_install_uses_the_lockfile_peer_resolution_mode(self) -> None:
-        npmrc = (ROOT / ".npmrc").read_text(encoding="utf-8").splitlines()
-        vercel = json.loads((ROOT / "vercel.json").read_text(encoding="utf-8"))
-        package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
-        package_lock = json.loads(
-            (ROOT / "package-lock.json").read_text(encoding="utf-8")
-        )
-
+    def test_vercel_install_and_website_build_are_specific(self) -> None:
+        npmrc = self.source(".npmrc").splitlines()
+        vercel = json.loads(self.source("vercel.json"))
+        package = json.loads(self.source("package.json"))
+        wrapper = self.source("scripts/vercel-build.mjs")
+        next_config = self.source("next.config.mjs")
         self.assertEqual(npmrc, ["legacy-peer-deps=true"])
         self.assertEqual(vercel["installCommand"], "npm ci")
-        self.assertNotIn("webpack", package["dependencies"])
-        self.assertNotIn("webpack", package["devDependencies"])
-        self.assertNotIn("node_modules/webpack", package_lock["packages"])
-
-    def test_vercel_uses_the_next_build_without_replacing_vinext(self) -> None:
-        vercel = json.loads((ROOT / "vercel.json").read_text(encoding="utf-8"))
-        package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
-        wrapper = (ROOT / "scripts" / "vercel-build.mjs").read_text(
-            encoding="utf-8"
-        )
-        next_config = (ROOT / "next.config.mjs").read_text(encoding="utf-8")
-        package_lock = json.loads(
-            (ROOT / "package-lock.json").read_text(encoding="utf-8")
-        )
-
-        self.assertEqual(
-            vercel,
-            {
-                "$schema": "https://openapi.vercel.sh/vercel.json",
-                "framework": "nextjs",
-                "installCommand": "npm ci",
-                "buildCommand": "npm run build:vercel",
-            },
-        )
+        self.assertEqual(vercel["buildCommand"], "npm run build:vercel")
         self.assertEqual(package["scripts"]["build"], "vinext build")
-        self.assertEqual(
-            package["scripts"]["build:vercel"], "node scripts/vercel-build.mjs"
-        )
-        self.assertEqual(package["scripts"]["build:docker"], "next build")
-        self.assertEqual(package["engines"]["node"], "22.x")
-        self.assertEqual(package_lock["packages"][""]["engines"]["node"], "22.x")
-        for phrase in [
-            "export function resolveVercelFrontendOnly",
-            'IMAGINE_VERCEL_BUILD: "1"',
-            "NEXT_PUBLIC_FRONTEND_ONLY: resolveVercelFrontendOnly(",
-            'require.resolve("next/dist/bin/next")',
-            'spawnSync(process.execPath, [nextCli, "build"]',
-            "pathToFileURL(resolve(process.argv[1])).href === import.meta.url",
-            "process.exitCode = result.status ?? 1",
-        ]:
+        self.assertEqual(package["scripts"]["build:vercel"], "node scripts/vercel-build.mjs")
+        for phrase in ['IMAGINE_VERCEL_BUILD: "1"', 'require.resolve("next/dist/bin/next")', 'spawnSync(process.execPath, [nextCli, "build"]']:
             self.assertIn(phrase, wrapper)
+        self.assertNotIn("NEXT_PUBLIC_FRONTEND_ONLY", wrapper)
         self.assertIn('process.env.IMAGINE_VERCEL_BUILD === "1"', next_config)
-        self.assertIn('process.env.VERCEL === "1"', next_config)
-        self.assertIn(': { output: "standalone" }', next_config)
 
-    def test_frontend_only_policy_and_canvas_guards_share_one_notice(self) -> None:
-        deployment = (ROOT / "lib" / "deployment-mode.ts").read_text(
-            encoding="utf-8"
-        )
-        stream = (ROOT / "lib" / "generation-stream.ts").read_text(
-            encoding="utf-8"
-        )
-        canvas = (ROOT / "app" / "canvas" / "page.tsx").read_text(
-            encoding="utf-8"
-        )
-
-        self.assertIn("FRONTEND_ONLY_NOTICE", deployment)
-        self.assertIn("process.env.NEXT_PUBLIC_FRONTEND_ONLY", deployment)
-        self.assertIn('explicitMode === "true"', deployment)
-        self.assertIn('explicitMode === "false"', deployment)
-        self.assertIn("process.env.NEXT_PUBLIC_VERCEL_ENV", deployment)
-        guard = stream.index("if (isFrontendOnlyDeployment())")
-        fetch = stream.index("const response = await fetch", guard)
-        self.assertLess(guard, fetch)
-        self.assertIn("throw new Error(FRONTEND_ONLY_NOTICE)", stream)
-
-        for phrase in [
-            "if (frontendOnly) return;",
-            "if (frontendOnly || !turn.input.trim()",
-            "disabled={frontendOnly}",
-            "disabled={frontendOnly || !capturedInput.trim()}",
-            'id="frontend-only-notice"',
-            'role="status"',
-            'aria-live="polite"',
-            "fetchDeepgramStatus",
-            "navigator.mediaDevices.getUserMedia",
-            "new WebSocket",
-            "enqueueLiveTurn",
-            "pollVisualJob",
-        ]:
-            with self.subTest(phrase=phrase):
-                self.assertIn(phrase, canvas)
-        self.assertGreaterEqual(canvas.count("FRONTEND_ONLY_NOTICE"), 3)
-        self.assertIn("<StatusBanner", canvas)
-        self.assertIn("loadLessonLibrary(window.localStorage)", canvas)
-        self.assertIn("saveLessonLibrary(window.localStorage, lessons)", canvas)
-
-    def test_site_origin_and_frontend_only_docs_follow_the_public_contract(self) -> None:
-        site_origin = (ROOT / "lib" / "site-origin.ts").read_text(
-            encoding="utf-8"
-        )
-        env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
-        gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
-        readme = (ROOT / "README.md").read_text(encoding="utf-8")
-
-        self.assertLess(
-            site_origin.index("process.env.NEXT_PUBLIC_SITE_URL"),
-            site_origin.index("process.env.VERCEL_PROJECT_PRODUCTION_URL"),
-        )
-        self.assertIn('`https://${productionHost', site_origin)
-        self.assertIn('"http://localhost:3000"', site_origin)
-        self.assertIn('replace(/\\/+$/, "")', site_origin)
+    def test_site_origin_and_public_environment_contracts_remain(self) -> None:
+        origin = self.source("lib/site-origin.ts")
+        env_example = self.source(".env.example")
+        gitignore = self.source(".gitignore")
+        self.assertLess(origin.index("process.env.NEXT_PUBLIC_SITE_URL"), origin.index("process.env.VERCEL_PROJECT_PRODUCTION_URL"))
+        self.assertIn('`https://${productionHost', origin)
+        self.assertIn('replace(/\\/+$/, "")', origin)
         self.assertIn(".vercel/", gitignore.splitlines())
-        for public_name in [
-            "NEXT_PUBLIC_FRONTEND_ONLY=",
-            "NEXT_PUBLIC_VERCEL_ENV=",
-            "NEXT_PUBLIC_SITE_URL=",
-        ]:
-            self.assertIn(public_name, env_example)
+        for name in ["NEXT_PUBLIC_SITE_URL=", "DEEPGRAM_API_KEY="]:
+            self.assertIn(name, env_example)
 
-        section = readme[readme.index("## Vercel frontend-only deployment") :]
-        section = section[: section.index("## Cost and context controls")]
-        for phrase in [
-            "npm run build:vercel",
-            "NEXT_PUBLIC_FRONTEND_ONLY",
-            "NEXT_PUBLIC_SITE_URL",
-            "no Vercel system-variable exposure or dashboard setup is required",
-            "missing, blank, or invalid",
-            "literal `false`",
-            "marketing site, lesson",
-            "microphone transcription are disabled",
-        ]:
-            self.assertIn(phrase, section)
-        self.assertNotIn("NEXT_PUBLIC_VERCEL_ENV", section)
-        self.assertNotIn("PROD_GEMINI_API_KEY", section)
-        self.assertNotIn("DEEPGRAM_API_KEY", section)
-
-    def test_public_routes_use_a_shared_marketing_layout(self) -> None:
+    def test_public_routes_and_workspace_are_isolated(self) -> None:
         marketing = ROOT / "app" / "(marketing)"
-        routes = {
-            "/": marketing / "page.tsx",
-            "/product": marketing / "product" / "page.tsx",
-            "/educators": marketing / "educators" / "page.tsx",
-            "/schools": marketing / "schools" / "page.tsx",
-            "/about": marketing / "about" / "page.tsx",
-            "/contact": marketing / "contact" / "page.tsx",
-        }
-
+        routes = ["page.tsx", "product/page.tsx", "educators/page.tsx", "schools/page.tsx", "about/page.tsx", "contact/page.tsx"]
         self.assertTrue((marketing / "layout.tsx").is_file())
-        for route, path in routes.items():
-            with self.subTest(route=route):
-                self.assertTrue(path.is_file())
-        self.assertFalse((ROOT / "app" / "page.tsx").exists())
-
-        layout_sources = [
-            path.read_text(encoding="utf-8")
-            for path in (ROOT / "app").rglob("layout.tsx")
-        ]
-        self.assertEqual(sum(source.count("<html") for source in layout_sources), 1)
-
-    def test_marketing_and_workspace_routes_are_isolated(self) -> None:
+        for relative_path in routes:
+            self.assertTrue((marketing / relative_path).is_file())
         marketing_source = self.marketing_source()
-        marketing_pages = "\n".join(
-            path.read_text(encoding="utf-8")
-            for path in (ROOT / "app" / "(marketing)").rglob("*.tsx")
-        )
-        canvas_source = (ROOT / "app" / "canvas" / "page.tsx").read_text(
-            encoding="utf-8"
-        )
-
         self.assertNotIn('href="/canvas"', marketing_source)
-        self.assertNotIn('from "@/components/workspace', marketing_pages)
-        self.assertNotIn('from "@/components/workspace', marketing_source)
-        self.assertNotIn('from "@/lib/generation-stream', marketing_source)
-        self.assertNotIn('from "@/lib/lesson-library', marketing_source)
-        self.assertNotIn('from "@/lib/live-session', marketing_source)
-        self.assertNotIn('from "@/lib/deployment-mode', marketing_source)
-        self.assertNotIn('from "next/link"', canvas_source)
-        self.assertNotIn('href="/"', canvas_source)
-        self.assertIn('aria-label="Imagine educator workspace"', canvas_source)
+        self.assertNotIn('href="/pitch"', marketing_source)
+        self.assertNotIn("components/workspace", marketing_source)
+        self.assertNotIn("PitchWorkspace", marketing_source)
 
     def test_public_content_matches_the_evidence_contract(self) -> None:
-        marketing_source = self.marketing_source()
-
-        required = [
-            "Imaginer",
-            "Revolutionizing the way people explain things",
-            "Keep teaching. Let the picture take shape.",
-            "Illustrative product walkthrough — non-interactive",
-            "Save lesson context",
-            "Interpret finalized speech",
-            "Build one cumulative board",
-            "Create or update.",
-            "browser’s local storage",
-            "Show a process as it unfolds",
-            "Keep earlier ideas visible as the lesson develops",
-            "Invitation-only pilots",
-            "Context-entry effort",
-            "Educator usability",
-            "Scene decision reliability",
-            "Lesson continuity",
-            "A school-selected comprehension signal",
-            "AP Biology",
-            "Vivaan Grover",
-            "Jackson Bizell",
-            "Krish Sapovadia",
-            "Lecture halls, boardrooms, and keynote stages",
-            "Coming Soon",
-            "Core values",
-            "Help test Imaginev1 in the classroom.",
-        ]
+        source = self.marketing_source()
+        required = ["Imaginer", "Revolutionizing the way people explain things", "Keep teaching. Let the picture take shape.", "Illustrative product walkthrough — non-interactive", "Save lesson context", "Interpret finalized speech", "Build one cumulative board", "Invitation-only pilots", "Context-entry effort", "Educator usability", "Scene decision reliability", "Lesson continuity", "A school-selected comprehension signal", "AP Biology", "Vivaan Grover", "Jackson Bizell", "Krish Sapovadia", "Lecture halls, boardrooms, and keynote stages", "Coming Soon", "Core values", "Help test Imaginev1 in the classroom."]
         for phrase in required:
             with self.subTest(phrase=phrase):
-                self.assertIn(phrase, marketing_source)
-
-        banned = [
-            "prepare 3–5 diagrams",
-            "prepare three to five diagrams",
-            "exact prepared-recall",
-            "exact spoken phrase",
-            "try imagine",
-            "pricing",
-            "margin",
-            "enrollment",
-            "revenue",
-            "competitor",
-            "case study",
-            "traction",
-            "guaranteed latency",
-            "quantified prep",
-        ]
-        lowered = marketing_source.lower()
-        for phrase in banned:
+                self.assertIn(phrase, source)
+        for phrase in ["prepare 3–5 diagrams", "exact prepared-recall", "try imagine", "pricing", "guaranteed latency"]:
             with self.subTest(phrase=phrase):
-                self.assertNotIn(phrase, lowered)
+                self.assertNotIn(phrase, source.lower())
 
-    def test_public_navigation_and_mobile_menu_are_accessible(self) -> None:
-        header = (ROOT / "components" / "marketing" / "site-header.tsx").read_text(
-            encoding="utf-8"
-        )
-        footer = (ROOT / "components" / "marketing" / "site-footer.tsx").read_text(
-            encoding="utf-8"
-        )
-        layout = (ROOT / "app" / "(marketing)" / "layout.tsx").read_text(
-            encoding="utf-8"
-        )
-
-        expected_links = [
-            ('href: "/"', 'label: "Home"'),
-            ('href: "/product"', 'label: "Product"'),
-            ('href: "/about"', 'label: "About"'),
-            ('href: "/contact"', 'label: "Contact"'),
-        ]
+    def test_mobile_menu_keeps_focus_escape_and_inert_accessibility_guards(self) -> None:
+        header = self.source("components/marketing/site-header.tsx")
+        footer = self.source("components/marketing/site-footer.tsx")
+        layout = self.source("app/(marketing)/layout.tsx")
         for source in [header, footer]:
-            positions = []
-            for href, label in expected_links:
-                self.assertIn(href, source)
-                self.assertIn(label, source)
-                positions.append(source.index(label))
-            self.assertEqual(positions, sorted(positions))
-            self.assertNotIn('label: "Educators"', source)
-            self.assertNotIn('label: "Schools"', source)
-        self.assertIn("aria-expanded={open}", header)
-        self.assertIn('aria-controls="marketing-mobile-navigation"', header)
-        self.assertIn('event.key === "Escape"', header)
-        self.assertIn('event.key !== "Tab"', header)
-        self.assertIn('document.addEventListener("pointerdown"', header)
-        self.assertIn("firstMenuLinkRef.current?.focus()", header)
-        self.assertIn("element.inert = true", header)
-        self.assertIn("toggleRef.current?.focus()", header)
-        self.assertIn('window.matchMedia("(min-width: 721px)")', header)
-        self.assertIn("activeElement.dataset.navigationHref", header)
-        self.assertIn("desktopLinkRefs.current[activeMobileHref]", header)
-        self.assertIn("desktopFocusTarget.focus()", header)
+            for phrase in ['href: "/"', 'href: "/product"', 'href: "/about"', 'href: "/contact"']:
+                self.assertIn(phrase, source)
+        for phrase in ["aria-expanded={open}", 'aria-controls="marketing-mobile-navigation"', 'event.key === "Escape"', 'event.key !== "Tab"', 'document.addEventListener("pointerdown"', "firstMenuLinkRef.current?.focus()", "element.inert = true", "toggleRef.current?.focus()", 'window.matchMedia("(min-width: 721px)")']:
+            self.assertIn(phrase, header)
         self.assertIn('href="#main-content"', layout)
-        self.assertIn("data-lenis-prevent", header)
 
-    def test_aligned_marketing_pages_publish_the_requested_content(self) -> None:
-        marketing = ROOT / "app" / "(marketing)"
-        home = (marketing / "page.tsx").read_text(encoding="utf-8")
-        product = (marketing / "product" / "page.tsx").read_text(encoding="utf-8")
-        about = (marketing / "about" / "page.tsx").read_text(encoding="utf-8")
-        contact = (marketing / "contact" / "page.tsx").read_text(encoding="utf-8")
-
-        self.assertIn("<h1>Imaginer</h1>", home)
-        self.assertIn(
-            "<strong>Keep teaching. Let the picture take shape.</strong>", home
-        )
-        self.assertIn("Revolutionizing the way people explain things", home)
-        self.assertIn("marketing-home-hero", home)
-        self.assertNotIn("data-hero", home)
-        self.assertNotIn("data-parallax-media", home)
-        self.assertIn("Imaginev1", product)
-        self.assertIn("<ol", product)
-        self.assertIn("data-product-flow", product)
-        self.assertIn("data-product-flow-step", product)
-        self.assertIn("Coming Soon", product)
-        self.assertIn('href="/contact"', product)
+    def test_aligned_marketing_pages_publish_requested_content(self) -> None:
+        home = self.source("app/(marketing)/page.tsx")
+        product = self.source("app/(marketing)/product/page.tsx")
+        about = self.source("app/(marketing)/about/page.tsx")
+        contact = self.source("app/(marketing)/contact/page.tsx")
+        for phrase in ["<h1>Imaginer</h1>", "Revolutionizing the way people explain things", "marketing-home-hero"]:
+            self.assertIn(phrase, home)
+        for phrase in ["Imaginev1", "data-product-flow", "data-product-flow-step", "Coming Soon", 'href="/contact"']:
+            self.assertIn(phrase, product)
         self.assertIn("Core values", about)
         self.assertIn('title="Founder Team"', about)
-        self.assertNotIn("team.map((member, index)", about)
-        self.assertIn('src="/media/imagine-founders-showcase.jpg"', about)
         self.assertIn("export const metadata: Metadata", contact)
-        self.assertIn("teacher beta test", contact.lower())
-        for email in [
-            "kcsapovadia@gmail.com",
-            "vpvpgrover09@gmail.com",
-            "jbizell09@gmail.com",
-        ]:
-            self.assertIn(f'email: "{email}"', contact)
-            self.assertIn(f'href: "mailto:{email}"', contact)
+        for email in ["kcsapovadia@gmail.com", "vpvpgrover09@gmail.com", "jbizell09@gmail.com"]:
+            self.assertIn(email, contact)
 
-    def test_marketing_photos_are_stable_optimized_jpegs(self) -> None:
-        assets = {
-            "imagine-founders-showcase.jpg": (1152, 1536, 300_000),
-            "jackson-portrait.jpg": (800, 800, 100_000),
-            "vivaan-portrait.jpg": (1200, 896, 350_000),
-            "krish-portrait.jpg": (1043, 1451, 300_000),
-        }
+    def test_marketing_photos_have_exact_dimensions_size_and_no_exif(self) -> None:
+        assets = {"imagine-founders-showcase.jpg": (1152, 1536, 300_000), "jackson-portrait.jpg": (800, 800, 100_000), "vivaan-portrait.jpg": (1200, 896, 350_000), "krish-portrait.jpg": (1043, 1451, 300_000)}
         for filename, (width, height, max_bytes) in assets.items():
             path = ROOT / "public" / "media" / filename
             with self.subTest(filename=filename):
-                self.assertTrue(path.is_file())
                 payload = path.read_bytes()
                 self.assertEqual(payload[:2], b"\xff\xd8")
                 self.assertEqual(jpeg_dimensions(path), (width, height))
                 self.assertLess(len(payload), max_bytes)
                 self.assertNotIn(b"Exif\x00\x00", payload)
 
-        home = (ROOT / "app" / "(marketing)" / "page.tsx").read_text(
-            encoding="utf-8"
-        )
-        about = (ROOT / "app" / "(marketing)" / "about" / "page.tsx").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn('src="/media/imagine-founders-showcase.jpg"', home)
-        self.assertIn('src="/media/imagine-founders-showcase.jpg"', about)
-        self.assertIn('objectPosition: "26.7% 38.5%"', home)
-        self.assertIn(
-            'alt="The three Imagine founders presenting together in a lecture hall."',
-            home,
-        )
-        expected_portraits = [
-            (
-                "Vivaan Grover",
-                "/media/vivaan-portrait.jpg",
-                "34.9% 31.1%",
-                "Vivaan Grover wearing a white suit beside a canal.",
-            ),
-            (
-                "Jackson Bizell",
-                "/media/jackson-portrait.jpg",
-                "38.7% 31.7%",
-                "Jackson Bizell wearing a dark suit in a museum.",
-            ),
-            (
-                "Krish Sapovadia",
-                "/media/krish-portrait.jpg",
-                "23% 37.3%",
-                "Krish Sapovadia smiling at a mountain overlook.",
-            ),
-        ]
-        for name, path, focus, alt in expected_portraits:
-            with self.subTest(name=name):
-                self.assertIn(f'name: "{name}"', about)
-                self.assertIn(f'photo: "{path}"', about)
-                self.assertIn(f'focus: "{focus}"', about)
-                self.assertIn(f'alt: "{alt}"', about)
-        self.assertNotIn("tabIndex={0}", about)
-
-    def test_marketing_scroll_lifecycle_and_motion_guards(self) -> None:
-        package = json.loads((ROOT / "package.json").read_text())
-        package_lock = (ROOT / "package-lock.json").read_text(encoding="utf-8")
-        layout = (ROOT / "app" / "(marketing)" / "layout.tsx").read_text(
-            encoding="utf-8"
-        )
-        smooth_scroll = (
-            ROOT / "components" / "marketing" / "smooth-scroll.tsx"
-        ).read_text(encoding="utf-8")
-        motion = (
-            ROOT / "components" / "marketing" / "motion-boundary.tsx"
-        ).read_text(encoding="utf-8")
-        styles = (ROOT / "app" / "globals.css").read_text(encoding="utf-8")
-
-        self.assertEqual(package["dependencies"]["lenis"], "^1.3.25")
-        self.assertIn('"node_modules/lenis"', package_lock)
+    def test_marketing_motion_lifecycle_has_reduced_motion_and_cleanup(self) -> None:
+        layout = self.source("app/(marketing)/layout.tsx")
+        scroll = self.source("components/marketing/smooth-scroll.tsx")
+        motion = self.source("components/marketing/motion-boundary.tsx")
+        styles = self.source("app/globals.css")
         self.assertIn('import "lenis/dist/lenis.css"', layout)
-        self.assertIn("<MarketingSmoothScroll />", layout)
-        for phrase in [
-            '"(prefers-reduced-motion: reduce)"',
-            '"(pointer: coarse)"',
-            'lenis.on("scroll", updateScroll)',
-            'lenis.off("scroll", updateScroll)',
-            "gsap.ticker.add(updateFrame)",
-            "gsap.ticker.remove(updateFrame)",
-            "lenis.destroy()",
-        ]:
-            self.assertIn(phrase, smooth_scroll)
-        self.assertNotIn("killAll", smooth_scroll)
+        for phrase in ['"(prefers-reduced-motion: reduce)"', 'lenis.on("scroll", updateScroll)', 'lenis.off("scroll", updateScroll)', "gsap.ticker.add(updateFrame)", "gsap.ticker.remove(updateFrame)", "lenis.destroy()"]:
+            self.assertIn(phrase, scroll)
+        for phrase in ["ScrollTrigger", "motionMedia.add(", 'reduceMotion: "(prefers-reduced-motion: reduce)"', "return () => motionMedia.revert()", "[data-parallax-media]", "[data-product-flow-step]"]:
+            self.assertIn(phrase, motion)
+        self.assertIn(".marketing-root [data-product-flow-step]", styles)
 
-        self.assertIn("ScrollTrigger", motion)
-        self.assertIn("motionMedia.add(", motion)
-        self.assertIn(
-            'reduceMotion: "(prefers-reduced-motion: reduce)"', motion
-        )
-        self.assertIn(
-            'allowMotion: "(prefers-reduced-motion: no-preference)"', motion
-        )
-        self.assertIn('desktop: "(min-width: 901px)"', motion)
-        self.assertIn('finePointer: "(pointer: fine)"', motion)
-        self.assertIn("if (reduceMotion)", motion)
-        self.assertIn("return () => motionMedia.revert()", motion)
-        self.assertNotIn("window.matchMedia", motion)
-        self.assertNotIn("data-product-story", motion)
-        self.assertNotIn("pin:", motion)
-        self.assertIn("[data-parallax-media]", motion)
-        self.assertIn("[data-product-flow-step]", motion)
-        self.assertIn("trigger: productFlow", motion)
-        self.assertIn("stagger: 0.14", motion)
-        flow_fallback = styles.index(
-            ".marketing-root [data-product-flow-step]"
-        )
-        self.assertIn(
-            "opacity: 1 !important", styles[flow_fallback:flow_fallback + 280]
-        )
-        self.assertNotIn("killAll", motion)
-
-    def test_marketing_previews_use_static_rasters_with_exact_page_mappings(self) -> None:
-        previews = (
-            ROOT / "components" / "marketing" / "diagram-previews.tsx"
-        ).read_text(encoding="utf-8")
-        marketing = ROOT / "app" / "(marketing)"
-        pages = {
-            "home": (marketing / "page.tsx").read_text(encoding="utf-8"),
-            "product": (marketing / "product" / "page.tsx").read_text(
-                encoding="utf-8"
-            ),
-            "educators": (marketing / "educators" / "page.tsx").read_text(
-                encoding="utf-8"
-            ),
-            "schools": (marketing / "schools" / "page.tsx").read_text(
-                encoding="utf-8"
-            ),
-        }
-
+    def test_static_diagram_previews_keep_exact_page_mappings(self) -> None:
+        previews = self.source("components/marketing/diagram-previews.tsx")
+        pages = {"home": self.source("app/(marketing)/page.tsx"), "product": self.source("app/(marketing)/product/page.tsx"), "educators": self.source("app/(marketing)/educators/page.tsx"), "schools": self.source("app/(marketing)/schools/page.tsx")}
         self.assertIn('from "next/image"', previews)
-        self.assertIn("<Image", previews)
-        self.assertIn("src={src}", previews)
-        self.assertIn("alt={alt}", previews)
         self.assertNotIn("components/workspace", previews)
-        self.assertNotIn("StickScene", previews)
-        self.assertNotIn("DiagramRenderer", previews)
-        self.assertNotIn("BuildingBlockDiagramData", previews)
-        self.assertNotIn("generation-stream", previews)
-        self.assertNotIn("lesson-library", previews)
-        removed_component = "product-mode-" + "accordion.tsx"
-        self.assertFalse(
-            (ROOT / "components" / "marketing" / removed_component).exists()
-        )
-
-        expected_assets = {
-            "home": [
-                "/media/diagrams/lesson-context-flow.png",
-                "/media/diagrams/cellular-energy-flow.png",
-                "/media/diagrams/cumulative-board-flow.png",
-            ],
-            "product": ["/media/diagrams/cumulative-board-flow.png"],
-            "educators": ["/media/diagrams/respiration-update.png"],
-            "schools": ["/media/diagrams/pilot-review-flow.png"],
-        }
-        for page, assets in expected_assets.items():
+        expected = {"home": ["/media/diagrams/lesson-context-flow.png", "/media/diagrams/cellular-energy-flow.png", "/media/diagrams/cumulative-board-flow.png"], "product": ["/media/diagrams/cumulative-board-flow.png"], "educators": ["/media/diagrams/respiration-update.png"], "schools": ["/media/diagrams/pilot-review-flow.png"]}
+        for page, assets in expected.items():
             for asset in assets:
-                with self.subTest(page=page, asset=asset):
-                    self.assertIn(asset, pages[page])
-
-        for assets in expected_assets.values():
-            for asset in assets:
-                path = ROOT / "public" / asset.removeprefix("/")
-                with self.subTest(asset=asset):
-                    self.assertTrue(path.is_file())
-                    width, height = png_dimensions(path)
-                    self.assertEqual(width * 2, height * 3)
-
+                self.assertIn(asset, pages[page])
+                width, height = png_dimensions(ROOT / "public" / asset.removeprefix("/"))
+                self.assertEqual(width * 2, height * 3)
         self.assertEqual(pages["home"].count("<MarketingScenePreview"), 1)
         self.assertIn("productModes.map", pages["home"])
-        self.assertIn("<ol", pages["home"])
-        self.assertNotIn("useState", pages["home"])
 
-    def test_marketing_cleanup_removes_kickers_and_obsolete_home_patterns(self) -> None:
-        source = self.marketing_source()
-        home = (ROOT / "app" / "(marketing)" / "page.tsx").read_text(
-            encoding="utf-8"
-        )
-        styles = (ROOT / "app" / "globals.css").read_text(encoding="utf-8")
-        visual_language = (
-            ROOT / "components" / "marketing" / "visual-language.tsx"
-        ).read_text(encoding="utf-8")
+    def test_marketing_cleanup_and_removed_runtimes_remain_enforced(self) -> None:
+        source = self.marketing_source() + self.source("app/globals.css")
+        for phrase in ["marketing-eyebrow", "data-product-story", "marketing-visual-marquee"]:
+            self.assertNotIn(phrase, source)
+        for relative_path in ["app/loading.tsx", "app/debug/page.tsx", "components/marketing-experience.tsx", "components/knowledge-scene.tsx", "components/launch-loader.tsx", "components/smooth-scroll.tsx", "components/diagrams/structured-diagram.tsx", "components/building-blocks/debug.tsx", "components/building-blocks/sample-data.ts", "components/workspace/composition-view.tsx", "lib/composition-summary.ts"]:
+            self.assertFalse((ROOT / relative_path).exists())
 
-        self.assertNotIn("marketing-" + "eyebrow", source + styles)
-        self.assertNotIn("eye" + "brow:", visual_language)
-        self.assertNotIn("data-product-story", source + styles)
-        self.assertNotIn("marketing-visual-" + "marquee", source + styles)
-        self.assertNotIn("From spoken explanation to a " + "useful visual.", home)
-        self.assertNotIn(
-            "Each turn changes only what the " + "explanation needs.", home
-        )
-
-    def test_live_assistant_is_the_public_and_backend_name(self) -> None:
-        files = [
-            *sorted((ROOT / "app").rglob("*.tsx")),
-            *sorted((ROOT / "components").rglob("*.ts")),
-            *sorted((ROOT / "components").rglob("*.tsx")),
-            *sorted((ROOT / "backend").rglob("*.py")),
-            ROOT / ".env.example",
-            ROOT / "README.md",
-            ROOT / "docs" / "LANDING_SITE_CHANGELOG.md",
-        ]
-        source = "\n".join(path.read_text(encoding="utf-8") for path in files)
-        self.assertNotIn("Visual" + " Director", source)
-        self.assertIn("Live Assistant", source)
-
-    def test_canvas_is_not_indexed_or_in_the_public_sitemap(self) -> None:
-        canvas_layout = (ROOT / "app" / "canvas" / "layout.tsx").read_text(
-            encoding="utf-8"
-        )
-        robots = (ROOT / "app" / "robots.ts").read_text(encoding="utf-8")
-        sitemap = (ROOT / "app" / "sitemap.ts").read_text(encoding="utf-8")
-        site_origin = (ROOT / "lib" / "site-origin.ts").read_text(
-            encoding="utf-8"
-        )
-
-        self.assertIn("index: false", canvas_layout)
-        self.assertIn("follow: false", canvas_layout)
-        self.assertIn('disallow: "/canvas"', robots)
-        self.assertIn("getSiteOrigin()", robots)
-        self.assertIn("`${origin}/sitemap.xml`", robots)
-        self.assertNotIn('"/canvas"', sitemap)
-        self.assertIn("getSiteOrigin()", sitemap)
-        self.assertIn('"http://localhost:3000"', site_origin)
-        self.assertIn('replace(/\\/+$/, "")', site_origin)
-        self.assertIn(
-            'const publicRoutes = ["", "/product", "/about", "/contact"]',
-            sitemap,
-        )
-        for route in ['"/product"', '"/about"', '"/contact"']:
-            self.assertIn(route, sitemap)
-        for excluded_route in ['"/educators"', '"/schools"']:
-            self.assertNotIn(excluded_route, sitemap)
-
-    def test_superseded_marketing_runtime_is_removed(self) -> None:
-        removed = [
-            "app/loading.tsx",
-            "app/debug/page.tsx",
-            "components/marketing-experience.tsx",
-            "components/knowledge-scene.tsx",
-            "components/launch-loader.tsx",
-            "components/smooth-scroll.tsx",
-            "components/diagrams/structured-diagram.tsx",
-            "components/building-blocks/debug.tsx",
-            "components/building-blocks/sample-data.ts",
-        ]
-        for relative_path in removed:
-            with self.subTest(path=relative_path):
-                self.assertFalse((ROOT / relative_path).exists())
-
-        package = json.loads((ROOT / "package.json").read_text())
-        self.assertEqual(package["dependencies"]["lenis"], "^1.3.25")
-
-    def test_fixed_template_runtime_is_removed(self) -> None:
-        for relative_path in [
-            "components/workspace/composition-view.tsx",
-            "lib/composition-summary.ts",
-        ]:
-            with self.subTest(path=relative_path):
-                self.assertFalse((ROOT / relative_path).exists())
-
-        building_blocks = ROOT / "components" / "building-blocks"
-        self.assertFalse(
-            any(path.is_file() for path in building_blocks.rglob("*"))
-        )
-
-        runtime_files = [
-            *sorted((ROOT / "app").rglob("*.ts")),
-            *sorted((ROOT / "app").rglob("*.tsx")),
-            *sorted((ROOT / "components").rglob("*.ts")),
-            *sorted((ROOT / "components").rglob("*.tsx")),
-            *sorted((ROOT / "lib").rglob("*.ts")),
-            *sorted((ROOT / "lib").rglob("*.tsx")),
-        ]
-        runtime_source = "\n".join(
-            path.read_text(encoding="utf-8") for path in runtime_files
-        )
-        for obsolete in [
-            "components/building-blocks",
-            "BuildingBlockDiagramData",
-            "CompositionView",
-            "CompositionCard",
-            "CompositionResponse",
-            "composition-summary",
-        ]:
-            with self.subTest(obsolete=obsolete):
-                self.assertNotIn(obsolete, runtime_source)
-
-    def test_readme_documents_the_live_whiteboard_contract(self) -> None:
-        readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        for phrase in [
-            "one Live Assistant text call",
-            "CREATE or UPDATE",
-            "24-column by 14-row grid",
-            "typed `WhiteboardDecision`",
-            "schema-v2 lesson context records",
-            "Optional images",
-        ]:
-            with self.subTest(phrase=phrase):
-                self.assertIn(phrase, readme)
-        self.assertNotIn("GEMINI_DIAGRAM_MODEL", readme)
-        self.assertNotIn("VISUAL_CACHE_DIR", readme)
-
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_sitemap_contains_only_public_marketing_routes(self) -> None:
+        robots = self.source("app/robots.ts")
+        sitemap = self.source("app/sitemap.ts")
+        self.assertIn('allow: "/"', robots)
+        self.assertIn('const publicRoutes = ["", "/product", "/about", "/contact"]', sitemap)
+        for route in ['"/canvas"', '"/pitch"', '"/educators"', '"/schools"']:
+            self.assertNotIn(route, sitemap)

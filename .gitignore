@@ -2,10 +2,13 @@
 node_modules/
 out/
 dist/
+desktop/dist/
+desktop/python/*.spec
+desktop/src-tauri/target/
+desktop/src-tauri/binaries/
 build/
 .vinext/
 .vercel/
-.wrangler/
 outputs/
 work/
 __pycache__/

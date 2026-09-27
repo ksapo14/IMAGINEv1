@@ -251,7 +251,7 @@ npm run build
 Agents choose checks based on the changed area. `npm run lint` is present in
 `package.json`, but its result must be reported honestly because tool support can
 change across Next.js versions. Do not start `npm run dev`, the backend server,
-or Docker as verification. Tests mock external Gemini requests.
+or Docker as verification. Tests mock external model requests.
 
 Verification output uses `PASS`/`FAIL`, lists commands actually run, evaluates
 each acceptance criterion, and classifies failures as:
@@ -374,4 +374,3 @@ the necessary focused commands, and one universal script would either duplicate
 them or incorrectly make every task run every check. No model override, external
 service, network dependency, database, dashboard, queue, or custom state-machine
 application is required.
-

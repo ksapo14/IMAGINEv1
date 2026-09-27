@@ -159,9 +159,56 @@ select:focus-visible {
   animation-delay: 140ms;
 }
 
+.diagram-drawing-loader {
+  color: #525252;
+}
+
+.diagram-drawing-loader__stroke {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: diagram-draw-stroke 1.8s ease-in-out infinite;
+}
+
+.diagram-drawing-loader__stroke--second {
+  animation-delay: 180ms;
+}
+
+.diagram-drawing-loader__stroke--third {
+  animation-delay: 360ms;
+}
+
+.diagram-drawing-loader__node {
+  opacity: 0.45;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: diagram-node-pulse 1.8s ease-in-out infinite;
+}
+
+.diagram-drawing-loader__node--second {
+  animation-delay: 300ms;
+}
+
+@keyframes diagram-draw-stroke {
+  0%, 18% { stroke-dashoffset: 1; }
+  62%, 100% { stroke-dashoffset: 0; }
+}
+
+@keyframes diagram-node-pulse {
+  0%, 100% { opacity: 0.45; transform: scale(0.92); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .diagram-motion .diagram-enter {
     animation: none;
+  }
+
+  .diagram-drawing-loader__stroke,
+  .diagram-drawing-loader__node {
+    animation: none;
+    opacity: 1;
+    stroke-dashoffset: 0;
+    transform: none;
   }
 }
 
